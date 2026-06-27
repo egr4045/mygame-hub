@@ -13,27 +13,16 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/game-config": "workspace:*",
-    "@civa/hex-core": "workspace:*",
     "@civa/protocol": "workspace:*",
-    "@civa/shared-types": "workspace:*",
-    "@civa/test-harness": "workspace:*",
     "@civa/ui-kit": "workspace:*",
-    "d3-geo": "^3.1.1",
-    "pixi.js": "^8.6.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io-client": "^4.8.1",
-    "topojson-client": "^3.1.0",
-    "world-atlas": "^2.0.2",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@types/d3-geo": "^3.1.0",
-    "@types/geojson": "^7946.0.15",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
-    "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",

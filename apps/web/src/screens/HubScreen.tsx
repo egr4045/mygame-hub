@@ -36,7 +36,7 @@ export const HubScreen = (): JSX.Element => {
   }, []);
   
   // Local state for library navigation (doesn't start the game yet)
-  const [viewedGameId, setViewedGameId] = useState<string | null>(GAMES[0].id);
+  const [viewedGameId, setViewedGameId] = useState<string | null>(GAMES[0]?.id ?? null);
   const [activeTab, setActiveTab] = useState<'store' | 'library' | 'community' | 'contact' | 'profile'>('library');
 
   const handlePlay = (g: GameInfo): void => {

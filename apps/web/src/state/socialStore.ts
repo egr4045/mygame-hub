@@ -20,7 +20,7 @@ const emit = (type: string, payload?: unknown): void => {
 
 interface SocialUIState {
   status: SocialStatus;
-  me: { accountId: string; displayName: string } | null;
+  me: { accountId: string; displayName: string; avatarUrl?: string } | null;
   friends: social.Friend[];
   /** Invites pushed to me by friends ("X invited you to CIVA"). */
   invites: Invite[];

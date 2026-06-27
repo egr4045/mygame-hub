@@ -7,7 +7,7 @@ import { usePlatformStore } from '../platform/platformStore.js';
 export const FriendsWidget = (): JSX.Element => {
   const [isOpen, setIsOpen] = useState(false);
   const openMenu = useMenuStore((s) => s.openMenu);
-  const activeGameId = usePlatformStore((s) => s.activeGameId);
+  const activeGameId = usePlatformStore((s) => s.selectedGame);
   const friends = useSocialStore((s) => s.friends);
   const onlineCount = friends.filter(f => f.status === 'accepted' && f.presence === 'online').length;
 

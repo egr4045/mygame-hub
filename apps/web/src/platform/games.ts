@@ -4,8 +4,8 @@
  * plus its services — that's the scalability story. Only `playable` games can be entered.
  *
  * `externalPort` marks a game that is its own SPA on its own origin (host:port). Selecting it
- * wakes the game (orchestrator) then navigates there. `undefined` = the game lives inside this
- * launcher app (CIVA).
+ * wakes the game (orchestrator) then navigates there. Every game (including CIVA) is now external —
+ * the hub itself ships no game.
  */
 export interface GameInfo {
   id: string;
@@ -25,6 +25,8 @@ export const GAMES: GameInfo[] = [
     status: 'playable',
     accent: '#3da9fc',
     emoji: '🌍',
+    // CIVA is now its own SPA like every other game. Provisional dev origin — finalize in Phase 4.
+    externalPort: 5180,
   },
   {
     id: 'svoyak',

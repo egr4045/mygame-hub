@@ -14,8 +14,7 @@
   },
   "dependencies": {
     "@civa/protocol": "workspace:*",
-    "@civa/shared-types": "workspace:*",
-    "@civa/sim-core": "workspace:*"
+    "@civa/shared-types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

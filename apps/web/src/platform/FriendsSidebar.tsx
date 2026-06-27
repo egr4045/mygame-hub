@@ -48,7 +48,7 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
   const me = useSocialStore((s) => s.me);
   const openMenu = useMenuStore((s) => s.openMenu);
   const openChatWithUser = useChatStore((s) => s.openChatWithUser);
-  const activeGameId = usePlatformStore((s) => s.activeGameId);
+  const activeGameId = usePlatformStore((s) => s.selectedGame);
   const friends = useSocialStore((s) => s.friends);
   const invites = useSocialStore((s) => s.invites);
   const status = useSocialStore((s) => s.status);

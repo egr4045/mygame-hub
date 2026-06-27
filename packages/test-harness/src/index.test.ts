@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCapturingLogger, createFakeClock, createMemoryBus, makeGameState } from './index.js';
+import { createCapturingLogger, createFakeClock, createMemoryBus } from './index.js';
 
 describe('fake clock', () => {
   it('advances and sets time deterministically', () => {
@@ -29,14 +29,5 @@ describe('capturing logger', () => {
     const log = createCapturingLogger({ svc: 'test' });
     log.info('hello', { a: 1 });
     expect(log.lines[0]).toMatchObject({ level: 'info', msg: 'hello', fields: { svc: 'test', a: 1 } });
-  });
-});
-
-describe('fixtures', () => {
-  it('builds a balanced two-player world', () => {
-    const s = makeGameState();
-    expect(Object.keys(s.players)).toHaveLength(2);
-    expect(s.players.p1?.warehouse.money).toBe(1000);
-    expect(s.tick).toBe(0);
   });
 });

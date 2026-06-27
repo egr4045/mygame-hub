@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 
 export interface MenuItem {
-  label: string;
+  /** Omitted for separator rows. */
+  label?: string;
   action: () => void;
   disabled?: boolean;
   separator?: boolean;

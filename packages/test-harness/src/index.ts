@@ -4,4 +4,3 @@
  * Phase 1 mock-server — never by production service code.
  */
 export * from './fakes.js';
-export * from './fixtures.js';

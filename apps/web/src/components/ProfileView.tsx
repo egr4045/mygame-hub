@@ -12,7 +12,7 @@ const ACHIEVEMENTS = [
 ];
 
 export const ProfileView = (): JSX.Element => {
-  const me = usePlatformStore((s) => s.me);
+  const me = usePlatformStore((s) => s.account);
   const openMenu = useMenuStore((s) => s.openMenu);
   
   const [avatar, setAvatar] = useState<string | null>(null);

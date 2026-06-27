@@ -1,9 +1,9 @@
 {
-  "name": "civa",
+  "name": "mygame",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "CIVA — real-time 4X strategy with diplomacy, WebRTC and a UN assembly phase",
+  "description": "mygame — game platform hub: shared auth, friends/social, game launcher and the @mygame/sdk",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
@@ -22,8 +22,9 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
     "dev:auth": "pnpm --filter @civa/auth dev",
-    "dev:lobby": "pnpm --filter @civa/lobby dev",
-    "dev:back": "turbo run dev --filter=@civa/auth --filter=@civa/lobby"
+    "dev:social": "pnpm --filter @civa/social dev",
+    "dev:orchestrator": "pnpm --filter @civa/orchestrator dev",
+    "dev:back": "turbo run dev --filter=@civa/auth --filter=@civa/social --filter=@civa/orchestrator"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
