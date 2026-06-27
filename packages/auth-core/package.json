@@ -1,5 +1,5 @@
 {
-  "name": "@civa/auth-core",
+  "name": "@mygame/auth-core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/protocol": "workspace:*",
+    "@mygame/protocol": "workspace:*",
     "jose": "^5.9.6"
   },
   "devDependencies": {

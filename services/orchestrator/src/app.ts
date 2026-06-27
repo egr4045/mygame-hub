@@ -1,5 +1,5 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import type { Logger } from '@civa/shared-types';
+import type { Logger } from '@mygame/shared-types';
 import type { Orchestrator } from './orchestrator.js';
 
 const cors = (res: ServerResponse): void => {

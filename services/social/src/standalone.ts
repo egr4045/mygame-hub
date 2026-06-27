@@ -2,7 +2,7 @@
  * Standalone entry: runs the social service in isolation with in-memory adapters and no real
  * infrastructure. JWTs are verified with the shared dev secret (the auth service issues them).
  */
-import { createAuthCore } from '@civa/auth-core';
+import { createAuthCore } from '@mygame/auth-core';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createSocialServer } from './server.js';

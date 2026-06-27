@@ -1,5 +1,5 @@
 /** Production entry: real adapters (system clock, console logger, in-memory account store). */
-import { createAuthCore } from '@civa/auth-core';
+import { createAuthCore } from '@mygame/auth-core';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';

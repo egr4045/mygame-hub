@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { InviteRole } from '@civa/protocol';
+import type { InviteRole } from '@mygame/protocol';
 
 /**
  * Invite store port: opaque, expiring join codes. A code is a capability — unforgeable because it is

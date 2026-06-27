@@ -3,7 +3,7 @@
  * This is how the module is developed and contract-tested before integration. Uses a real system
  * clock (JWT needs real time) but an in-memory account store.
  */
-import { createAuthCore } from '@civa/auth-core';
+import { createAuthCore } from '@mygame/auth-core';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';

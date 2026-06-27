@@ -1,5 +1,5 @@
 {
-  "name": "@civa/protocol",
+  "name": "@mygame/protocol",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/shared-types": "workspace:*",
+    "@mygame/shared-types": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {

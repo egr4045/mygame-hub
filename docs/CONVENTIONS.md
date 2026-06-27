@@ -5,7 +5,7 @@ Cross-cutting rules every package and service follows. Most are enforced in code
 
 ## Contract versioning
 
-- `CONTRACT_VERSION` (in `@civa/protocol`) is the single version for all wire messages.
+- `CONTRACT_VERSION` (in `@mygame/protocol`) is the single version for all wire messages.
 - Bump the **major** on any breaking change to a message schema. The gateway rejects a client
   whose major differs, so mismatches fail loudly instead of corrupting state.
 
@@ -25,34 +25,34 @@ Every WS message, both directions, is wrapped by `envelopeSchema`:
 
 ## Messages
 
-Define every message with `defineMessage(type, zodSchema)` in `@civa/protocol`. Never hand-write
+Define every message with `defineMessage(type, zodSchema)` in `@mygame/protocol`. Never hand-write
 a wire type without a matching schema — the schema is the validation and the type source of truth.
 
 ## Errors
 
-Map every failure to a canonical `ErrorCode` (`@civa/protocol`): `unauthorized`, `forbidden`,
+Map every failure to a canonical `ErrorCode` (`@mygame/protocol`): `unauthorized`, `forbidden`,
 `not_found`, `validation`, `conflict`, `rate_limited`, `illegal_action`, `internal`. Throw
 `ContractError` internally; serialise with `.toProtocol()` at the boundary.
 
 ## Logging & trace-id
 
-- Use the `Logger` port (`@civa/shared-types`); never call `console.*` directly in logic.
+- Use the `Logger` port (`@mygame/shared-types`); never call `console.*` directly in logic.
 - Real adapter: JSON console logger (pino in Phase 10). Test adapter: capturing logger.
 - Always create a child logger bound to `{ svc, traceId }` at the start of handling a command.
 
 ## Ports & adapters
 
 Depend on `Clock`, `Logger`, `EventBus` (and storage ports added per service) — never on concrete
-infrastructure. Real adapters live in the service; fakes live in `@civa/test-harness`.
+infrastructure. Real adapters live in the service; fakes live in `@mygame/test-harness`.
 
 ## Determinism
 
-`@civa/sim-core` is pure: `(state, commands, ctx) -> { state, events }`. No `Date.now`, no
+`@mygame/sim-core` is pure: `(state, commands, ctx) -> { state, events }`. No `Date.now`, no
 `Math.random` — time comes from an injected `Clock`, randomness from the seeded `Rng`. This is what
 makes reconnect snapshots and command-journal replay exact.
 
 ## Naming
 
-- Packages: `@civa/<kebab>`. Internal libs export TypeScript source (`exports: ./src/index.ts`).
+- Packages: `@mygame/<kebab>`. Internal libs export TypeScript source (`exports: ./src/index.ts`).
 - Services: `services/<kebab>`, scaffolded by `corepack pnpm gen:service`.
-- Branded ids (`PlayerId`, `SessionId`, …) from `@civa/shared-types` — don't pass raw strings.
+- Branded ids (`PlayerId`, `SessionId`, …) from `@mygame/shared-types` — don't pass raw strings.

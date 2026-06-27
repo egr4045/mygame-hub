@@ -21,10 +21,10 @@
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
-    "dev:auth": "pnpm --filter @civa/auth dev",
-    "dev:social": "pnpm --filter @civa/social dev",
-    "dev:orchestrator": "pnpm --filter @civa/orchestrator dev",
-    "dev:back": "turbo run dev --filter=@civa/auth --filter=@civa/social --filter=@civa/orchestrator"
+    "dev:auth": "pnpm --filter @mygame/auth dev",
+    "dev:social": "pnpm --filter @mygame/social dev",
+    "dev:orchestrator": "pnpm --filter @mygame/orchestrator dev",
+    "dev:back": "turbo run dev --filter=@mygame/auth --filter=@mygame/social --filter=@mygame/orchestrator"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

@@ -1,7 +1,7 @@
 /**
  * Port interfaces — the swappable abstractions every service depends on instead of concrete
  * infrastructure (the "ports & adapters" rule of the isolation contract). Real adapters
- * (system clock, pino logger, Redis bus) live in services; fakes live in `@civa/test-harness`.
+ * (system clock, pino logger, Redis bus) live in services; fakes live in `@mygame/test-harness`.
  */
 
 /** Injectable time source. The simulation and schedulers read time only through this. */

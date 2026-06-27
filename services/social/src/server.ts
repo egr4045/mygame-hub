@@ -7,9 +7,9 @@
  */
 import { createServer, type Server as HttpServer } from 'node:http';
 import { Server as IOServer, type Socket } from 'socket.io';
-import { ContractError, social, type Invite } from '@civa/protocol';
-import type { AuthCore } from '@civa/auth-core';
-import type { Logger } from '@civa/shared-types';
+import { ContractError, social, type Invite } from '@mygame/protocol';
+import type { AuthCore } from '@mygame/auth-core';
+import type { Logger } from '@mygame/shared-types';
 import type { ZodType } from 'zod';
 import type { SocialStore } from './store.js';
 import type { InviteRecord, InviteStore } from './invites.js';

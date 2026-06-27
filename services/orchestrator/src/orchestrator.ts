@@ -3,7 +3,7 @@
  * never burns resources on empty games. Pure control logic over injected ports — fully testable
  * without Docker. Concurrency-safe: overlapping `ensureUp` calls start a game exactly once.
  */
-import type { Clock, Logger } from '@civa/shared-types';
+import type { Clock, Logger } from '@mygame/shared-types';
 import type { GameManifest } from './manifest.js';
 import type { ActivityProbe, ContainerRuntime, GameStatus } from './ports.js';
 

@@ -2,7 +2,7 @@
  * Auth client: passwordless dev login + session persistence. The accountId is stored so a reload
  * re-claims the *same* account (durable identity) — that's what lets the lobby restore your seat.
  */
-import type { HandoffResponse, LoginResponse } from '@civa/protocol';
+import type { HandoffResponse, LoginResponse } from '@mygame/protocol';
 import { AUTH_URL } from './config.js';
 
 export interface Session {

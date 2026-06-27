@@ -1,11 +1,11 @@
 /**
- * @civa/auth-core — pure, stateless JWT sign/verify (HS256 via jose). The auth service issues
+ * @mygame/auth-core — pure, stateless JWT sign/verify (HS256 via jose). The auth service issues
  * tokens; the lobby (and later services) verify them with the same shared secret. No I/O, no
  * account storage — that lives in the auth service. Stateless verification is what lets any
  * service authenticate a connection without calling back to auth.
  */
 import { SignJWT, jwtVerify, errors as joseErrors } from 'jose';
-import type { AuthClaims } from '@civa/protocol';
+import type { AuthClaims } from '@mygame/protocol';
 
 export interface AuthConfig {
   secret: string;

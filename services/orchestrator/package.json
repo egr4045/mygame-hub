@@ -1,5 +1,5 @@
 {
-  "name": "@civa/orchestrator",
+  "name": "@mygame/orchestrator",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/shared-types": "workspace:*"
+    "@mygame/shared-types": "workspace:*"
   },
   "devDependencies": {
-    "@civa/test-harness": "workspace:*",
+    "@mygame/test-harness": "workspace:*",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

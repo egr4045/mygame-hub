@@ -14,11 +14,11 @@ RUN pnpm install --frozen-lockfile
 # --- Build the web SPA. In prod the client talks to auth/lobby on the SAME origin (the CIVA
 #     Caddy routes /auth and /socket.io), so no API URL needs baking in. ---
 FROM base AS webbuild
-RUN pnpm --filter @civa/web build
+RUN pnpm --filter @mygame/hub build
 
 # --- Static web + self-contained reverse proxy (one origin for web + auth + lobby) ---
 FROM caddy:2-alpine AS web
-COPY --from=webbuild /app/apps/web/dist /srv/www
+COPY --from=webbuild /app/apps/hub/dist /srv/www
 COPY deploy/civa/Caddyfile /etc/caddy/Caddyfile
 
 # --- Service runtime for auth & lobby (command set per-service in compose) ---
@@ -30,4 +30,4 @@ CMD ["node", "--version"]
 FROM base AS orchestrator
 RUN apk add --no-cache docker-cli docker-cli-compose
 ENV NODE_ENV=production
-CMD ["pnpm", "--filter", "@civa/orchestrator", "start"]
+CMD ["pnpm", "--filter", "@mygame/orchestrator", "start"]

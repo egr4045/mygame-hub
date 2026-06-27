@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
-import { social, type Invite, type ProtocolError } from '@civa/protocol';
+import { social, type Invite, type ProtocolError } from '@mygame/protocol';
 import { SOCIAL_URL } from '../net/config.js';
 import { loadSession, login } from '../net/authClient.js';
 

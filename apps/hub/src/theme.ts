@@ -1,8 +1,8 @@
 /**
- * Bridges the framework-agnostic design tokens in @civa/ui-kit into CSS custom properties so
+ * Bridges the framework-agnostic design tokens in @mygame/ui-kit into CSS custom properties so
  * both inline styles and global CSS read from one source of truth. Called once at startup.
  */
-import { color, space, radius, font, motion } from '@civa/ui-kit';
+import { color, space, radius, font, motion } from '@mygame/ui-kit';
 
 const toVars = (prefix: string, obj: Record<string, string | number>, unit = ''): string =>
   Object.entries(obj)

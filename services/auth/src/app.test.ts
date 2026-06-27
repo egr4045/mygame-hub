@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
-import { createAuthCore } from '@civa/auth-core';
-import type { HandoffResponse, LoginResponse, RefreshResponse } from '@civa/protocol';
-import { createCapturingLogger, createFakeClock } from '@civa/test-harness';
+import { createAuthCore } from '@mygame/auth-core';
+import type { HandoffResponse, LoginResponse, RefreshResponse } from '@mygame/protocol';
+import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
 import { createApp } from './app.js';
 import { createMemoryAccountStore } from './store.js';
 

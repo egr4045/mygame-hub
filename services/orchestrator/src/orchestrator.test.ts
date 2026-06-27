@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCapturingLogger, createFakeClock } from '@civa/test-harness';
+import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
 import { Orchestrator, type OrchestratorDeps } from './orchestrator.js';
 import type { GameManifest } from './manifest.js';
 import type { ActivityProbe, ContainerRuntime, GameStatus } from './ports.js';

@@ -1,5 +1,5 @@
 /**
- * @civa/ui-kit/tokens — the design language for the whole client.
+ * @mygame/ui-kit/tokens — the design language for the whole client.
  *
  * The UI is a fixed 100vw/100vh screen: a PixiJS map fills the background and translucent
  * React panels float over it (section 8). These tokens keep every panel, button and overlay

@@ -7,7 +7,7 @@ See the full implementation plan at `docs/PLAN.md` (mirrors the approved plan).
 
 ## Stack
 
-- **Frontend:** React + PixiJS + Vite + TypeScript (`apps/web`)
+- **Frontend:** React + PixiJS + Vite + TypeScript (`apps/hub`)
 - **Backend:** Node.js + TypeScript, Socket.io, authoritative tick loop (`services/*`)
 - **WebRTC:** LiveKit (caucus rooms + global conference)
 - **TTS announcer:** local Silero worker (reuses the `ml-box` job-queue contract)

@@ -36,12 +36,12 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.21)
 
-  apps/web:
+  apps/hub:
     dependencies:
-      '@civa/protocol':
+      '@mygame/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@civa/ui-kit':
+      '@mygame/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
       react:
@@ -78,7 +78,7 @@ importers:
 
   packages/auth-core:
     dependencies:
-      '@civa/protocol':
+      '@mygame/protocol':
         specifier: workspace:*
         version: link:../protocol
       jose:
@@ -94,7 +94,7 @@ importers:
 
   packages/protocol:
     dependencies:
-      '@civa/shared-types':
+      '@mygame/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       zod:
@@ -119,10 +119,10 @@ importers:
 
   packages/test-harness:
     dependencies:
-      '@civa/protocol':
+      '@mygame/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@civa/shared-types':
+      '@mygame/shared-types':
         specifier: workspace:*
         version: link:../shared-types
     devDependencies:
@@ -144,17 +144,17 @@ importers:
 
   services/auth:
     dependencies:
-      '@civa/auth-core':
+      '@mygame/auth-core':
         specifier: workspace:*
         version: link:../../packages/auth-core
-      '@civa/protocol':
+      '@mygame/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@civa/shared-types':
+      '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
     devDependencies:
-      '@civa/test-harness':
+      '@mygame/test-harness':
         specifier: workspace:*
         version: link:../../packages/test-harness
       '@types/node':
@@ -172,11 +172,11 @@ importers:
 
   services/orchestrator:
     dependencies:
-      '@civa/shared-types':
+      '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
     devDependencies:
-      '@civa/test-harness':
+      '@mygame/test-harness':
         specifier: workspace:*
         version: link:../../packages/test-harness
       '@types/node':
@@ -194,13 +194,13 @@ importers:
 
   services/social:
     dependencies:
-      '@civa/auth-core':
+      '@mygame/auth-core':
         specifier: workspace:*
         version: link:../../packages/auth-core
-      '@civa/protocol':
+      '@mygame/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@civa/shared-types':
+      '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       socket.io:
@@ -210,7 +210,7 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@civa/test-harness':
+      '@mygame/test-harness':
         specifier: workspace:*
         version: link:../../packages/test-harness
       '@types/node':

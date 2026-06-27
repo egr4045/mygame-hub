@@ -1,5 +1,5 @@
 {
-  "name": "@civa/test-harness",
+  "name": "@mygame/test-harness",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,8 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/protocol": "workspace:*",
-    "@civa/shared-types": "workspace:*"
+    "@mygame/protocol": "workspace:*",
+    "@mygame/shared-types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

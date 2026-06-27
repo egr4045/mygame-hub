@@ -1,4 +1,4 @@
-import type { Logger } from '@civa/shared-types';
+import type { Logger } from '@mygame/shared-types';
 
 /** Tiny JSON console logger (real adapter). Swapped for pino in Phase 10. */
 export const createConsoleLogger = (base: Record<string, unknown> = {}): Logger => {

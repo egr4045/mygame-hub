@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { io as ioc, type Socket as ClientSocket } from 'socket.io-client';
-import { createAuthCore } from '@civa/auth-core';
-import { social, type Invite } from '@civa/protocol';
-import { createCapturingLogger } from '@civa/test-harness';
+import { createAuthCore } from '@mygame/auth-core';
+import { social, type Invite } from '@mygame/protocol';
+import { createCapturingLogger } from '@mygame/test-harness';
 import { createSocialServer, type SocialServer } from './server.js';
 import { createMemorySocialStore } from './store.js';
 import { createMemoryInviteStore } from './invites.js';

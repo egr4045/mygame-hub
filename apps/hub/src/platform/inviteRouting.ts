@@ -4,7 +4,7 @@
  * so the game resolves the rest. Shared by the `?invite=` deep link and the "Join" button on a
  * pushed invite, so both paths behave identically.
  */
-import type { Invite } from '@civa/protocol';
+import type { Invite } from '@mygame/protocol';
 import { GAMES } from './games.js';
 import { enterGame } from '../net/orchestratorClient.js';
 import { getHandoff } from '../net/authClient.js';

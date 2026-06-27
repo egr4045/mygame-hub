@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import type { social } from '@civa/protocol';
+import type { social } from '@mygame/protocol';
 import { useSocialStore } from '../state/socialStore.js';
 import { routeToInvite } from './inviteRouting.js';
 import { useMenuStore } from '../state/menuStore.js';

@@ -56,6 +56,6 @@ leaderboard, secret vassals, and the breakdown of your four Influence sources + 
 
 - Types: `packages/shared-types` (resources, units, buildings, `DiplomaticRelation` incl. vassal/overlord).
 - Numbers: `packages/game-config` (`buildings`, `units`, `combatConfig`, `influenceConfig`, `victoryConfig`).
-- UI (mocks): `apps/web/src/mock/*`, `components/ProductionPreview.tsx`, `panels/StandingsPanel.tsx`,
+- UI (mocks): `apps/hub/src/mock/*`, `components/ProductionPreview.tsx`, `panels/StandingsPanel.tsx`,
   `dialogs/AttackDialog.tsx` (tribute/vassal), `panels/DiplomacyPanel.tsx` (buy votes / vassalage),
   `screens/FinaleScreen.tsx` (bloc reveal).

@@ -3,7 +3,7 @@
  * unauthenticated GET on the social service — usable straight from a `?invite=CODE` deep link before
  * any socket exists. Returns null if the code is unknown or expired.
  */
-import type { Invite } from '@civa/protocol';
+import type { Invite } from '@mygame/protocol';
 import { SOCIAL_URL } from './config.js';
 
 export const resolveInvite = async (code: string): Promise<Invite | null> => {

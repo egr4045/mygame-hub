@@ -4,7 +4,7 @@
  * touching the service logic (ports & adapters). Live presence/activity are NOT here — they belong
  * to the connection layer in server.ts; this store is the persistent social graph.
  */
-import type { social } from '@civa/protocol';
+import type { social } from '@mygame/protocol';
 
 export interface Account {
   id: string;

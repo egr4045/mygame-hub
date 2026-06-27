@@ -1,5 +1,5 @@
 {
-  "name": "@civa/auth",
+  "name": "@mygame/auth",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,12 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@civa/auth-core": "workspace:*",
-    "@civa/protocol": "workspace:*",
-    "@civa/shared-types": "workspace:*"
+    "@mygame/auth-core": "workspace:*",
+    "@mygame/protocol": "workspace:*",
+    "@mygame/shared-types": "workspace:*"
   },
   "devDependencies": {
-    "@civa/test-harness": "workspace:*",
+    "@mygame/test-harness": "workspace:*",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

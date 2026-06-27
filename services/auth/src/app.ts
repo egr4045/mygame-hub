@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { Clock, Logger } from '@civa/shared-types';
-import { handoffRequest, loginRequest, refreshRequest } from '@civa/protocol';
-import type { AuthCore } from '@civa/auth-core';
-import { TokenError } from '@civa/auth-core';
+import type { Clock, Logger } from '@mygame/shared-types';
+import { handoffRequest, loginRequest, refreshRequest } from '@mygame/protocol';
+import type { AuthCore } from '@mygame/auth-core';
+import { TokenError } from '@mygame/auth-core';
 import type { AccountStore } from './store.js';
 
 /**

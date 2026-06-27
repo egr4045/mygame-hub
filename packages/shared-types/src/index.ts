@@ -1,8 +1,8 @@
 /**
- * @civa/shared-types — the domain vocabulary shared across the client and every service.
+ * @mygame/shared-types — the domain vocabulary shared across the client and every service.
  *
  * Pure type declarations only (no runtime values except `const` tuples used to derive unions).
- * Balance numbers live in `@civa/game-config`; wire schemas live in `@civa/protocol`.
+ * Balance numbers live in `@mygame/game-config`; wire schemas live in `@mygame/protocol`.
  *
  * Economy model: deliberately flat and small for first-glance clarity. Five tradable/stored
  * resources + Influence (the victory currency). No intermediate goods, no electricity. Fuel is

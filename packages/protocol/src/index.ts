@@ -1,5 +1,5 @@
 /**
- * @civa/protocol — the single source of truth for every message that crosses a service
+ * @mygame/protocol — the single source of truth for every message that crosses a service
  * boundary. Services and the client import schemas from here and from nowhere else; no
  * service imports another service's internal modules. This is the isolation contract.
  *

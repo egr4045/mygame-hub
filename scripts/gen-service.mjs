@@ -2,7 +2,7 @@
 /**
  * Service generator. Every backend module starts from the same skeleton so the isolation
  * contract is uniform: a /health endpoint, a production entry (`index.ts`, real adapters),
- * a standalone entry (`standalone.ts`, fake adapters from @civa/test-harness), and a contract
+ * a standalone entry (`standalone.ts`, fake adapters from @mygame/test-harness), and a contract
  * test. Game logic and protocol messages are filled in per phase.
  *
  *   corepack pnpm gen:service <kebab-name>
@@ -33,7 +33,7 @@ const files = {
   'package.json':
     JSON.stringify(
       {
-        name: `@civa/${name}`,
+        name: `@mygame/${name}`,
         version: '0.0.0',
         private: true,
         type: 'module',
@@ -47,11 +47,11 @@ const files = {
           clean: 'rimraf .turbo *.tsbuildinfo',
         },
         dependencies: {
-          '@civa/protocol': 'workspace:*',
-          '@civa/shared-types': 'workspace:*',
+          '@mygame/protocol': 'workspace:*',
+          '@mygame/shared-types': 'workspace:*',
         },
         devDependencies: {
-          '@civa/test-harness': 'workspace:*',
+          '@mygame/test-harness': 'workspace:*',
           '@types/node': '^22.10.2',
           tsx: '^4.19.2',
           typescript: '^5.7.2',
@@ -85,7 +85,7 @@ export const loadConfig = (): ServiceConfig => ({
 });
 `,
 
-  'src/logger.ts': `import type { Logger } from '@civa/shared-types';
+  'src/logger.ts': `import type { Logger } from '@mygame/shared-types';
 
 /** Tiny JSON console logger (real adapter). Swapped for pino in Phase 10. */
 export const createConsoleLogger = (base: Record<string, unknown> = {}): Logger => {
@@ -107,7 +107,7 @@ export const createConsoleLogger = (base: Record<string, unknown> = {}): Logger 
 `,
 
   'src/app.ts': `import { createServer, type Server } from 'node:http';
-import type { Clock, Logger } from '@civa/shared-types';
+import type { Clock, Logger } from '@mygame/shared-types';
 
 /**
  * Dependencies are injected as ports (clock/logger/...) so the same app runs against real
@@ -146,7 +146,7 @@ app.listen(config.port, () => logger.info('listening', { port: config.port, mode
  * Standalone entry: runs the service in isolation with fake adapters and no real
  * infrastructure. This is how the module is developed and contract-tested before integration.
  */
-import { createFakeClock } from '@civa/test-harness';
+import { createFakeClock } from '@mygame/test-harness';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
@@ -162,7 +162,7 @@ app.listen(config.port, () =>
 
   'src/app.test.ts': `import { afterEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
-import { createFakeClock, createCapturingLogger } from '@civa/test-harness';
+import { createFakeClock, createCapturingLogger } from '@mygame/test-harness';
 import { createApp } from './app.js';
 
 let server: ReturnType<typeof createApp> | undefined;
@@ -192,14 +192,14 @@ describe('${name} app', () => {
 });
 `,
 
-  'README.md': `# @civa/${name}
+  'README.md': `# @mygame/${name}
 
-A CIVA backend service. Isolated module — talks to the outside only through \`@civa/protocol\`.
+A CIVA backend service. Isolated module — talks to the outside only through \`@mygame/protocol\`.
 
 \`\`\`sh
-corepack pnpm --filter @civa/${name} dev:standalone   # run in isolation (fake adapters)
-corepack pnpm --filter @civa/${name} test             # unit + contract tests
-corepack pnpm --filter @civa/${name} dev              # run with real adapters
+corepack pnpm --filter @mygame/${name} dev:standalone   # run in isolation (fake adapters)
+corepack pnpm --filter @mygame/${name} test             # unit + contract tests
+corepack pnpm --filter @mygame/${name} dev              # run with real adapters
 \`\`\`
 
 Port: \`${ENV}_PORT\` (default 8080).

@@ -1,9 +1,9 @@
 /**
- * Fake adapters for the ports in `@civa/shared-types`. These let any service run in its
+ * Fake adapters for the ports in `@mygame/shared-types`. These let any service run in its
  * `dev:standalone` / contract-test mode with zero real infrastructure — controllable time,
  * an in-process bus, and a logger that captures lines for assertions.
  */
-import type { Clock, EventBus, Logger } from '@civa/shared-types';
+import type { Clock, EventBus, Logger } from '@mygame/shared-types';
 
 export interface FakeClock extends Clock {
   /** Move time forward by `ms`. */

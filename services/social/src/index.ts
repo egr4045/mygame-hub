@@ -1,5 +1,5 @@
 /** Production entry: real adapters (console logger, in-memory social store). */
-import { createAuthCore } from '@civa/auth-core';
+import { createAuthCore } from '@mygame/auth-core';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createSocialServer } from './server.js';
