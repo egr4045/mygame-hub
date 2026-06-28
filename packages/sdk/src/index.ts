@@ -11,6 +11,7 @@ export * from './state/menuStore.js';
 export * from './components/ToastContainer.js';
 export * from './components/ContextMenu.js';
 export { MygameOverlay } from './components/MygameOverlay.js';
+export * from './overlay/mount.js';
 
 export * from './config.js';
 export * from './authClient.js';

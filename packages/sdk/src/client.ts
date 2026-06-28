@@ -11,6 +11,7 @@ import { useChatStore } from './state/chatStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
 import { useToastStore, type ToastData } from './state/toastStore.js';
 import { Emitter } from './emitter.js';
+import { mountOverlay } from './overlay/mount.js';
 
 export interface MygameAccount {
   accountId: string;
@@ -34,6 +35,7 @@ class MygameClient {
     configure(opts);
     if (!this.started) {
       this.started = true;
+      mountOverlay();
       void this.social.connect();
     }
     this.emitter.emit('ready', { gameId });

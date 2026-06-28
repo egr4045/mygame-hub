@@ -7,7 +7,9 @@ export const ContextMenu = (): JSX.Element | null => {
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      // composedPath so this also works inside the SDK's Shadow-DOM overlay — events retarget at the
+      // shadow boundary, so `contains(e.target)` would wrongly report "outside" for our own menu.
+      if (menuRef.current && !e.composedPath().includes(menuRef.current)) {
         closeMenu();
       }
     };
@@ -37,6 +39,7 @@ export const ContextMenu = (): JSX.Element | null => {
         borderRadius: 4,
         boxShadow: '0 8px 16px rgba(0,0,0,0.8)',
         zIndex: 9999,
+        pointerEvents: 'auto',
         padding: '4px 0',
         display: 'flex',
         flexDirection: 'column'
