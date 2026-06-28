@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   plugins: [react()],
@@ -7,8 +8,12 @@ export default defineConfig({
     port: 5180,
     host: true,
   },
-  // Workspace packages export TypeScript source; Vite transpiles them directly.
   resolve: {
     dedupe: ['react', 'react-dom'],
+    alias: {
+      // The hub consumes the SDK from source (HMR, no build step). The dist build (package.json
+      // exports) is for external game repos that npm-install @mygame/sdk.
+      '@mygame/sdk': fileURLToPath(new URL('../../packages/sdk/src/index.ts', import.meta.url)),
+    },
   },
 });
