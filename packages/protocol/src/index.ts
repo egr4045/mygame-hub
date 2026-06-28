@@ -1,10 +1,10 @@
 /**
- * @mygame/protocol — the single source of truth for every message that crosses a service
- * boundary. Services and the client import schemas from here and from nowhere else; no
- * service imports another service's internal modules. This is the isolation contract.
+ * @mygame/protocol — the platform-wide wire protocol: the single source of truth for every
+ * message that crosses a *platform* service boundary (auth, invite, social). Services and the
+ * client import schemas from here and from nowhere else. This is the isolation contract.
  *
- * As each module is built it adds its own message file (e.g. `lobby.ts`, `engine.ts`) and
- * registers it here. Phase 0 ships the cross-cutting primitives: the envelope and errors.
+ * Per-game protocols (e.g. a game's lobby/engine messages) live in that game's own repo; they may
+ * re-export these platform primitives (envelope, errors, auth) and add their own message files.
  */
 import { z } from 'zod';
 
@@ -12,7 +12,6 @@ export * from './envelope.js';
 export * from './errors.js';
 export * from './auth.js';
 export * from './invite.js';
-export * as lobby from './lobby.js';
 export * as social from './social.js';
 
 /**
