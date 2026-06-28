@@ -14,3 +14,5 @@ export { MygameOverlay } from './components/MygameOverlay.js';
 
 export * from './config.js';
 export * from './authClient.js';
+export * from './emitter.js';
+export * from './client.js';

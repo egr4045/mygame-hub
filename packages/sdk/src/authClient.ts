@@ -3,7 +3,7 @@
  * re-claims the *same* account (durable identity) — that's what lets the lobby restore your seat.
  */
 import type { HandoffResponse, LoginResponse } from '@mygame/protocol';
-import { AUTH_URL } from './config.js';
+import { config } from './config.js';
 
 export interface Session {
   accountId: string;
@@ -28,7 +28,7 @@ export const clearSession = (): void => localStorage.removeItem(KEY);
 
 /** Log in (or re-claim `accountId`) and persist the fresh tokens. */
 export const login = async (displayName: string, accountId?: string): Promise<Session> => {
-  const res = await fetch(`${AUTH_URL}/auth/login`, {
+  const res = await fetch(`${config.authUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ displayName, accountId }),
@@ -48,7 +48,7 @@ export const getHandoff = async (): Promise<string | null> => {
   const s = loadSession();
   if (!s) return null;
   try {
-    const res = await fetch(`${AUTH_URL}/auth/handoff`, {
+    const res = await fetch(`${config.authUrl}/auth/handoff`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ refreshToken: s.refreshToken }),

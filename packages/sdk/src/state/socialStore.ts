@@ -8,7 +8,7 @@
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
 import { social, type Invite, type ProtocolError } from '@mygame/protocol';
-import { SOCIAL_URL } from '../config.js';
+import { config } from '../config.js';
 import { loadSession, login } from '../authClient.js';
 
 export type SocialStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -66,7 +66,7 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     }
 
     socket?.close();
-    socket = io(SOCIAL_URL, { auth: { token }, transports: ['websocket'] });
+    socket = io(config.socialUrl, { auth: { token }, transports: ['websocket'] });
 
     socket.on('connect', () => set({ status: 'connected', error: null }));
     socket.on('disconnect', () => set({ status: 'connecting' }));
