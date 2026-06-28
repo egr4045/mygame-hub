@@ -7,7 +7,7 @@
 import type { Invite } from '@mygame/protocol';
 import { GAMES } from './games.js';
 import { enterGame } from '../net/orchestratorClient.js';
-import { getHandoff } from '../net/authClient.js';
+import { getHandoff } from '@mygame/sdk';
 
 export const routeToInvite = async (inv: Invite): Promise<void> => {
   const game = GAMES.find((g) => g.id === inv.game);

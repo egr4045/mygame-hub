@@ -5,16 +5,16 @@ import { FriendsWidget } from '../components/FriendsWidget.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
-import { getHandoff } from '../net/authClient.js';
-import { useSocialStore } from '../state/socialStore.js';
+import { getHandoff } from '@mygame/sdk';
+import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
-import { ContextMenu } from '../components/ContextMenu.js';
+import { ContextMenu } from '@mygame/sdk';
 import { ChatWidget } from '../components/ChatWidget.js';
-import { ToastContainer } from '../components/ToastContainer.js';
-import { useMenuStore } from '../state/menuStore.js';
-import { useToastStore } from '../state/toastStore.js';
-import { useChatStore } from '../state/chatStore.js';
+import { ToastContainer } from '@mygame/sdk';
+import { useMenuStore } from '@mygame/sdk';
+import { useToastStore } from '@mygame/sdk';
+import { useChatStore } from '@mygame/sdk';
 
 export const HubScreen = (): JSX.Element => {
   const selectGame = usePlatformStore((s) => s.selectGame);

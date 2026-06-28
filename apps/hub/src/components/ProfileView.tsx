@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { useMenuStore } from '../state/menuStore.js';
+import { useMenuStore } from '@mygame/sdk';
 
 // Mock achievements data
 const ACHIEVEMENTS = [

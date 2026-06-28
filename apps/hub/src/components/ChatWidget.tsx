@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { useChatStore } from '../state/chatStore.js';
-import { useSocialStore } from '../state/socialStore.js';
-import { useMenuStore } from '../state/menuStore.js';
+import { useChatStore } from '@mygame/sdk';
+import { useSocialStore } from '@mygame/sdk';
+import { useMenuStore } from '@mygame/sdk';
 
 export const ChatWidget = (): JSX.Element | null => {
   const isOpen = useChatStore(s => s.isOpen);

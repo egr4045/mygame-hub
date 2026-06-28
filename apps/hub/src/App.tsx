@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { usePlatformStore } from './platform/platformStore.js';
-import { useSocialStore } from './state/socialStore.js';
+import { useSocialStore } from '@mygame/sdk';
 import { AuthScreen } from './screens/AuthScreen.js';
 import { HubScreen } from './screens/HubScreen.js';
 

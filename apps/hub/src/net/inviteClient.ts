@@ -4,7 +4,7 @@
  * any socket exists. Returns null if the code is unknown or expired.
  */
 import type { Invite } from '@mygame/protocol';
-import { SOCIAL_URL } from './config.js';
+import { SOCIAL_URL } from '@mygame/sdk';
 
 export const resolveInvite = async (code: string): Promise<Invite | null> => {
   try {

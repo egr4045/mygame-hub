@@ -8,8 +8,8 @@
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
 import { social, type Invite, type ProtocolError } from '@mygame/protocol';
-import { SOCIAL_URL } from '../net/config.js';
-import { loadSession, login } from '../net/authClient.js';
+import { SOCIAL_URL } from '../config.js';
+import { loadSession, login } from '../authClient.js';
 
 export type SocialStatus = 'idle' | 'connecting' | 'connected' | 'error';
 

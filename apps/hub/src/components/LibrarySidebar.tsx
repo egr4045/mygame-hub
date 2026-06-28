@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { GAMES, type GameInfo } from '../platform/games.js';
-import { useMenuStore } from '../state/menuStore.js';
+import { useMenuStore } from '@mygame/sdk';
 
 export const LibrarySidebar = ({ selectedGameId, onSelectGame }: { selectedGameId: string | null, onSelectGame: (id: string) => void }): JSX.Element => {
   const openMenu = useMenuStore((s) => s.openMenu);

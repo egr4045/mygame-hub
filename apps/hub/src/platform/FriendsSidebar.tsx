@@ -1,10 +1,10 @@
 import { useState, type CSSProperties } from 'react';
 import type { social } from '@mygame/protocol';
-import { useSocialStore } from '../state/socialStore.js';
+import { useSocialStore } from '@mygame/sdk';
 import { routeToInvite } from './inviteRouting.js';
-import { useMenuStore } from '../state/menuStore.js';
+import { useMenuStore } from '@mygame/sdk';
 import { usePlatformStore } from './platformStore.js';
-import { useChatStore } from '../state/chatStore.js';
+import { useChatStore } from '@mygame/sdk';
 
 const inputStyle: CSSProperties = {
   flex: 1,

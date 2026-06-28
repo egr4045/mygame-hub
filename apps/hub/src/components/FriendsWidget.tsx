@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FriendsSidebar } from '../platform/FriendsSidebar.js';
-import { useSocialStore } from '../state/socialStore.js';
-import { useMenuStore } from '../state/menuStore.js';
+import { useSocialStore } from '@mygame/sdk';
+import { useMenuStore } from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
 
 export const FriendsWidget = (): JSX.Element => {

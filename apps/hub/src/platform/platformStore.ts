@@ -5,7 +5,7 @@
  * game, to your seat).
  */
 import { create } from 'zustand';
-import { clearSession, loadSession, login as apiLogin } from '../net/authClient.js';
+import { clearSession, loadSession, login as apiLogin } from '@mygame/sdk';
 
 export type PlatformStatus = 'idle' | 'logging-in' | 'ready' | 'error';
 
