@@ -1,0 +1,76 @@
+/**
+ * Postgres-backed AccountStore. Durable adapter for the in-memory account port: it keeps the
+ * canonical account logic in `createMemoryAccountStore` (reads stay synchronous) and mirrors every
+ * mutation to Postgres via the WriteQueue. `init()` hydrates memory from the DB on boot, so a
+ * restart re-claims the same account ids (stable SSO identity).
+ */
+import { type Pool, WriteQueue } from '@mygame/platform-db';
+import type { Logger } from '@mygame/shared-types';
+import { createMemoryAccountStore, type Account, type AccountStore } from './store.js';
+
+export interface PgAccountStore extends AccountStore {
+  /** Load all accounts from Postgres into the in-memory working set. Call once before serving. */
+  init(): Promise<void>;
+}
+
+export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore => {
+  const mem = createMemoryAccountStore();
+  const queue = new WriteQueue(logger);
+
+  /** Upsert the account's *current* full state (mem returns live references, so this is always fresh). */
+  const persist = (a: Account): void =>
+    queue.push('account.upsert', () =>
+      pool.query(
+        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, achievements, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, now())
+         ON CONFLICT (id) DO UPDATE SET
+           display_name = EXCLUDED.display_name,
+           telegram_id  = EXCLUDED.telegram_id,
+           vk_id        = EXCLUDED.vk_id,
+           avatar_icon  = EXCLUDED.avatar_icon,
+           achievements = EXCLUDED.achievements,
+           updated_at   = now()`,
+        [
+          a.id,
+          a.displayName,
+          a.telegramId ?? null,
+          a.vkId ?? null,
+          a.avatarIcon ?? null,
+          JSON.stringify(a.achievements),
+        ],
+      ),
+    );
+
+  return {
+    async init() {
+      const { rows } = await pool.query(
+        `SELECT id, display_name, telegram_id, vk_id, achievements FROM accounts`,
+      );
+      for (const r of rows) {
+        const acc = mem.upsert(r.display_name as string, r.id as string);
+        if (r.telegram_id) mem.linkSocial(acc.id, 'telegram', r.telegram_id as string);
+        if (r.vk_id) mem.linkSocial(acc.id, 'vk', r.vk_id as string);
+        for (const ach of (r.achievements as string[] | null) ?? []) mem.addAchievement(acc.id, ach);
+      }
+      logger.info('accounts hydrated', { count: rows.length });
+    },
+
+    upsert(displayName, id) {
+      const a = mem.upsert(displayName, id);
+      persist(a);
+      return a;
+    },
+    get: (id) => mem.get(id),
+    findBySocial: (network, socialId) => mem.findBySocial(network, socialId),
+    linkSocial(id, network, socialId) {
+      const a = mem.linkSocial(id, network, socialId);
+      if (a) persist(a);
+      return a;
+    },
+    addAchievement(id, achievement) {
+      mem.addAchievement(id, achievement);
+      const a = mem.get(id);
+      if (a) persist(a);
+    },
+  };
+};

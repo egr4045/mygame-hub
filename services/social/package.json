@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@mygame/auth-core": "workspace:*",
+    "@mygame/platform-db": "workspace:*",
     "@mygame/protocol": "workspace:*",
     "@mygame/shared-types": "workspace:*",
     "socket.io": "^4.8.1",

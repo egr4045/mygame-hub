@@ -27,7 +27,8 @@ export interface InviteStore {
 
 // Unambiguous alphabet (no 0/O/1/I): 32 chars so a byte maps cleanly via `& 31`.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const makeCode = (len = 6): string => {
+/** Random opaque join code. Exported so the Postgres adapter reuses the same generator. */
+export const makeCode = (len = 6): string => {
   const bytes = randomBytes(len);
   let out = '';
   for (let i = 0; i < len; i++) out += ALPHABET[bytes[i]! & 31];

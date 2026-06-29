@@ -7,6 +7,8 @@ export interface ServiceConfig {
   readonly jwtIssuer: string;
   /** Allowed CORS origin for the Socket.io server. */
   readonly corsOrigin: string;
+  /** Postgres connection string. When unset, the friend graph + invites are in-memory (not durable). */
+  readonly databaseUrl: string | undefined;
 }
 
 export const loadConfig = (): ServiceConfig => ({
@@ -16,4 +18,5 @@ export const loadConfig = (): ServiceConfig => ({
   jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
   jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  databaseUrl: process.env.DATABASE_URL,
 });
