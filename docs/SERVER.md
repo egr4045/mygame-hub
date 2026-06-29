@@ -32,6 +32,17 @@ Do not break one while touching the other.
 - Orchestrator controls Docker via the host socket; it `docker compose up/stop`s each game's compose.
   Idle policy: stop after `CIVA_IDLE_MS` (default 10 min) with zero players (polls each game `/metrics`).
 
+### State & secrets (important)
+- **Platform state is in-memory.** `auth`, `social` and invites use in-memory stores — restarting a
+  platform container **wipes accounts, friends and invites**. Postgres adapters are the planned fix
+  (see `STATUS.md`). The Leaders Postgres (127.0.0.1:5432) is Leaders-only; do not reuse it for the
+  platform without an explicit decision.
+- **Secrets via env only, never committed.** Set per-container in the deploy `.env`:
+  - `JWT_SECRET` — shared secret for SSO; the **same** value must be set on every game that accepts
+    the platform login (see `SSO-FEDERATION.md`).
+  - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking (when that feature lands).
+    Keep it out of git, logs and docs.
+
 ### Deploy / update CIVA
 See **`/root/civa/deploy/DEPLOY.md`**. TL;DR:
 ```sh

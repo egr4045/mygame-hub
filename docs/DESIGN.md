@@ -1,7 +1,13 @@
 # CIVA — Game Design (simplified model + victory)
 
+> **Scope:** this document describes the **CIVA 4X game** — a *separate product* that the platform in
+> this repo launches as an on-demand stack. It is **not** the platform's design. The game's code and
+> `packages/game-config` are not in this repository (the game ships from its own `deploy/civa-game`
+> compose). The CIVA domain types referenced below also appear in `@mygame/shared-types`, but the
+> platform itself does not use them. For the platform, see `STATUS.md` / `ARCHITECTURE.md` / `PLAN.md`.
+
 This is the agreed design after the criteria review. It is the source of truth for balance intent;
-numbers live in `packages/game-config`.
+numbers live in `packages/game-config` (in the game's repo).
 
 ## Design criteria (the bar every mechanic must clear)
 

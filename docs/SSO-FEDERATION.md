@@ -19,6 +19,10 @@ by the platform and already shares the session.
 The long-lived access/refresh tokens never leave the launcher; only the 120s handoff token travels
 in the URL, so a leak (history, logs) expires almost immediately.
 
+> ⚠️ Current limitation: the platform account store is **in-memory** (`STATUS.md`). The platform
+> account id (`sub`) is stable only while the `auth` service stays up — a restart re-issues ids.
+> Games federate on `sub`, so durable cross-game identity depends on the planned Postgres adapter.
+
 ## The platform token
 
 - Algorithm **HS256**, signed with the secret in `JWT_SECRET` (the same value must be configured on

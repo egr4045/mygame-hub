@@ -1,63 +1,64 @@
-# CIVA — Implementation Plan
+# Platform — implementation plan
 
-> This mirrors the approved plan. Phases are built in order; each module is implemented in isolation,
-> tested in isolation, then integrated.
+> This is the plan for the **platform** in this repo (launcher + social + auth + orchestrator + SDK).
+> The CIVA *game's* implementation plan (hex map, sim-core, economy, UN/TTS) is a separate product —
+> its design lives in `docs/DESIGN.md` and it ships as an on-demand stack the orchestrator launches.
 
-## Stack & decisions
+For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see `docs/ARCHITECTURE.md`.
 
-- **Frontend:** React + PixiJS + Vite + TypeScript. Map = PixiJS (hexes, zoom, pan); UI = React over Canvas.
-- **Backend:** Node.js + TypeScript, authoritative tick server, Socket.io.
-- **WebRTC:** LiveKit (self-hostable; caucus rooms + global conference).
-- **UN announcer TTS:** reuse the `D:\dev\leaders\ml-box` pattern — local Silero v4 worker that polls a server
-  job queue and pushes audio back (base64 + Bearer token). Offline pre-generation (`batch_generate.py`) + a live
-  worker for on-the-fly "spy" events.
-- **Repo:** pnpm workspaces + Turborepo monorepo; every game module is an isolated, standalone-runnable service/package.
+## Principles (the isolation contract)
 
-## Isolation contract (every service/module)
+1. **Boundary = schema.** All cross-service interaction is zod schemas in `@mygame/protocol`. No
+   cross-service imports of internal logic.
+2. **Ports & adapters.** Services depend on abstractions (`Clock`, `Logger`, storage ports), so real
+   (Postgres/system clock) and test (in-memory) adapters are interchangeable.
+3. **Standalone mode.** Each service runs in isolation (`standalone.ts`) against in-memory adapters.
+4. **One game = one entry.** Adding a game is a manifest entry in the orchestrator + a registry entry
+   in the hub + its own `deploy/<game>` compose — no platform code changes.
 
-1. **Boundary = schema.** All interaction is described by zod schemas in `packages/protocol`. No cross-service
-   imports of internal logic — only via the contract.
-2. **Standalone mode.** Each service has `dev:standalone` — runs in isolation against `test-harness` mocks/fixtures
-   and in-memory adapters, with no dependency on neighbours.
-3. **Ports & adapters.** Each service depends on abstractions (storage, event bus, clock); real (Postgres/Redis/
-   system clock) and test (in-memory/fake clock) adapters are interchangeable.
-4. **Determinism.** `sim-core` = pure `(state, commands, tick, seed) → (state', events[])`. No I/O, no direct
-   `Date.now`/`Math.random` (injected clock + seeded RNG). Enables replay and unit tests.
-5. **Three test tiers per module:** unit (pure logic) → contract (service-in-a-box vs fixtures) → integration
-   (compose, real adapters, cross-service scenarios). Isolation stays green before integration.
+## Done
 
-## Phases
+- **Phase 0 — Monorepo foundation.** pnpm + Turborepo + TS, package skeletons, service generator,
+  conventions, infra compose (Postgres/Redis present but not yet wired).
+- **Phase 1 — Hub UI.** The full Steam-style launcher: auth screen, library + game details, profile,
+  friends overlay, chat/messenger UI, toasts, context menus. Most content is still on mock data
+  (`STATUS.md`).
+- **Phase 2 — Platform realtime + SDK.**
+  - `auth` service: passwordless login, JWT access/refresh, SSO handoff tokens.
+  - `social` service: Socket.io friends + presence + invites.
+  - `orchestrator` service: Docker wake/reap per game.
+  - `@mygame/sdk`: framework-agnostic client, runtime config, self-mounting Shadow-DOM overlay,
+    bundled with `tsup` for external games.
+  - `@mygame/protocol`: platform-only contract (auth/social/invite/envelope/errors).
+- **Phase 3 — Persistence.** `@mygame/platform-db` (pool + migrations + write-behind queue) and
+  Postgres adapters for accounts (`auth`) and the friend graph + invites (`social`), wired into the
+  production entries and gated on `DATABASE_URL`. Memory stays the read working set; writes mirror to
+  Postgres; boot hydrates from the DB. In-memory fallback (with a warning) when `DATABASE_URL` is
+  unset, and always in `standalone`.
 
-- **Phase 0 — Monorepo foundation & tooling.** pnpm+Turbo+TS, package skeletons, infra compose, service generator, conventions.
-- **Phase 1 — Frontend on mocks.** Polish the entire UI against a mock-server (fixtures) through the `protocol` contract:
-  design system, hex map, resource bar, city/base window, build & recruit panels, tech tree, combat UI, diplomacy widget,
-  exchange, shadow market, event feed, UN screen, lobby, final screen, companion layout, polish.
-- **Phase 2 — Realtime foundation.** Auth (JWT) → Gateway (Socket.io, seamless reconnect, multi-device) → Lobby
-  (rooms, nation pick, start). Replace mock-server with the real stack; integration test the realtime core.
-- **Phase 3 — Simulation core.** `sim-core` pure tick fn → game-engine service (authoritative clock, state store,
-  getState) → map/territories (biomes, starting balance) → deterministic isolation runs.
-- **Phase 4 — Economy & construction.** Resources & storage (electricity non-stored) → population & taxes →
-  buildings & slots → science (3 branches × 3 tiers) → isolation tests.
-- **Phase 5 — Military & logistics.** Units & ranges → attack resolution (loot/destroy, no capture) → logistics
-  (ammo/fuel) → defender advantage → interceptions → hidden aggression index → isolation tests.
-- **Phase 6 — Trade.** Exchange (order book, commission, fuel logistics, frozen deposit) → exchange vulnerability →
-  shadow market (P2P) → isolation tests.
-- **Phase 7 — Diplomacy & WebRTC.** Diplomacy service (LiveKit tokens, caucus + conference) → client streams →
-  P2P deals tied to calls → isolation tests.
-- **Phase 8 — UN phase & TTS.** tts-gateway (ml-box job-queue contract) → template pre-generation → live spy events →
-  assembly service (year trigger, map lock, crisis bulletin) → debate & voting (diplomatic-representation double votes) →
-  isolation tests.
-- **Phase 9 — Finale & cycle.** Scoring/victory → full 5-year cycle → unified notifications → persistence (Postgres).
-- **Phase 10 — Integration, load, deploy.** E2E (8 bots through all services) → load/resilience → observability →
-  security (server-side validation) → deploy → balance tuning.
+## Next (mock → real)
+
+Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
+
+1. **Telegram account linking.** Real bot (token via `TELEGRAM_BOT_TOKEN`, never committed): linking
+   codes issued by the bot, redeemed in the hub; account recovery via Telegram. Persist the
+   `telegramId` ↔ account mapping. (VK deferred.)
+2. **Chat backend.** A real messaging service (DMs first, then groups) replacing `chatStore`'s mock
+   sessions; Socket.io transport, persisted history.
+3. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
+   the SDK; render the real set in the profile.
+4. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
+   DB), surfaced across games via the social `me` payload.
+5. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+   (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
+6. **VK account linking.** Mirror the Telegram flow (deferred by request).
+7. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+   `JWT_SECRET` handling.
 
 ## Verification
 
-- Per service: `corepack pnpm --filter <svc> dev:standalone` + `... test` (unit+contract), health endpoint responds.
-- Frontend: `corepack pnpm --filter web dev` → walk every screen on the mock-server.
-- Realtime: compose auth+gateway+lobby+redis → multi-client nation pick, disconnect/reconnect, start.
-- Engine/mechanics: deterministic fixture runs (same seed → same state) + live client.
-- WebRTC: LiveKit dev server, multiple caucuses + conference.
-- UN/TTS: run `ml-box` `start.ps1` against tts-gateway; pre-gen via `batch_generate.py`; year-end → map lock →
-  spoken bulletin → vote.
-- Full cycle: `docker compose up` everything; e2e 8-bot game lobby → final screen.
+- Per service: `corepack pnpm --filter @mygame/<svc> dev:standalone` + `... test`; `/health` responds.
+- Hub: `corepack pnpm --filter @mygame/hub dev` → walk every screen.
+- Realtime: run `auth` + `social`, connect two clients, exercise add/accept/presence/invite.
+- Launch: run `orchestrator` with Docker, `POST /orchestrator/games/:id/enter`, confirm the game's
+  containers come up and reap on idle.

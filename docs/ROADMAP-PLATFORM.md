@@ -3,17 +3,23 @@
 Beyond the per-game engines, the platform itself (launcher + lobby + orchestrator) has its own
 roadmap. Top of the list:
 
-## Invite links (no codes to type) — planned
+## Invite links (no codes to type) — partially done
 
 Goal: share a link, the friend lands straight in your room. No "enter this 6-digit code".
 
-- Server: `lobby` accepts a join by **room id in a signed invite token** (short-lived, room-scoped).
-  Issue `POST /invite` (host only) → `{ url }` where url = `https://<launcher>/?join=<token>`.
-- Launcher: on load, if `?join=<token>` is present → after login, auto-`enter` the game and
-  auto-join that room (skip the room list). Works for not-yet-logged-in users (login then join) and
-  for a cold game (orchestrator wakes it first).
-- Nice-to-haves: room **QR code** next to the link; invite expiry + max-uses; "copy link" button in
-  the room view; deep-link straight into a specific game (`?game=civa&join=…`).
+**Done:** the `social` service mints opaque invite codes (`createInvite` / `inviteFriend`), resolves
+them publicly via `GET /invite/:code`, and pushes invites into a friend's presence channel. The hub
+has `resolveInvite(code)` for `?invite=CODE` deep links.
+
+**Still to do:**
+
+- Launcher auto-join: on load, if `?invite=<code>` / `?join=<code>` is present → after login,
+  auto-`enter` the game and auto-join that room (skip the room list). Works for not-yet-logged-in
+  users (login then join) and a cold game (orchestrator wakes it first). Today the code resolves but
+  the auto-join flow isn't wired end-to-end.
+- Per-game lobby must accept a join by the resolved room/role (the platform side is ready).
+- Nice-to-haves: room **QR code** next to the link; invite **max-uses** (TTL exists, 1h); "copy link"
+  button in the room view; deep-link straight into a specific game (`?game=civa&invite=…`).
 
 ## Cool, convenient lobby features (proposed)
 
