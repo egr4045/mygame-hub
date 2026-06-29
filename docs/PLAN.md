@@ -35,24 +35,24 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   production entries and gated on `DATABASE_URL`. Memory stays the read working set; writes mirror to
   Postgres; boot hydrates from the DB. In-memory fallback (with a warning) when `DATABASE_URL` is
   unset, and always in `standalone`.
+- **Phase 4 — Telegram linking & login.** Real bot (`auth`, long polling, gated on
+  `TELEGRAM_BOT_TOKEN`): link an account via the hub profile (`/start <code>`), and log in on a new
+  device via a `/login` code. The `telegram_id` mapping persists through the account store.
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Telegram account linking.** Real bot (token via `TELEGRAM_BOT_TOKEN`, never committed): linking
-   codes issued by the bot, redeemed in the hub; account recovery via Telegram. Persist the
-   `telegramId` ↔ account mapping. (VK deferred.)
-2. **Chat backend.** A real messaging service (DMs first, then groups) replacing `chatStore`'s mock
+1. **Chat backend.** A real messaging service (DMs first, then groups) replacing `chatStore`'s mock
    sessions; Socket.io transport, persisted history.
-3. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
+2. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
    the SDK; render the real set in the profile.
-4. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
+3. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
    DB), surfaced across games via the social `me` payload.
-5. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+4. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
    (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
-6. **VK account linking.** Mirror the Telegram flow (deferred by request).
-7. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+5. **VK account linking.** Mirror the Telegram flow (deferred by request).
+6. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
 
 ## Verification

@@ -40,8 +40,9 @@ Do not break one while touching the other.
 - **Secrets via env only, never committed.** Set per-container in the deploy `.env`:
   - `JWT_SECRET` — shared secret for SSO; the **same** value must be set on every game that accepts
     the platform login (see `SSO-FEDERATION.md`).
-  - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking (when that feature lands).
-    Keep it out of git, logs and docs.
+  - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
+    a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
+    token; disable any webhook). Keep the token out of git, logs and docs.
 
 ### Deploy / update CIVA
 See **`/root/civa/deploy/DEPLOY.md`**. TL;DR:

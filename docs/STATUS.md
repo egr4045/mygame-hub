@@ -24,8 +24,9 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 | Account login | 🟡 | Real backend (`services/auth`, real HS256 JWT access/refresh). But login is **passwordless**: the password field on the auth screen is **ignored** (`AuthScreen.tsx` passes only the name). "Регистрация" is the same call as login. |
 | Account persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/auth/src/pgStore.ts`): accounts survive restart, ids stay stable (durable SSO identity). Falls back to in-memory with a loud warning when unset (and in `standalone`). |
 | SSO handoff into a game | ✅ | `POST /auth/handoff` mints a short-lived (120s) token; the hub passes it via `?pt=` (`HubScreen.tsx`). Games exchange it at their own `POST /auth/platform`. See `SSO-FEDERATION.md`. |
-| Telegram account linking | ❌ | Buttons are `alert('Мок привязки Telegram')` (`ProfileView.tsx`). `services/auth/src/botGateway.ts` generates codes but is **wired to nothing** (no HTTP route, no webhook), and codes are never stored. |
-| VK account linking | ❌ | Mock + `handleVkMessage` returns "coming soon". (Intentionally deferred.) |
+| Telegram account linking | ✅ | Real bot (`services/auth/src/telegram.ts` long-poll + `telegramLinking.ts`), gated on `TELEGRAM_BOT_TOKEN`. Hub profile → `POST /auth/telegram/link-code` → open bot `/start <code>` → binds `accounts.telegram_id` (persisted). Status via `GET /auth/telegram/status`. |
+| Login from another device (Telegram) | ✅ | Send `/login` to the bot → one-time code → enter it on the auth screen (`POST /auth/social/login`) → full session for the linked account. |
+| VK account linking | ❌ | Deferred by request. Button shows "(скоро)". |
 | Friends list (add/accept/decline/remove) | ✅ | Real Socket.io backend (`services/social`). Account id doubles as friend code. |
 | Presence (online/offline/in-game) | ✅ | Computed from live socket connections; activity is pushed to friends. |
 | Friends persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/social/src/pgStore.ts`): the friendship graph survives restart. Falls back to in-memory (warning) when unset / in `standalone`. |
@@ -63,8 +64,8 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 ## Mock → real, progress
 
 1. ✅ **Persistence (Postgres adapters)** — done (`auth` + `social`, gated on `DATABASE_URL`).
-2. ⏳ **Telegram linking** — real bot + linking codes (token via `TELEGRAM_BOT_TOKEN`). *Next.*
-3. **Chat backend** — a real messaging service (DMs first, then groups).
+2. ✅ **Telegram linking + login** — done (real bot, gated on `TELEGRAM_BOT_TOKEN`).
+3. ⏳ **Chat backend** — a real messaging service (DMs first, then groups). *Next.*
 4. **Achievements API** — expose the store that already exists; emit from games via the SDK.
 5. **Profile (avatar/title) persistence + upload.**
 6. **Invite deep-links + notification center.**

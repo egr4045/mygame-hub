@@ -46,11 +46,21 @@ Passwordless identity provider. Routes (`app.ts`):
 - `POST /auth/refresh` `{ refreshToken }` → `{ accessToken }`.
 - `POST /auth/handoff` `{ refreshToken }` → `{ handoffToken, accountId, displayName }` — a 120s token
   to carry identity into a game (see `SSO-FEDERATION.md`).
+- `POST /auth/telegram/link-code` (Bearer access) → `{ code, url }` — one-time code bound to the
+  account; the bot consumes it via `/start <code>`.
+- `GET /auth/telegram/status` (Bearer access) → `{ linked, telegramId? }`.
+- `POST /auth/social/login` `{ network, recoveryCode }` → session — redeem a `/login` code from the
+  bot to sign in on a new device (currently `network: 'telegram'` only).
 - `GET /health`, `GET /ready`.
 
 JWTs are HS256 via `@mygame/auth-core` (`signAccess` 15m, `signRefresh` 30d, `signHandoff` 120s,
-`verify`). Accounts live in `AccountStore` (`store.ts`) — in-memory `Map`. `botGateway.ts` is a
-**stub** for Telegram/VK bot flows (not wired to any route yet).
+`verify`). Accounts live in `AccountStore` (real Postgres or in-memory).
+
+**Telegram.** When `TELEGRAM_BOT_TOKEN` is set, `index.ts` starts a bot: `telegram.ts` is a minimal
+Bot API client using **long polling** (no public webhook needed — run a single auth instance);
+`telegramLinking.ts` holds short-lived (5 min) link/login codes and handles `/start <code>` (binds the
+chat to the account) and `/login` (issues a login code). The `telegram_id` mapping persists via the
+account store.
 
 ### social (`services/social`) — port 8083
 
