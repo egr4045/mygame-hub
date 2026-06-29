@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { useMenuStore } from '@mygame/sdk';
+import { useMenuStore, createTelegramLinkCode, getTelegramStatus } from '@mygame/sdk';
 
 // Mock achievements data
 const ACHIEVEMENTS = [
@@ -20,6 +20,49 @@ export const ProfileView = (): JSX.Element => {
   const [titleAchievement, setTitleAchievement] = useState<string | null>(null);
   
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
+
+  // Telegram linking state
+  const [tgLinked, setTgLinked] = useState<boolean | null>(null);
+  const [tgId, setTgId] = useState<string | undefined>(undefined);
+  const [tgModal, setTgModal] = useState<{ code: string; url: string } | null>(null);
+
+  useEffect(() => {
+    void getTelegramStatus().then((s) => {
+      if (s) {
+        setTgLinked(s.linked);
+        setTgId(s.telegramId);
+      }
+    });
+  }, []);
+
+  // While the link modal is open, poll for confirmation from the bot, then auto-close.
+  useEffect(() => {
+    if (!tgModal) return;
+    const handle = window.setInterval(() => {
+      void getTelegramStatus().then((s) => {
+        if (s?.linked) {
+          setTgLinked(true);
+          setTgId(s.telegramId);
+          setTgModal(null);
+        }
+      });
+    }, 2500);
+    const stop = window.setTimeout(() => window.clearInterval(handle), 120_000);
+    return () => {
+      window.clearInterval(handle);
+      window.clearTimeout(stop);
+    };
+  }, [tgModal]);
+
+  const startTelegramLink = async () => {
+    const r = await createTelegramLinkCode();
+    if (!r) {
+      alert('Не удалось создать код привязки. Попробуйте позже.');
+      return;
+    }
+    if (r.url) window.open(r.url, '_blank', 'noopener');
+    setTgModal(r);
+  };
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
@@ -129,17 +172,27 @@ export const ProfileView = (): JSX.Element => {
             >
               Выбрать титул
             </button>
-            <button 
-              onClick={() => alert('Мок привязки Telegram')}
-              style={{ background: '#2AABEE', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+            {tgLinked ? (
+              <div
+                title={tgId ? `Telegram chat ${tgId}` : undefined}
+                style={{ background: 'rgba(92,126,16,0.25)', color: '#a3d928', border: '1px solid #5c7e10', padding: '8px 16px', borderRadius: 4, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                <span>✈</span> Telegram привязан ✓
+              </div>
+            ) : (
+              <button
+                onClick={() => void startTelegramLink()}
+                style={{ background: '#2AABEE', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                <span>✈</span> Привязать TG
+              </button>
+            )}
+            <button
+              disabled
+              title="Скоро"
+              style={{ background: '#4C75A3', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'not-allowed', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.5 }}
             >
-              <span>✈</span> Привязать TG
-            </button>
-            <button 
-              onClick={() => alert('Мок привязки VK')}
-              style={{ background: '#4C75A3', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
-            >
-              <span>K</span> Привязать VK
+              <span>K</span> Привязать VK (скоро)
             </button>
           </div>
         </div>
@@ -259,6 +312,33 @@ export const ProfileView = (): JSX.Element => {
             >
               Закрыть
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Telegram link modal */}
+      {tgModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="civa-fade-in" style={{ width: 460, background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 32, textAlign: 'center' }}>
+            <h2 style={{ color: '#fff', margin: '0 0 12px 0', fontSize: 22 }}>Привязка Telegram</h2>
+            <p style={{ color: '#8f98a0', marginBottom: 20, fontSize: 14, lineHeight: 1.5 }}>
+              Открой бота в Telegram и нажми <b>Start</b> — аккаунт привяжется автоматически.
+              Если бот не открылся, отправь ему команду:
+            </p>
+            <div style={{ background: '#171a21', border: '1px dashed #3d4450', padding: 16, borderRadius: 4, color: '#fff', letterSpacing: 1, fontSize: 18, marginBottom: 20, fontFamily: 'monospace' }}>
+              /start {tgModal.code}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {tgModal.url && (
+                <a href={tgModal.url} target="_blank" rel="noreferrer" style={{ background: '#2AABEE', color: '#fff', padding: '12px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 }}>
+                  ✈ Открыть Telegram
+                </a>
+              )}
+              <div style={{ color: '#8f98a0', fontSize: 13 }}>Ожидаем подтверждения от бота…</div>
+              <button onClick={() => setTgModal(null)} style={{ background: 'transparent', color: '#8f98a0', border: 'none', padding: '8px', cursor: 'pointer', fontWeight: 600 }}>
+                Отмена
+              </button>
+            </div>
           </div>
         </div>
       )}

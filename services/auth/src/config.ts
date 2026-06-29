@@ -10,6 +10,8 @@ export interface ServiceConfig {
   readonly handoffTtl: string;
   /** Postgres connection string. When unset, accounts are in-memory (not durable). */
   readonly databaseUrl: string | undefined;
+  /** Telegram bot token (secret). When unset, Telegram linking is disabled. */
+  readonly telegramBotToken: string | undefined;
 }
 
 export const loadConfig = (): ServiceConfig => ({
@@ -22,4 +24,5 @@ export const loadConfig = (): ServiceConfig => ({
   refreshTtl: process.env.REFRESH_TTL ?? '30d',
   handoffTtl: process.env.HANDOFF_TTL ?? '120s',
   databaseUrl: process.env.DATABASE_URL,
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
 });

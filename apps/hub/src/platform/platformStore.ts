@@ -5,7 +5,7 @@
  * game, to your seat).
  */
 import { create } from 'zustand';
-import { clearSession, loadSession, login as apiLogin } from '@mygame/sdk';
+import { clearSession, loadSession, login as apiLogin, loginWithTelegram } from '@mygame/sdk';
 
 export type PlatformStatus = 'idle' | 'logging-in' | 'ready' | 'error';
 
@@ -25,6 +25,8 @@ interface PlatformState {
   error: string | null;
 
   login: (displayName: string) => Promise<void>;
+  /** Log in by redeeming a one-time code sent by the Telegram bot (/login). */
+  loginWithTelegramCode: (code: string) => Promise<void>;
   logout: () => void;
   selectGame: (id: string) => void;
   exitGame: () => void;
@@ -47,6 +49,16 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
     } catch (e) {
       set({ status: 'error', error: String(e) });
     }
+  },
+
+  loginWithTelegramCode: async (code) => {
+    set({ status: 'logging-in', error: null });
+    const session = await loginWithTelegram(code.trim());
+    if (!session) {
+      set({ status: 'error', error: 'Неверный или истёкший код' });
+      return;
+    }
+    set({ account: { accountId: session.accountId, displayName: session.displayName }, status: 'ready' });
   },
 
   logout: () => {

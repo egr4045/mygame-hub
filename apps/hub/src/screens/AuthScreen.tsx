@@ -51,13 +51,17 @@ const secondaryBtn: CSSProperties = {
 
 export const AuthScreen = (): JSX.Element => {
   const login = usePlatformStore((s) => s.login);
+  const loginWithTelegramCode = usePlatformStore((s) => s.loginWithTelegramCode);
   const status = usePlatformStore((s) => s.status);
   const error = usePlatformStore((s) => s.error);
-  
+
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [showTg, setShowTg] = useState(false);
+  const [tgCode, setTgCode] = useState('');
 
   const goLogin = () => name.trim() && password && void login(name.trim());
+  const goTgLogin = () => tgCode.trim() && void loginWithTelegramCode(tgCode.trim());
 
   return (
     <div style={shell}>
@@ -132,6 +136,38 @@ export const AuthScreen = (): JSX.Element => {
             ⚠ {error}
           </div>
         )}
+
+        {/* Login via a one-time code from the Telegram bot (/login) */}
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          {!showTg ? (
+            <button
+              onClick={() => setShowTg(true)}
+              style={{ background: 'transparent', border: 'none', color: '#2AABEE', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+            >
+              ✈ Войти через Telegram
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ color: '#8f98a0', fontSize: '12px', margin: 0 }}>
+                Отправь боту команду <b>/login</b> и введи полученный код:
+              </p>
+              <input
+                value={tgCode}
+                placeholder="Код из Telegram"
+                onChange={(e) => setTgCode(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && goTgLogin()}
+                style={{ ...inputStyle, textAlign: 'center', letterSpacing: 2, textTransform: 'uppercase' }}
+              />
+              <button
+                disabled={!tgCode.trim() || status === 'logging-in'}
+                onClick={goTgLogin}
+                style={{ ...primaryBtn, background: '#2AABEE', opacity: tgCode.trim() ? 1 : 0.5 }}
+              >
+                {status === 'logging-in' ? 'Входим...' : 'Войти по коду'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

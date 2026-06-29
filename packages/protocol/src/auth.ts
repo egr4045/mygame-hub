@@ -28,6 +28,25 @@ export const socialLoginRequest = z.object({
 });
 export type SocialLoginRequest = z.infer<typeof socialLoginRequest>;
 
+/**
+ * Telegram account linking. The hub (authenticated) asks for a one-time code; the user opens the bot
+ * via `url` (`https://t.me/<bot>?start=<code>`) which binds their Telegram chat to the account. To log
+ * in on another device, the user sends `/login` to the bot and redeems the returned code via
+ * `socialLoginRequest`.
+ */
+export const telegramLinkResponse = z.object({
+  code: z.string(),
+  /** Deep link to the bot with the code prefilled. Empty if the bot username is unknown. */
+  url: z.string(),
+});
+export type TelegramLinkResponse = z.infer<typeof telegramLinkResponse>;
+
+export const telegramStatusResponse = z.object({
+  linked: z.boolean(),
+  telegramId: z.string().optional(),
+});
+export type TelegramStatusResponse = z.infer<typeof telegramStatusResponse>;
+
 export const refreshRequest = z.object({ refreshToken: z.string() });
 export type RefreshRequest = z.infer<typeof refreshRequest>;
 

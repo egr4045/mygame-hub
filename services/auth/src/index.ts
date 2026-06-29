@@ -10,6 +10,8 @@ import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createMemoryAccountStore, type AccountStore } from './store.js';
 import { createPgAccountStore } from './pgStore.js';
+import { createTelegramClient } from './telegram.js';
+import { createTelegramLinking, type TelegramLinking } from './telegramLinking.js';
 
 const config = loadConfig();
 const logger = createConsoleLogger({ svc: config.service });
@@ -34,6 +36,17 @@ const accounts: AccountStore = await (async () => {
   return store;
 })();
 
-const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts });
+let telegram: TelegramLinking | undefined;
+if (config.telegramBotToken) {
+  const client = createTelegramClient(config.telegramBotToken, logger);
+  const me = await client.getMe();
+  telegram = createTelegramLinking({ accounts, client, logger, botUsername: me?.username ?? null });
+  client.startPolling((m) => telegram!.handleMessage(m));
+  logger.info('telegram linking enabled', { bot: me?.username ?? '(unknown)' });
+} else {
+  logger.info('TELEGRAM_BOT_TOKEN not set — telegram linking disabled');
+}
+
+const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, telegram });
 
 app.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
