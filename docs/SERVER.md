@@ -32,14 +32,24 @@ Do not break one while touching the other.
 - Orchestrator controls Docker via the host socket; it `docker compose up/stop`s each game's compose.
   Idle policy: stop after `CIVA_IDLE_MS` (default 10 min) with zero players (polls each game `/metrics`).
 
+> ⚠️ **`deploy/civa` is stale relative to the current repo.** It predates the `social` and `chat`
+> services and the Postgres persistence work: it still filters on the old `@civa/auth` package name
+> (now `@mygame/auth`), has no `social`/`chat`/Postgres containers, and the gateway has no route for
+> either socket service (would collide with the game lobby's `/socket.io/*` if added naively). `auth`,
+> `orchestrator` and the SPA work as deployed; `social`/`chat`/persistence do not yet. See `STATUS.md`
+> and `PLAN.md` ("Deploy reconciliation") before deploying those features to this server.
+
 ### State & secrets (important)
-- **Platform state is in-memory.** `auth`, `social` and invites use in-memory stores — restarting a
-  platform container **wipes accounts, friends and invites**. Postgres adapters are the planned fix
-  (see `STATUS.md`). The Leaders Postgres (127.0.0.1:5432) is Leaders-only; do not reuse it for the
-  platform without an explicit decision.
+- **Platform state is in-memory by default.** `auth`, `social` and `chat` fall back to in-memory
+  stores unless `DATABASE_URL` is set — a restart then **wipes accounts, friends, invites and
+  messages**. Postgres adapters exist (`@mygame/platform-db`) but aren't wired into `deploy/civa` yet
+  (see above). The Leaders Postgres (127.0.0.1:5432) is Leaders-only; do not reuse it for the platform
+  without an explicit decision — CIVA needs its own Postgres container.
 - **Secrets via env only, never committed.** Set per-container in the deploy `.env`:
   - `JWT_SECRET` — shared secret for SSO; the **same** value must be set on every game that accepts
-    the platform login (see `SSO-FEDERATION.md`).
+    the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat` alike.
+  - `DATABASE_URL` — e.g. `postgres://civa:civa@postgres:5432/civa`; set identically on `auth`,
+    `social` and `chat` for durable accounts/friends/invites/messages.
   - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
     a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
     token; disable any webhook). Keep the token out of git, logs and docs.
@@ -62,6 +72,7 @@ Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` the
 | 5432 / 6379 | Leaders pg/redis | localhost |
 | 8088 | CIVA gateway (launcher) | yes (http; TLS via subdomain later) |
 | 8081 / 8082 / 8090 | CIVA auth / lobby / orchestrator | internal (civa-net) |
+| 8083 / 8084 | CIVA social / chat | internal — **not yet in `deploy/civa`** (see the ⚠️ above) |
 
 ## Quick orientation for an agent
 - This file is the map. The CIVA repo's `docs/` has DESIGN.md (game), DEPLOY.md (ops), PLAN.md (roadmap).

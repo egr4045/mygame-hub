@@ -10,21 +10,21 @@ main data flows. For *what works vs. what's mocked* see `STATUS.md`.
                  │  hub SPA (apps/hub)  — React + Zustand        │
                  │  AuthScreen → HubScreen (library/launcher)    │
                  │  embeds @mygame/sdk (overlay: friends/chat/…) │
-                 └───────┬───────────────┬───────────────┬───────┘
-                         │ HTTP          │ Socket.io     │ HTTP
-                         ▼               ▼               ▼
-                 ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-                 │ auth         │ │ social       │ │ orchestrator     │
-                 │ JWT login    │ │ friends +    │ │ docker compose   │
-                 │ + handoff    │ │ presence +   │ │ up/stop per game │
-                 │ (in-memory)  │ │ invites (mem)│ │ + idle reaper    │
-                 └──────────────┘ └──────────────┘ └────────┬─────────┘
-                         ▲                                   │ docker
-                         │ verifies platform JWT             ▼
-                 ┌───────┴────────────────────┐     per-game stacks
-                 │ a game on its own origin    │     (CIVA, svoyak, …)
-                 │ POST /auth/platform (SSO)   │
-                 └─────────────────────────────┘
+                 └──┬───────────┬───────────────┬───────────┬───┘
+                    │ HTTP      │ Socket.io      │ Socket.io │ HTTP
+                    ▼           ▼                ▼           ▼
+             ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
+             │ auth     │ │ social   │ │ chat     │ │ orchestrator │
+             │ JWT login│ │ friends +│ │ direct   │ │ docker       │
+             │ + handoff│ │ presence │ │ messages │ │ compose      │
+             │ + telegram│ │ + invites│ │ (DMs)   │ │ per game     │
+             └──────────┘ └──────────┘ └──────────┘ └──────┬───────┘
+                    ▲                                       │ docker
+                    │ verifies platform JWT                 ▼
+             ┌──────┴──────────────────────┐       per-game stacks
+             │ a game on its own origin    │       (CIVA, svoyak, …)
+             │ POST /auth/platform (SSO)   │
+             └──────────────────────────────┘
 ```
 
 Everything that crosses a platform boundary is a zod schema in `@mygame/protocol`. Services never
@@ -32,10 +32,10 @@ import each other's internals — only the contract.
 
 ## Services (`services/*`)
 
-All three follow the same shape: a `createApp`/`createServer` that takes **ports** (deps) so the same
+All four follow the same shape: a `createApp`/`createServer` that takes **ports** (deps) so the same
 logic runs against real or in-memory adapters; an `index.ts` "production" entry; a `standalone.ts` for
-isolated dev; a `config.ts` reading env. Today every "production" entry still wires the **in-memory**
-store (see `STATUS.md`).
+isolated dev; a `config.ts` reading env. `auth`, `social` and `chat` are Postgres-backed when
+`DATABASE_URL` is set, else fall back to in-memory (see `STATUS.md` and "Persistence" below).
 
 ### auth (`services/auth`) — port 8081
 
@@ -80,6 +80,26 @@ Socket.io server layering live presence over a durable friendship graph.
   resolving to `{ game, room, role, inviter }`. Public HTTP `GET /invite/:code` resolves a code
   before any socket exists (for deep links).
 
+### chat (`services/chat`) — port 8084
+
+Socket.io server for **direct messages** (1:1 only — no group chat yet, see `PLAN.md`). Mirrors
+`social`'s shape closely: same JWT handshake auth (`io.use`), same "push the full view on any change"
+model, same in-memory-then-Postgres adapter split.
+
+- **Threads have no id of their own** — since a DM is always exactly two accounts, the *other*
+  account's id identifies the thread from either side (`ChatThread.accountId`).
+- **Store (`store.ts`):** messages bucketed by the sorted account pair; `threads(accountId)` derives
+  the last message + unread count per thread; `markRead` flips `readAt` on the recipient's unread
+  messages and returns the timestamp to notify the sender.
+- **C2S/S2C events:** see `protocol/src/chat.ts` (`send`, `markRead`, `getHistory`, `getState` /
+  `threads`, `message`, `read`, `error`). `send` and `getHistory` reply via ack; `message`/`threads`/
+  `read` are pushed.
+- **Read receipts:** simplified to `sent` | `read` (no `delivered` state). A message is "read" once
+  the recipient's client calls `markRead` (the hub does this on `openChat`).
+- **Known v1 simplifications** (see `STATUS.md`): no group chat, no reactions, no typing indicators,
+  history is capped (last 100) with no pagination, DMs aren't restricted to friends (any known
+  accountId can message any other — same trust model as friend codes).
+
 ### orchestrator (`services/orchestrator`) — port 8090
 
 Wakes a game when a player enters and reaps it when idle, so empty games burn no RAM.
@@ -99,12 +119,14 @@ Wakes a game when a player enters and reaps it when idle, so empty games burn no
 The framework-agnostic client a game embeds, plus the overlay the hub also uses.
 
 - **`client.ts`** — the `mygame` singleton. `mygame.init(gameId, { hubUrl })` configures endpoints,
-  mounts the overlay, and opens the social connection. Sub-APIs: `auth`, `social`, `chat`, `ui`.
-- **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083`; prod → same origin; a game points
-  it at the hub via `mygame.init(id, { hubUrl })`.
-- **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`.
-- **State (Zustand):** `socialStore` (the live friends/presence connection — **real**),
-  `chatStore` (**mock data**), `menuStore`, `toastStore`.
+  mounts the overlay, and opens the social **and** chat connections. Sub-APIs: `auth`, `social`,
+  `chat`, `ui`.
+- **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084`; prod → same origin; a game
+  points it at the hub via `mygame.init(id, { hubUrl })`.
+- **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
+  plus Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`).
+- **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
+  `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
   `MygameOverlay` (toasts, context menu) so a game gets the platform UI without importing React itself.
 - Built with `tsup` (`tsup.config.ts`) for external consumption.
@@ -124,7 +146,7 @@ for embedded games).
 
 ## Contract (`packages/protocol` → `@mygame/protocol`)
 
-The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `invite.ts`,
+The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `chat.ts`, `invite.ts`,
 `envelope.ts` (the WS envelope `{ v, type, seq, ts, traceId?, payload }` + `CONTRACT_VERSION`),
 `errors.ts` (`ErrorCode` + `ContractError.toProtocol()`). Per-game protocols live in each game's repo
 and may re-export these primitives.
@@ -148,6 +170,11 @@ Socket.io connection with `auth.token`, and renders whatever `social.friends` th
 **Invite a friend.** `inviteFriend` → server checks friendship, mints a code, pushes
 `social.invite` to the friend's sockets. Or `createInvite` → ack returns a code to share as a link.
 
+**Send a DM.** `chatStore.sendMessage` → `chat.send` (ack) → server persists + pushes `chat.message`
+to both the sender's other sockets and the recipient, and a refreshed `chat.threads` to both. Opening
+a thread (`openChat`) fetches `chat.getHistory` and fires `chat.markRead`, which flips `readAt` and
+pushes `chat.read` back to the sender so their checkmarks update.
+
 **Launch a game.** `handlePlay` → `enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort)
 → `getHandoff()` → navigate to `http://host:PORT/?pt=<handoff>`. The game exchanges the token at its
 own `/auth/platform` and federates the identity.
@@ -155,18 +182,20 @@ own `/auth/platform` and federates the identity.
 ## Persistence
 
 `@mygame/platform-db` provides the shared Postgres plumbing: `createPool`, `runMigrations` (the
-platform schema — `accounts`, `friendships`, `invites`), and a `WriteQueue`. Each service has its own
-adapter next to its port (`auth/src/pgStore.ts`, `social/src/pgStore.ts`, `social/src/pgInvites.ts`).
+platform schema — `accounts`, `friendships`, `invites`, `messages`), and a `WriteQueue`. Each service
+has its own adapter next to its port (`auth/src/pgStore.ts`, `social/src/pgStore.ts` +
+`social/src/pgInvites.ts`, `chat/src/pgStore.ts`).
 
 **Write-behind model.** The in-memory store stays authoritative for **reads** (the hot
-friends/presence path is synchronous and fast). Every **write** also goes to Postgres through the
+friends/presence/chat path is synchronous and fast). Every **write** also goes to Postgres through the
 `WriteQueue` — ordered, non-blocking, errors logged not thrown. On boot each adapter's `init()`
-hydrates memory from the DB (the social adapter replays the friendship graph through the store's own
-public API, so state is reconstructed exactly). A restart no longer loses data.
+hydrates memory from the DB (the social/chat adapters replay their graph/messages through the store's
+own public API or a dedicated `hydrate()`, so state is reconstructed exactly). A restart no longer
+loses data.
 
 **Wiring.** Production entries (`index.ts`) use Postgres when `DATABASE_URL` is set, else fall back to
 the in-memory store with a loud warning. `standalone.ts` is always in-memory (isolation/dev). The
-`accounts` table is shared: `auth` is authoritative for profile fields; `social` only refreshes
+`accounts` table is shared: `auth` is authoritative for profile fields; `social`/`chat` only refresh
 `display_name`. Set `DATABASE_URL=postgres://civa:civa@localhost:5432/civa` (matches
 `infra/docker-compose.yml`) to enable it. Redis is provisioned but not yet used.
 

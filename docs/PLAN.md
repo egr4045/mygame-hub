@@ -38,22 +38,29 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
 - **Phase 4 — Telegram linking & login.** Real bot (`auth`, long polling, gated on
   `TELEGRAM_BOT_TOKEN`): link an account via the hub profile (`/start <code>`), and log in on a new
   device via a `/login` code. The `telegram_id` mapping persists through the account store.
+- **Phase 5 — Chat backend (DMs).** `services/chat` (Socket.io, mirrors `social`): direct messages
+  with persisted history, unread counts, and read receipts; Postgres-backed via the same
+  `@mygame/platform-db` adapters, gated on `DATABASE_URL`. Group chat, reactions, typing indicators
+  and message edit/delete are deliberately deferred (see `STATUS.md`).
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Chat backend.** A real messaging service (DMs first, then groups) replacing `chatStore`'s mock
-   sessions; Socket.io transport, persisted history.
-2. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
+1. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
    the SDK; render the real set in the profile.
-3. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
+2. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
    DB), surfaced across games via the social `me` payload.
-4. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+3. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
    (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
+4. **Group chat.** Extend `services/chat` beyond 1:1 DMs.
 5. **VK account linking.** Mirror the Telegram flow (deferred by request).
 6. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
+7. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
+   `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
+   service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
+   lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
 
 ## Verification
 

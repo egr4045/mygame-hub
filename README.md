@@ -14,20 +14,22 @@ products on their own origins** — the hub logs you in once and hands that iden
 See **`docs/STATUS.md`** for the authoritative, audited feature-by-feature breakdown (real backend vs.
 in-memory vs. UI-only mock). The short version:
 
-- ✅ **Real, with a backend:** account login (JWT), cross-game SSO handoff, friends graph + live
-  presence/activity, invite codes, on-demand game launch (Docker orchestrator), **Postgres
-  persistence** for accounts/friends/invites (gated on `DATABASE_URL`).
+- ✅ **Real, with a backend:** account login (JWT), cross-game SSO handoff, Telegram account
+  linking/login (real bot), friends graph + live presence/activity, invite codes, direct messages
+  (1:1 chat, persisted, read receipts), on-demand game launch (Docker orchestrator), **Postgres
+  persistence** for accounts/friends/invites/messages (gated on `DATABASE_URL`).
 - 🟡 **Partial:** persistence falls back to in-memory when `DATABASE_URL` is unset; login is
-  passwordless (the password field is ignored).
-- ❌ **UI-only mock (no backend):** chat/messenger, voice/video calls, achievements, game store pages
-  (changelog/forum/lobby browser), playtime stats, Telegram/VK linking.
+  passwordless (the password field is ignored); chat is DMs only (no groups yet).
+- ❌ **UI-only mock (no backend):** voice/video calls, achievements, game store pages
+  (changelog/forum/lobby browser), playtime stats, VK linking (deferred by request).
 
 ## Stack
 
 - **Hub (frontend):** React + Vite + TypeScript + Zustand (`apps/hub`). No game engine here.
 - **Platform services:** Node.js + TypeScript, dependency-injected ports & adapters (`services/*`):
-  - `auth` — passwordless login, JWT access/refresh, short-lived SSO handoff tokens.
+  - `auth` — passwordless login, JWT access/refresh, short-lived SSO handoff tokens, Telegram linking.
   - `social` — Socket.io friends + presence + invites.
+  - `chat` — Socket.io direct messages (1:1), persisted history + read receipts.
   - `orchestrator` — wakes/reaps per-game Docker stacks on player entry/idle.
 - **SDK:** `@mygame/sdk` — the framework-agnostic client a game embeds (`mygame.init()`), plus a
   self-mounting Shadow-DOM overlay (friends, chat, toasts, context menu).
@@ -40,11 +42,12 @@ in-memory vs. UI-only mock). The short version:
 apps/
   hub/                 launcher SPA (login → library → launch a game)
 services/
-  auth/                JWT login + SSO handoff (Postgres or in-memory accounts)
+  auth/                JWT login + SSO handoff + Telegram linking (Postgres or in-memory accounts)
   social/              Socket.io friends/presence/invites (Postgres or in-memory)
+  chat/                Socket.io direct messages (Postgres or in-memory)
   orchestrator/        Docker compose wake/reap per game
 packages/
-  protocol/            zod wire schemas (auth, social, invite, envelope, errors)
+  protocol/            zod wire schemas (auth, social, chat, invite, envelope, errors)
   sdk/                 @mygame/sdk — embeddable client + overlay
   auth-core/           JWT sign/verify (HS256)
   platform-db/         shared Postgres pool + migrations + write-behind queue
@@ -85,25 +88,35 @@ corepack pnpm build
 corepack pnpm test
 ```
 
-Run the platform backend + hub in dev:
+Run the platform backend + hub in dev. Prefer starting each service individually via `--filter`
+(some `turbo run` invocations trip a pnpm-version guard when packages have changed — see below):
 
 ```sh
-corepack pnpm dev:back     # auth (8081) + social (8083) + orchestrator (8090)
-corepack pnpm --filter @mygame/hub dev   # hub on Vite (5173)
+corepack pnpm --filter @mygame/auth dev          # :8081
+corepack pnpm --filter @mygame/social dev        # :8083
+corepack pnpm --filter @mygame/chat dev          # :8084
+corepack pnpm --filter @mygame/orchestrator dev  # :8090
+corepack pnpm --filter @mygame/hub dev           # hub on Vite (5173)
 ```
 
-The hub talks to `auth` on `:8081` and `social` on `:8083` in dev (see `packages/sdk/src/config.ts`);
-in production it talks to the same origin behind the gateway.
+(`corepack pnpm dev:back` runs all four backend services together via Turborepo if your environment
+doesn't hit the pnpm-version guard.)
+
+The hub talks to `auth`/`social`/`chat` on `:8081`/`:8083`/`:8084` in dev (see
+`packages/sdk/src/config.ts`); in production it talks to the same origin behind the gateway.
 
 For **durable** dev data, start Postgres and point the services at it:
 
 ```sh
 corepack pnpm infra:up                                  # Postgres on :5432 (civa/civa/civa)
-DATABASE_URL=postgres://civa:civa@localhost:5432/civa corepack pnpm dev:back
+DATABASE_URL=postgres://civa:civa@localhost:5432/civa corepack pnpm --filter @mygame/auth dev
+DATABASE_URL=postgres://civa:civa@localhost:5432/civa corepack pnpm --filter @mygame/social dev
+DATABASE_URL=postgres://civa:civa@localhost:5432/civa corepack pnpm --filter @mygame/chat dev
 ```
 
 Without `DATABASE_URL` the services run in-memory (data lost on restart). `dev:standalone` is always
-in-memory by design.
+in-memory by design. Telegram linking additionally needs `TELEGRAM_BOT_TOKEN` set on `auth` (see
+`docs/SERVER.md`).
 
 ## Isolation contract
 

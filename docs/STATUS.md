@@ -32,7 +32,9 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 | Friends persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/social/src/pgStore.ts`): the friendship graph survives restart. Falls back to in-memory (warning) when unset / in `standalone`. |
 | Invite codes | ✅ | Real: mint a code, resolve via `GET /invite/:code`, push an invite to a friend's socket. Postgres-backed when `DATABASE_URL` is set (`pgInvites.ts`), 1h TTL; in-memory fallback otherwise. |
 | Invite **links** (deep-link join) | ❌ | Codes exist; the `?invite=CODE` / `?join=` deep-link auto-join flow is not implemented end-to-end (see `ROADMAP-PLATFORM.md`). |
-| Chat / messenger | ❌ | Fully mock. `sdk/src/state/chatStore.ts` ships `MOCK_SESSIONS`; messages live only in browser state. No chat service, no sockets for chat. |
+| Chat / DMs (1:1) | ✅ | Real backend: `services/chat` (Socket.io + JWT, mirrors `social`). Send/receive, persisted history, unread counts, read receipts. Postgres-backed when `DATABASE_URL` is set, in-memory fallback otherwise. |
+| Group chat | ❌ | Not modelled yet — DMs only for now (see `docs/PLAN.md`). The old mock's one hardcoded group session is gone; `ChatSession.type` keeps a `'group'` variant reserved for later. |
+| Chat reactions / edit / delete | ❌ | Dropped from the real backend for v1 scope. Message context-menu actions (reply/edit/delete) are still `alert(...)`. |
 | Voice / video calls | ❌ | UI only (`ChatWidget.tsx`, marked `CALL VIEW MOCK`). No LiveKit/WebRTC wired. |
 | Achievements | ❌ | Hardcoded `ACHIEVEMENTS` array (`ProfileView.tsx`). The account store has an `achievements` field + `addAchievement`, but it's never called or exposed via API. "5 из 50", showcase, titles are fake. |
 | Profile avatar / wallpaper / title | 🟡 | Changed locally (`URL.createObjectURL` + `useState`); **not uploaded, not persisted** — gone on reload. |
@@ -65,8 +67,12 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 
 1. ✅ **Persistence (Postgres adapters)** — done (`auth` + `social`, gated on `DATABASE_URL`).
 2. ✅ **Telegram linking + login** — done (real bot, gated on `TELEGRAM_BOT_TOKEN`).
-3. ⏳ **Chat backend** — a real messaging service (DMs first, then groups). *Next.*
-4. **Achievements API** — expose the store that already exists; emit from games via the SDK.
+3. ✅ **Chat backend (DMs)** — done (`services/chat`, Postgres-backed, gated on `DATABASE_URL`). Groups still pending.
+4. ⏳ **Achievements API** — expose the store that already exists; emit from games via the SDK. *Next.*
 5. **Profile (avatar/title) persistence + upload.**
 6. **Invite deep-links + notification center.**
 7. **VK linking** (deferred by request).
+8. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/chat work: it still
+   filters on the old `@civa/auth` package name (now `@mygame/auth`), has no `social`/`chat`/Postgres
+   containers, and the gateway has no route for either socket service (would collide with the game
+   lobby's `/socket.io/*`). Not yet blocking local dev; blocking before a real server deploy.
