@@ -7,7 +7,7 @@ import type { social } from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
 import { loadSession, login as authLogin, clearSession, getHandoff, type Session } from './authClient.js';
 import { useSocialStore } from './state/socialStore.js';
-import { useChatStore } from './state/chatStore.js';
+import { useChatStore, type ChatSession } from './state/chatStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
 import { useToastStore, type ToastData } from './state/toastStore.js';
 import { Emitter } from './emitter.js';
@@ -70,9 +70,21 @@ class MygameClient {
   };
 
   readonly chat = {
+    /** Toggle the chat window (the SDK-shipped widget — see `ChatWidget`). */
     open: (): void => useChatStore.getState().toggleChat(),
+    /** Find-or-create a DM with `userId` and open it. */
     openWithUser: (userId: string, userName: string): void =>
       useChatStore.getState().openChatWithUser(userId, userName),
+    /** Create a group (I'm added automatically) and open it. */
+    createGroup: (name: string, memberIds: string[]): void => useChatStore.getState().createGroup(name, memberIds),
+    /** Send into an already-open conversation (dm or group) by its id. */
+    send: (conversationId: string, text: string): void => useChatStore.getState().sendMessage(conversationId, text),
+    /** All of my conversations (DMs + groups), newest activity first. */
+    getThreads: (): ChatSession[] => useChatStore.getState().sessions,
+    getUnreadCount: (): number =>
+      useChatStore.getState().sessions.reduce((n, s) => n + (s.unreadCount ?? 0), 0),
+    /** Subscribe to chat-store changes (new messages, thread updates); returns an unsubscribe. */
+    subscribe: (cb: () => void): (() => void) => useChatStore.subscribe(cb),
   };
 
   readonly ui = {

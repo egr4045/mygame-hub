@@ -10,11 +10,10 @@ import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
 import { ContextMenu } from '@mygame/sdk';
-import { ChatWidget } from '../components/ChatWidget.js';
+import { ChatWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
-import { useChatStore } from '@mygame/sdk';
 
 export const HubScreen = (): JSX.Element => {
   const selectGame = usePlatformStore((s) => s.selectGame);
@@ -22,8 +21,7 @@ export const HubScreen = (): JSX.Element => {
   const me = useSocialStore((s) => s.me);
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
-  const toggleChat = useChatStore((s) => s.toggleChat);
-  
+
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -178,12 +176,7 @@ export const HubScreen = (): JSX.Element => {
 
       {/* DEMO BUTTONS */}
       <div style={{ position: 'fixed', bottom: 16, left: 16, display: 'flex', gap: 8, zIndex: 100 }}>
-        <button 
-          onClick={() => toggleChat()}
-          style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
-          💬 Мессенджер
-        </button>
-        <button 
+        <button
           onClick={() => addToast({ type: 'message', title: 'Новое сообщение', content: 'S1mple: Пойдем катать?', icon: '💬' })}
           style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
           🔔 Тест: Сообщение

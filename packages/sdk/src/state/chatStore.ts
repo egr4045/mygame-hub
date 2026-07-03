@@ -1,9 +1,9 @@
 /**
- * Chat store — direct messages, backed by the `chat` service (mirrors `socialStore`'s shape: connect
- * with the stored account, render whatever the server pushes). DMs only for now (see docs/PLAN.md —
- * group chat is a later step); a thread has no id of its own, so a session's `id` is simply the other
- * account's id. Login lives in `platformStore`/`authClient`; here we take the stored account, refresh
- * its token and connect.
+ * Chat store — direct messages and groups, backed by the `chat` service (mirrors `socialStore`'s
+ * shape: connect with the stored account, render whatever the server pushes). A session's `id` is
+ * the conversation id (real, server-minted — DMs are found-or-created via `openDm`, groups via
+ * `createGroup`). Login lives in `platformStore`/`authClient`; here we take the stored account,
+ * refresh its token and connect.
  */
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
@@ -16,8 +16,11 @@ export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 export interface ChatMessage {
   id: string;
   senderId: string;
+  senderName: string;
   text: string;
   timestamp: string;
+  createdAt: number;
+  /** Only ever set for dm messages *I* sent — groups don't show per-message read receipts (v1). */
   status?: 'sent' | 'read';
   /** Not implemented server-side yet — always undefined for real messages. */
   reactions?: Record<string, number>;
@@ -25,13 +28,14 @@ export interface ChatMessage {
 
 export interface ChatSession {
   id: string;
-  /** Always 'dm' for now — group chat is a later step (docs/PLAN.md). */
   type: 'dm' | 'group';
   name: string;
   participants: string[];
   messages: ChatMessage[];
   avatar?: string;
   unreadCount?: number;
+  /** Internal: dm only, drives read-receipt recomputation on every thread push. */
+  otherReadAt?: number | null;
 }
 
 interface ChatState {
@@ -46,7 +50,10 @@ interface ChatState {
   disconnect: () => void;
   toggleChat: () => void;
   openChat: (chatId: string) => void;
+  /** Find-or-create a DM with `userId` and open it. */
   openChatWithUser: (userId: string, userName: string) => void;
+  /** Create a group with `memberIds` (I'm added automatically) and open it. */
+  createGroup: (name: string, memberIds: string[]) => void;
   /** `_senderId` is accepted for call-site compatibility but ignored — the server derives it from the JWT. */
   sendMessage: (chatId: string, text: string, _senderId?: string) => void;
 }
@@ -56,27 +63,54 @@ let meId: string | null = null;
 
 const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-const toUiMessage = (m: chat.ChatMessage): ChatMessage => ({
+const EMPTY_HISTORY_PLACEHOLDER: ChatMessage[] = [
+  { id: 'sys-empty', senderId: 'system', senderName: 'system', text: 'История сообщений пуста', timestamp: '', createdAt: 0 },
+];
+
+/** `otherReadAt` only ever applies to dm — groups never render per-message read receipts (v1). */
+const toUiMessage = (m: chat.ChatMessage, type: 'dm' | 'group', otherReadAt: number | null): ChatMessage => ({
   id: m.id,
   senderId: m.senderId,
+  senderName: m.senderName,
   text: m.text,
   timestamp: formatTime(m.createdAt),
-  ...(m.senderId === meId ? { status: (m.readAt ? ('read' as const) : ('sent' as const)) } : {}),
+  createdAt: m.createdAt,
+  ...(type === 'dm' && m.senderId === meId
+    ? { status: otherReadAt !== null && m.createdAt <= otherReadAt ? ('read' as const) : ('sent' as const) }
+    : {}),
 });
 
-/** Merge a pushed thread list into existing sessions, keeping any already-loaded message history. */
+/** Re-derive every dm message's read status against the latest known `otherReadAt`. Exact (uses the
+ *  message's own raw `createdAt`), so this is safe to call on every thread/read push, in any order. */
+const applyOtherReadAt = (messages: ChatMessage[], otherReadAt: number | null): ChatMessage[] =>
+  messages.map((m) =>
+    m.senderId === meId && m.id !== 'sys-empty'
+      ? { ...m, status: otherReadAt !== null && m.createdAt <= otherReadAt ? 'read' : 'sent' }
+      : m,
+  );
+
+/** Merge a pushed thread list into existing sessions, re-deriving dm read status from `otherReadAt`. */
 const mergeThreads = (sessions: ChatSession[], threads: chat.ChatThread[]): ChatSession[] => {
   const byId = new Map(sessions.map((s) => [s.id, s]));
   for (const t of threads) {
-    const existing = byId.get(t.accountId);
-    byId.set(t.accountId, {
-      id: t.accountId,
-      type: 'dm',
-      name: t.displayName,
-      participants: meId ? [meId, t.accountId] : [t.accountId],
+    const existing = byId.get(t.conversationId);
+    const hasLoaded = existing?.messages && existing.messages.length > 0 && existing.messages[0]!.id !== 'sys-empty';
+    const messages = hasLoaded
+      ? t.type === 'dm'
+        ? applyOtherReadAt(existing!.messages, t.otherReadAt)
+        : existing!.messages
+      : t.lastMessage
+        ? [toUiMessage(t.lastMessage, t.type, t.otherReadAt)]
+        : [];
+    byId.set(t.conversationId, {
+      id: t.conversationId,
+      type: t.type,
+      name: t.name,
+      participants: t.participantIds,
       ...(existing?.avatar !== undefined ? { avatar: existing.avatar } : {}),
-      messages: existing?.messages ?? (t.lastMessage ? [toUiMessage(t.lastMessage)] : []),
+      messages,
       unreadCount: t.unreadCount,
+      otherReadAt: t.otherReadAt,
     });
   }
   return [...byId.values()];
@@ -119,24 +153,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
 
     socket.on(chat.S2C.message, (p: chat.MessageEvent) => {
-      const otherId = p.message.senderId === meId ? p.message.recipientId : p.message.senderId;
-      const uiMsg = toUiMessage(p.message);
       set((s) => {
-        const idx = s.sessions.findIndex((sess) => sess.id === otherId);
+        const idx = s.sessions.findIndex((sess) => sess.id === p.message.conversationId);
         if (idx === -1) {
+          // Rare race: the message arrived before the thread it belongs to. The threads push that
+          // always follows corrects name/type/otherReadAt.
           const fresh: ChatSession = {
-            id: otherId,
+            id: p.message.conversationId,
             type: 'dm',
-            name: otherId.slice(0, 8),
-            participants: meId ? [meId, otherId] : [otherId],
-            messages: [uiMsg],
+            name: p.message.senderName,
+            participants: meId ? [meId, p.message.senderId] : [p.message.senderId],
+            messages: [toUiMessage(p.message, 'dm', null)],
           };
           return { sessions: [...s.sessions, fresh] };
         }
         const sess = s.sessions[idx]!;
-        if (sess.messages.some((m) => m.id === uiMsg.id)) return s; // already applied (e.g. own echo)
+        if (sess.messages.some((m) => m.id === p.message.id)) return s; // already applied (e.g. own echo)
+        const uiMsg = toUiMessage(p.message, sess.type, sess.otherReadAt ?? null);
+        const withoutPlaceholder = sess.messages.filter((m) => m.id !== 'sys-empty');
         const sessions = [...s.sessions];
-        sessions[idx] = { ...sess, messages: [...sess.messages, uiMsg] };
+        sessions[idx] = { ...sess, messages: [...withoutPlaceholder, uiMsg] };
         return { sessions };
       });
     });
@@ -144,8 +180,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket.on(chat.S2C.read, (p: chat.ReadEvent) =>
       set((s) => ({
         sessions: s.sessions.map((sess) =>
-          sess.id === p.byAccountId
-            ? { ...sess, messages: sess.messages.map((m) => (m.senderId === meId ? { ...m, status: 'read' } : m)) }
+          sess.id === p.conversationId
+            ? { ...sess, otherReadAt: p.upTo, messages: applyOtherReadAt(sess.messages, p.upTo) }
             : sess,
         ),
       })),
@@ -165,31 +201,62 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   openChat: (chatId) => {
     set({ isOpen: true, activeChatId: chatId });
-    socket?.emit(chat.C2S.getHistory, { withAccountId: chatId, limit: 100 }, (p: chat.HistoryAck) =>
+    socket?.emit(chat.C2S.getHistory, { conversationId: chatId, limit: 100 }, (p: chat.HistoryAck) =>
       set((s) => ({
-        sessions: s.sessions.map((sess) => (sess.id === chatId ? { ...sess, messages: p.messages.map(toUiMessage) } : sess)),
+        sessions: s.sessions.map((sess) => {
+          if (sess.id !== chatId) return sess;
+          const otherReadAt = sess.otherReadAt ?? null;
+          const messages =
+            p.messages.length > 0 ? p.messages.map((m) => toUiMessage(m, sess.type, otherReadAt)) : EMPTY_HISTORY_PLACEHOLDER;
+          return { ...sess, messages };
+        }),
       })),
     );
-    socket?.emit(chat.C2S.markRead, { withAccountId: chatId });
+    socket?.emit(chat.C2S.markRead, { conversationId: chatId });
   },
 
   openChatWithUser: (userId, userName) => {
-    if (get().sessions.some((s) => s.id === userId)) {
-      get().openChat(userId);
+    const existing = get().sessions.find((s) => s.type === 'dm' && s.participants.includes(userId));
+    if (existing) {
+      get().openChat(existing.id);
       return;
     }
-    const placeholder: ChatSession = {
-      id: userId,
-      type: 'dm',
-      name: userName,
-      participants: meId ? [meId, userId] : [userId],
-      messages: [{ id: 'sys1', senderId: 'system', text: 'История сообщений пуста', timestamp: '' }],
-    };
-    set((s) => ({ sessions: [...s.sessions, placeholder], isOpen: true, activeChatId: userId }));
+    if (!socket?.connected) return;
+    set({ isOpen: true });
+    socket.emit(chat.C2S.openDm, { withAccountId: userId }, (ack: chat.OpenDmAck) => {
+      if (!ack?.conversationId) {
+        set({ error: ack?.error ?? 'failed to open chat' });
+        return;
+      }
+      const conversationId = ack.conversationId;
+      set((s) => {
+        if (s.sessions.some((sess) => sess.id === conversationId)) return s;
+        const placeholder: ChatSession = {
+          id: conversationId,
+          type: 'dm',
+          name: userName,
+          participants: meId ? [meId, userId] : [userId],
+          messages: EMPTY_HISTORY_PLACEHOLDER,
+        };
+        return { sessions: [...s.sessions, placeholder] };
+      });
+      get().openChat(conversationId);
+    });
+  },
+
+  createGroup: (name, memberIds) => {
+    if (!socket?.connected || !name.trim() || memberIds.length === 0) return;
+    socket.emit(chat.C2S.createGroup, { name: name.trim(), memberIds }, (ack: chat.CreateGroupAck) => {
+      if (!ack?.conversationId) {
+        set({ error: ack?.error ?? 'failed to create group' });
+        return;
+      }
+      get().openChat(ack.conversationId);
+    });
   },
 
   sendMessage: (chatId, text) => {
-    socket?.emit(chat.C2S.send, { toAccountId: chatId, text }, (ack: chat.SendAck) => {
+    socket?.emit(chat.C2S.send, { conversationId: chatId, text }, (ack: chat.SendAck) => {
       if (ack?.error) set({ error: ack.error });
     });
   },

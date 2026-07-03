@@ -1,5 +1,5 @@
 /**
- * @mygame/platform-db — shared Postgres plumbing for the platform services (auth, social).
+ * @mygame/platform-db — shared Postgres plumbing for the platform services (auth, social, chat).
  *
  * It provides only infrastructure: a connection pool, the platform schema migration, and an ordered
  * write queue. The concrete store adapters (account / social / invite) live in each service next to
@@ -58,17 +58,32 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     );
     CREATE INDEX IF NOT EXISTS invites_expires_at_idx ON invites (expires_at);
 
-    -- Direct messages between two accounts (no group chat yet — see docs/PLAN.md).
-    CREATE TABLE IF NOT EXISTS messages (
+    -- Chat: a conversation is either a 2-member 'dm' or a named 'group' (fixed membership for now —
+    -- no add/remove member yet, see docs/PLAN.md). Membership carries per-member read state, so a
+    -- message has no per-recipient row to update — "read" is "created_at <= my last_read_at".
+    CREATE TABLE IF NOT EXISTS conversations (
       id            TEXT PRIMARY KEY,
-      sender_id     TEXT NOT NULL,
-      recipient_id  TEXT NOT NULL,
-      text          TEXT NOT NULL,
-      created_at    BIGINT NOT NULL,
-      read_at       BIGINT
+      type          TEXT NOT NULL, -- 'dm' | 'group'
+      name          TEXT,          -- set for groups; null for dm (name is derived client-side)
+      created_at    BIGINT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (sender_id, recipient_id, created_at);
-    CREATE INDEX IF NOT EXISTS messages_thread_idx_rev ON messages (recipient_id, sender_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS conversation_members (
+      conversation_id  TEXT NOT NULL,
+      account_id       TEXT NOT NULL,
+      last_read_at     BIGINT NOT NULL,
+      PRIMARY KEY (conversation_id, account_id)
+    );
+    CREATE INDEX IF NOT EXISTS conversation_members_account_idx ON conversation_members (account_id);
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id               TEXT PRIMARY KEY,
+      conversation_id  TEXT NOT NULL,
+      sender_id        TEXT NOT NULL,
+      text             TEXT NOT NULL,
+      created_at       BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at);
   `);
 };
 

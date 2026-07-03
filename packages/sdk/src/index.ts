@@ -10,6 +10,7 @@ export * from './state/menuStore.js';
 
 export * from './components/ToastContainer.js';
 export * from './components/ContextMenu.js';
+export { ChatWidget } from './components/ChatWidget.js';
 export { MygameOverlay } from './components/MygameOverlay.js';
 export * from './overlay/mount.js';
 

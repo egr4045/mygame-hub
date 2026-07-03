@@ -1,9 +1,9 @@
 /**
  * Chat transport: a Socket.io server that authenticates each socket with the platform JWT and binds
- * it to the player's **account** (mirrors `services/social/src/server.ts`). Direct messages only —
- * no group chat yet. On any change to a thread, the affected account gets a fresh full thread list
- * (same "push the full view" model social uses); a new message is also pushed immediately so an open
- * chat window updates without waiting for the next thread-list push.
+ * it to the player's **account** (mirrors `services/social/src/server.ts`). Handles both DMs and
+ * groups through the unified `Conversation` concept. On any change to a conversation, every
+ * participant's thread list is refreshed (same "push the full view" model social uses); a new message
+ * is also pushed immediately so an open chat window updates without waiting for the next push.
  */
 import { createServer, type Server as HttpServer } from 'node:http';
 import { Server as IOServer, type Socket } from 'socket.io';
@@ -78,6 +78,10 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     for (const id of sockets) io.to(id).emit(event, payload);
   };
 
+  const emitToEveryone = (accountIds: string[], event: string, payload: unknown): void => {
+    for (const id of accountIds) emitTo(id, event, payload);
+  };
+
   const emitThreads = (accountId: string): void => {
     if (!socketsOf.get(accountId)?.size) return;
     const payload: chat.ThreadsEvent = { threads: deps.store.threads(accountId) };
@@ -107,37 +111,63 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       }
     };
 
+    socket.on(chat.C2S.openDm, (raw, ack?: (res: chat.OpenDmAck) => void) =>
+      guard(() => {
+        const { withAccountId } = parse(chat.openDmPayload, raw);
+        if (withAccountId === accountId) throw new ContractError('validation', 'cannot DM yourself');
+        const conv = deps.store.openDm(accountId, withAccountId);
+        if (typeof ack === 'function') ack({ conversationId: conv.id });
+        emitThreads(accountId);
+        emitThreads(withAccountId);
+      }),
+    );
+
+    socket.on(chat.C2S.createGroup, (raw, ack?: (res: chat.CreateGroupAck) => void) =>
+      guard(() => {
+        const { name, memberIds } = parse(chat.createGroupPayload, raw);
+        const conv = deps.store.createGroup(accountId, name, memberIds);
+        if (typeof ack === 'function') ack({ conversationId: conv.id });
+        for (const p of conv.participantIds) emitThreads(p);
+      }),
+    );
+
     socket.on(chat.C2S.send, (raw, ack?: (res: chat.SendAck) => void) =>
       guard(() => {
-        const { toAccountId, text } = parse(chat.sendPayload, raw);
-        if (toAccountId === accountId) throw new ContractError('validation', 'cannot message yourself');
-        const message = deps.store.send(accountId, toAccountId, text);
+        const { conversationId, text } = parse(chat.sendPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const message = deps.store.send(conversationId, accountId, text);
+        if (!message) throw new ContractError('internal', 'send failed');
         const payload: chat.MessageEvent = { message };
         if (typeof ack === 'function') ack({ message });
-        emitTo(accountId, chat.S2C.message, payload);
-        emitTo(toAccountId, chat.S2C.message, payload);
-        emitThreads(accountId);
-        emitThreads(toAccountId);
+        const participants = deps.store.participantsOf(conversationId);
+        emitToEveryone(participants, chat.S2C.message, payload);
+        for (const p of participants) emitThreads(p);
       }),
     );
 
     socket.on(chat.C2S.markRead, (raw) =>
       guard(() => {
-        const { withAccountId } = parse(chat.markReadPayload, raw);
-        const result = deps.store.markRead(accountId, withAccountId);
+        const { conversationId } = parse(chat.markReadPayload, raw);
+        const result = deps.store.markRead(conversationId, accountId);
         if (result) {
           emitThreads(accountId);
-          const payload: chat.ReadEvent = { byAccountId: accountId, upTo: result.upTo };
-          emitTo(withAccountId, chat.S2C.read, payload);
+          const payload: chat.ReadEvent = { conversationId, byAccountId: accountId, upTo: result.upTo };
+          const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+          emitToEveryone(others, chat.S2C.read, payload);
         }
       }),
     );
 
     socket.on(chat.C2S.getHistory, (raw, ack?: (res: chat.HistoryAck) => void) =>
       guard(() => {
-        const { withAccountId, limit } = parse(chat.getHistoryPayload, raw);
-        const messages = deps.store.history(accountId, withAccountId, limit ?? 100);
-        if (typeof ack === 'function') ack({ withAccountId, messages });
+        const { conversationId, limit } = parse(chat.getHistoryPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const messages = deps.store.history(conversationId, limit ?? 100);
+        if (typeof ack === 'function') ack({ conversationId, messages });
       }),
     );
 

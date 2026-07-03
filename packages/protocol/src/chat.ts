@@ -1,69 +1,93 @@
 import { z } from 'zod';
 
 /**
- * Chat contract (Socket.io) — direct messages between two accounts. Group chat is not modelled yet
- * (see docs/PLAN.md — DMs first). A thread has no id of its own: since it's always exactly two
- * accounts, the *other* account's id identifies the thread from either side's point of view.
+ * Chat contract (Socket.io) — direct messages *and* group conversations, unified as a single
+ * `Conversation` concept (a DM is just a 2-member conversation with `type: 'dm'`). A DM's
+ * conversation is found-or-created via `openDm` (deterministic per account pair — calling it twice
+ * for the same two accounts returns the same conversation); a group is created explicitly with a name
+ * and an initial member list (fixed for v1 — no add/remove member yet, see docs/PLAN.md).
  */
+
+export const conversationType = z.enum(['dm', 'group']);
+export type ConversationType = z.infer<typeof conversationType>;
 
 export const chatMessage = z.object({
   id: z.string(),
+  conversationId: z.string(),
   senderId: z.string(),
-  recipientId: z.string(),
+  senderName: z.string(),
   text: z.string(),
   createdAt: z.number(), // epoch ms
-  readAt: z.number().nullable(),
 });
 export type ChatMessage = z.infer<typeof chatMessage>;
 
-/** One DM thread as `accountId` should see it: the other party + a preview + unread count. */
+/** One conversation as `accountId` should see it: resolved display name + a preview + unread count. */
 export const chatThread = z.object({
-  accountId: z.string(),
-  displayName: z.string(),
+  conversationId: z.string(),
+  type: conversationType,
+  /** The other participant's display name (dm) or the group's name. */
+  name: z.string(),
+  participantIds: z.array(z.string()),
   lastMessage: chatMessage.nullable(),
   unreadCount: z.number(),
+  /** dm only: the other participant's last-read timestamp, so the client can render read receipts
+   *  (`createdAt <= otherReadAt` = read) without a per-message read flag. Null for groups. */
+  otherReadAt: z.number().nullable(),
 });
 export type ChatThread = z.infer<typeof chatThread>;
 
 // --- Client -> Server events -------------------------------------------------
 export const C2S = {
+  openDm: 'chat.openDm', // find-or-create the DM conversation with another account
+  createGroup: 'chat.createGroup',
   send: 'chat.send',
-  markRead: 'chat.markRead', // mark all messages from `withAccountId` as read
+  markRead: 'chat.markRead',
   getHistory: 'chat.getHistory',
   getState: 'chat.getState', // re-request the full thread list (reconnect)
 } as const;
 
-export const sendPayload = z.object({ toAccountId: z.string().min(1), text: z.string().min(1).max(2000) });
-export const markReadPayload = z.object({ withAccountId: z.string().min(1) });
+export const openDmPayload = z.object({ withAccountId: z.string().min(1) });
+export const createGroupPayload = z.object({
+  name: z.string().min(1).max(64),
+  /** Other members to include; the creator is added automatically. */
+  memberIds: z.array(z.string().min(1)).min(1),
+});
+export const sendPayload = z.object({ conversationId: z.string().min(1), text: z.string().min(1).max(2000) });
+export const markReadPayload = z.object({ conversationId: z.string().min(1) });
 export const getHistoryPayload = z.object({
-  withAccountId: z.string().min(1),
+  conversationId: z.string().min(1),
   limit: z.number().int().positive().max(200).optional(),
 });
 export const getStatePayload = z.object({}).strict();
 
+export type OpenDmPayload = z.infer<typeof openDmPayload>;
+export type CreateGroupPayload = z.infer<typeof createGroupPayload>;
 export type SendPayload = z.infer<typeof sendPayload>;
 export type MarkReadPayload = z.infer<typeof markReadPayload>;
 export type GetHistoryPayload = z.infer<typeof getHistoryPayload>;
 
-/** Ack returned to the sender of `chat.send`. */
+/** Acks returned to the caller of the corresponding C2S event. */
+export const openDmAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
+export const createGroupAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
 export const sendAck = z.object({ message: chatMessage.optional(), error: z.string().optional() });
-export type SendAck = z.infer<typeof sendAck>;
+export const historyAck = z.object({ conversationId: z.string(), messages: z.array(chatMessage) });
 
-/** Ack returned for `chat.getHistory`. */
-export const historyAck = z.object({ withAccountId: z.string(), messages: z.array(chatMessage) });
+export type OpenDmAck = z.infer<typeof openDmAck>;
+export type CreateGroupAck = z.infer<typeof createGroupAck>;
+export type SendAck = z.infer<typeof sendAck>;
 export type HistoryAck = z.infer<typeof historyAck>;
 
 // --- Server -> Client events -------------------------------------------------
 export const S2C = {
   threads: 'chat.threads', // full thread list (pushed on connect + whenever it changes)
-  message: 'chat.message', // a new message, pushed to both the sender's other sockets and the recipient
-  read: 'chat.read', // the other party read our messages up to `upTo`
+  message: 'chat.message', // a new message, pushed to every participant of the conversation
+  read: 'chat.read', // someone read up to `upTo` in a conversation
   error: 'chat.error',
 } as const;
 
 export const threadsEvent = z.object({ threads: z.array(chatThread) });
 export const messageEvent = z.object({ message: chatMessage });
-export const readEvent = z.object({ byAccountId: z.string(), upTo: z.number() });
+export const readEvent = z.object({ conversationId: z.string(), byAccountId: z.string(), upTo: z.number() });
 
 export type ThreadsEvent = z.infer<typeof threadsEvent>;
 export type MessageEvent = z.infer<typeof messageEvent>;
