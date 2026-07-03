@@ -15,11 +15,12 @@ See **`docs/STATUS.md`** for the authoritative, audited feature-by-feature break
 in-memory vs. UI-only mock). The short version:
 
 - ✅ **Real, with a backend:** account login (JWT), cross-game SSO handoff, Telegram account
-  linking/login (real bot), friends graph + live presence/activity, invite codes, direct messages
-  (1:1 chat, persisted, read receipts), on-demand game launch (Docker orchestrator), **Postgres
-  persistence** for accounts/friends/invites/messages (gated on `DATABASE_URL`).
+  linking/login (real bot), friends graph + live presence/activity, invite codes, chat (DMs **and**
+  groups, persisted, read receipts), on-demand game launch (Docker orchestrator), **Postgres
+  persistence** for accounts/friends/invites/conversations (gated on `DATABASE_URL`). The chat UI ships
+  as part of `@mygame/sdk` — any game embedding the SDK gets it for free.
 - 🟡 **Partial:** persistence falls back to in-memory when `DATABASE_URL` is unset; login is
-  passwordless (the password field is ignored); chat is DMs only (no groups yet).
+  passwordless (the password field is ignored); groups have no add/remove-member yet.
 - ❌ **UI-only mock (no backend):** voice/video calls, achievements, game store pages
   (changelog/forum/lobby browser), playtime stats, VK linking (deferred by request).
 
@@ -29,10 +30,13 @@ in-memory vs. UI-only mock). The short version:
 - **Platform services:** Node.js + TypeScript, dependency-injected ports & adapters (`services/*`):
   - `auth` — passwordless login, JWT access/refresh, short-lived SSO handoff tokens, Telegram linking.
   - `social` — Socket.io friends + presence + invites.
-  - `chat` — Socket.io direct messages (1:1), persisted history + read receipts.
+  - `chat` — Socket.io direct messages + groups, persisted history + read receipts.
   - `orchestrator` — wakes/reaps per-game Docker stacks on player entry/idle.
-- **SDK:** `@mygame/sdk` — the framework-agnostic client a game embeds (`mygame.init()`), plus a
-  self-mounting Shadow-DOM overlay (friends, chat, toasts, context menu).
+- **SDK:** `@mygame/sdk` — the framework-agnostic client a game embeds (`mygame.init()`), built to be
+  usable by third-party games (dual ESM/CJS + a global IIFE, React as a peer dep). Ships a
+  self-mounting Shadow-DOM overlay with a working **chat widget** (DMs + groups), toasts and a context
+  menu — a game gets a real messenger with zero UI code. Friends UI isn't extracted into the SDK yet
+  (data only, via `mygame.social.*`); see `docs/STATUS.md`.
 - **Contract:** `@mygame/protocol` — zod schemas for every platform message (the isolation boundary).
 - **Monorepo:** pnpm workspaces + Turborepo.
 
@@ -44,7 +48,7 @@ apps/
 services/
   auth/                JWT login + SSO handoff + Telegram linking (Postgres or in-memory accounts)
   social/              Socket.io friends/presence/invites (Postgres or in-memory)
-  chat/                Socket.io direct messages (Postgres or in-memory)
+  chat/                Socket.io DMs + groups (Postgres or in-memory)
   orchestrator/        Docker compose wake/reap per game
 packages/
   protocol/            zod wire schemas (auth, social, chat, invite, envelope, errors)

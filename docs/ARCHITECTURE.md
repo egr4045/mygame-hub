@@ -15,9 +15,9 @@ main data flows. For *what works vs. what's mocked* see `STATUS.md`.
                     ▼           ▼                ▼           ▼
              ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
              │ auth     │ │ social   │ │ chat     │ │ orchestrator │
-             │ JWT login│ │ friends +│ │ direct   │ │ docker       │
-             │ + handoff│ │ presence │ │ messages │ │ compose      │
-             │ + telegram│ │ + invites│ │ (DMs)   │ │ per game     │
+             │ JWT login│ │ friends +│ │ dm +     │ │ docker       │
+             │ + handoff│ │ presence │ │ group    │ │ compose      │
+             │ + telegram│ │ + invites│ │ messages│ │ per game     │
              └──────────┘ └──────────┘ └──────────┘ └──────┬───────┘
                     ▲                                       │ docker
                     │ verifies platform JWT                 ▼
@@ -82,23 +82,32 @@ Socket.io server layering live presence over a durable friendship graph.
 
 ### chat (`services/chat`) — port 8084
 
-Socket.io server for **direct messages** (1:1 only — no group chat yet, see `PLAN.md`). Mirrors
-`social`'s shape closely: same JWT handshake auth (`io.use`), same "push the full view on any change"
-model, same in-memory-then-Postgres adapter split.
+Socket.io server for **direct messages and groups**, unified as a single `Conversation` concept (a DM
+is just a 2-member conversation). Mirrors `social`'s shape closely: same JWT handshake auth
+(`io.use`), same "push the full view on any change" model, same in-memory-then-Postgres adapter split.
 
-- **Threads have no id of their own** — since a DM is always exactly two accounts, the *other*
-  account's id identifies the thread from either side (`ChatThread.accountId`).
-- **Store (`store.ts`):** messages bucketed by the sorted account pair; `threads(accountId)` derives
-  the last message + unread count per thread; `markRead` flips `readAt` on the recipient's unread
-  messages and returns the timestamp to notify the sender.
-- **C2S/S2C events:** see `protocol/src/chat.ts` (`send`, `markRead`, `getHistory`, `getState` /
-  `threads`, `message`, `read`, `error`). `send` and `getHistory` reply via ack; `message`/`threads`/
-  `read` are pushed.
-- **Read receipts:** simplified to `sent` | `read` (no `delivered` state). A message is "read" once
-  the recipient's client calls `markRead` (the hub does this on `openChat`).
-- **Known v1 simplifications** (see `STATUS.md`): no group chat, no reactions, no typing indicators,
-  history is capped (last 100) with no pagination, DMs aren't restricted to friends (any known
-  accountId can message any other — same trust model as friend codes).
+- **A DM is found-or-created, deterministically, per account pair** via `openDm(a, b)` (calling it
+  twice for the same two accounts always returns the same conversation). A **group** is created
+  explicitly via `createGroup(creator, name, memberIds)` — membership is fixed at creation (no
+  add/remove/leave yet, see `PLAN.md`).
+- **Store (`store.ts`):** `conversations` + a `dmIndex` (sorted account pair → conversation id) +
+  messages bucketed by conversation. `threads(accountId)` derives, per conversation, the last message,
+  unread count, and (dm only) the other participant's `otherReadAt`.
+- **Read state is per-member, not per-message** (`lastReadAt` in `conversation_members`) — this is
+  what lets the model scale to N-member groups without a combinatorial "read by whom" state per
+  message. New members start at `lastReadAt = 0` ("read nothing"), not `now()` — a message landing in
+  the same tick as the conversation's creation must still count as unread.
+- **C2S/S2C events:** see `protocol/src/chat.ts` (`openDm`, `createGroup`, `send`, `markRead`,
+  `getHistory`, `getState` / `threads`, `message`, `read`, `error`). Mutating calls reply via ack;
+  `message`/`threads`/`read` are pushed to every participant of the affected conversation.
+- **Read receipts:** simplified to `sent` | `read`, **dm only** (no `delivered` state, and groups don't
+  render per-message read state — `ChatThread.otherReadAt` is `null` for groups). A dm message is
+  "read" once `otherReadAt >= message.createdAt`; the client recomputes this on every `chat.threads`/
+  `chat.read` push using the message's raw timestamp (not the formatted display string).
+- **Known v1 simplifications** (see `STATUS.md`): no group membership changes (add/remove/leave), no
+  reactions, no typing indicators, history is capped (last 100) with no pagination, messaging isn't
+  restricted to friends (any known accountId can be DMed or added to a group — same trust model as
+  friend codes).
 
 ### orchestrator (`services/orchestrator`) — port 8090
 
@@ -116,11 +125,19 @@ Wakes a game when a player enters and reaps it when idle, so empty games burn no
 
 ## SDK (`packages/sdk` → `@mygame/sdk`)
 
-The framework-agnostic client a game embeds, plus the overlay the hub also uses.
+The framework-agnostic client a game embeds, plus the overlay the hub also uses. Built with the
+explicit goal of being usable by third-party games (and eventually open-sourced): dual ESM/CJS build
+plus a global IIFE (`window.mygame`) for non-bundler consumers, React as a peer dependency, and a
+self-mounting Shadow-DOM overlay so the platform UI works on top of any host page's CSS.
 
 - **`client.ts`** — the `mygame` singleton. `mygame.init(gameId, { hubUrl })` configures endpoints,
-  mounts the overlay, and opens the social **and** chat connections. Sub-APIs: `auth`, `social`,
-  `chat`, `ui`.
+  mounts the overlay, and opens the social **and** chat connections. Sub-APIs:
+  - `auth` — session, tokens, handoff.
+  - `social` — friends/presence (`getFriends`, `addByCode`, `setActivity`, `subscribe`).
+  - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `send`, `getThreads`,
+    `getUnreadCount`, `subscribe`. A game can either just call `open()`/`openWithUser()` and rely on
+    the SDK-shipped `ChatWidget`, or build its own UI entirely on this data.
+  - `ui` — context menu, toasts.
 - **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084`; prod → same origin; a game
   points it at the hub via `mygame.init(id, { hubUrl })`.
 - **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
@@ -128,7 +145,15 @@ The framework-agnostic client a game embeds, plus the overlay the hub also uses.
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
   `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
-  `MygameOverlay` (toasts, context menu) so a game gets the platform UI without importing React itself.
+  `MygameOverlay` (toasts, context menu, **`ChatWidget`**) so a game gets the platform UI — including a
+  working messenger — without writing any of its own. The host is click-through
+  (`pointer-events: none`); every interactive component explicitly re-enables `pointerEvents: 'auto'`
+  on its own root.
+- **`ChatWidget`** (`components/ChatWidget.tsx`) is the one platform widget that ships with the SDK
+  today (moved out of the hub in the same pass that added groups). It renders as a small launcher
+  button with an unread badge when closed, and the full draggable/resizable messenger (DM + group
+  list, create-group form, message view) when open. `FriendsWidget`/`FriendsSidebar` have **not** been
+  extracted yet — still hub-only (see `STATUS.md`).
 - Built with `tsup` (`tsup.config.ts`) for external consumption.
 
 ## Hub (`apps/hub`)
@@ -140,9 +165,12 @@ Steam-style library/launcher). State:
 - **`platform/games.ts`** — the front-end game registry; `externalPort` marks a game that is its own
   SPA (selecting it wakes it via the orchestrator, then navigates with a handoff token).
 - Social/chat/menu/toast come from `@mygame/sdk` stores (single source shared with embedded games).
+  `ChatWidget` is likewise imported straight from `@mygame/sdk` (not a local hub component) —
+  `HubScreen` renders it directly in its own tree, `MygameOverlay` renders the *same* component for
+  embedded games via the Shadow-DOM mount. One component, two mounting paths.
 
-The hub still renders the overlay components itself inside `HubScreen` (the SDK self-mount overlay is
-for embedded games).
+The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget` itself inside `HubScreen` rather than
+using the SDK's self-mount overlay (that mounting path is for embedded games).
 
 ## Contract (`packages/protocol` → `@mygame/protocol`)
 
@@ -170,10 +198,14 @@ Socket.io connection with `auth.token`, and renders whatever `social.friends` th
 **Invite a friend.** `inviteFriend` → server checks friendship, mints a code, pushes
 `social.invite` to the friend's sockets. Or `createInvite` → ack returns a code to share as a link.
 
-**Send a DM.** `chatStore.sendMessage` → `chat.send` (ack) → server persists + pushes `chat.message`
-to both the sender's other sockets and the recipient, and a refreshed `chat.threads` to both. Opening
-a thread (`openChat`) fetches `chat.getHistory` and fires `chat.markRead`, which flips `readAt` and
-pushes `chat.read` back to the sender so their checkmarks update.
+**Start a DM / group.** `openChatWithUser` → `chat.openDm` (ack returns the conversation id,
+found-or-created) → `openChat`. `createGroup` → `chat.createGroup` (ack) → `openChat`.
+
+**Send a message.** `chatStore.sendMessage(conversationId, text)` → `chat.send` (ack) → server
+persists + pushes `chat.message` to every participant (sender included, for multi-device echo), and a
+refreshed `chat.threads` to each. Opening a conversation (`openChat`) fetches `chat.getHistory` and
+fires `chat.markRead`, which advances the reader's `lastReadAt` and pushes `chat.read` to the other
+participants so a dm sender's checkmarks update.
 
 **Launch a game.** `handlePlay` → `enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort)
 → `getHandoff()` → navigate to `http://host:PORT/?pt=<handoff>`. The game exchanges the token at its
@@ -182,9 +214,14 @@ own `/auth/platform` and federates the identity.
 ## Persistence
 
 `@mygame/platform-db` provides the shared Postgres plumbing: `createPool`, `runMigrations` (the
-platform schema — `accounts`, `friendships`, `invites`, `messages`), and a `WriteQueue`. Each service
-has its own adapter next to its port (`auth/src/pgStore.ts`, `social/src/pgStore.ts` +
-`social/src/pgInvites.ts`, `chat/src/pgStore.ts`).
+platform schema — `accounts`, `friendships`, `invites`, `conversations`, `conversation_members`,
+`messages`), and a `WriteQueue`. Each service has its own adapter next to its port
+(`auth/src/pgStore.ts`, `social/src/pgStore.ts` + `social/src/pgInvites.ts`, `chat/src/pgStore.ts`).
+
+> The `messages` table's shape changed (DM-only `sender/recipient/read_at` → `conversation_id`-based)
+> when groups landed. This repo has no real production data yet, so the migration is additive-only
+> (no `ALTER`) — anyone with an old local dev Postgres volume from testing DM-only chat should run
+> `corepack pnpm infra:reset` before testing groups.
 
 **Write-behind model.** The in-memory store stays authoritative for **reads** (the hot
 friends/presence/chat path is synchronous and fast). Every **write** also goes to Postgres through the
