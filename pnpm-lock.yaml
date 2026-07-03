@@ -223,6 +223,46 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.21)
 
+  services/chat:
+    dependencies:
+      '@mygame/auth-core':
+        specifier: workspace:*
+        version: link:../../packages/auth-core
+      '@mygame/platform-db':
+        specifier: workspace:*
+        version: link:../../packages/platform-db
+      '@mygame/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@mygame/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      socket.io:
+        specifier: ^4.8.1
+        version: 4.8.3
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@mygame/test-harness':
+        specifier: workspace:*
+        version: link:../../packages/test-harness
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.21
+      socket.io-client:
+        specifier: ^4.8.1
+        version: 4.8.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.21)
+
   services/orchestrator:
     dependencies:
       '@mygame/shared-types':

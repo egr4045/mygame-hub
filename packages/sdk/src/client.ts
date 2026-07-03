@@ -37,6 +37,7 @@ class MygameClient {
       this.started = true;
       mountOverlay();
       void this.social.connect();
+      void useChatStore.getState().connect();
     }
     this.emitter.emit('ready', { gameId });
   }
@@ -52,6 +53,7 @@ class MygameClient {
     logout: (): void => {
       clearSession();
       useSocialStore.getState().disconnect();
+      useChatStore.getState().disconnect();
     },
     getHandoff: (): Promise<string | null> => getHandoff(),
   };

@@ -13,6 +13,7 @@ export * from './errors.js';
 export * from './auth.js';
 export * from './invite.js';
 export * as social from './social.js';
+export * as chat from './chat.js';
 
 /**
  * A single typed message: a `type` discriminator string plus a zod schema for its payload.

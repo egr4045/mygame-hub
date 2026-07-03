@@ -209,7 +209,7 @@ export const ChatWidget = (): JSX.Element | null => {
                       }
                       
                       const showReadReceipt = isMe && m.status;
-                      const checkmarks = m.status === 'read' ? '✔✔' : (m.status === 'delivered' ? '✔✔' : '✔');
+                      const checkmarks = m.status === 'read' ? '✔✔' : '✔';
                       const checkColor = m.status === 'read' ? '#54a5d4' : '#8f98a0';
 
                       return (

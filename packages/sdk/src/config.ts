@@ -15,18 +15,21 @@ const env = meta.env ?? {};
 export interface PlatformConfig {
   authUrl: string;
   socialUrl: string;
+  chatUrl: string;
 }
 
 export const config: PlatformConfig = {
   authUrl: env.VITE_AUTH_URL ?? (env.DEV ? 'http://localhost:8081' : sameOrigin),
   socialUrl: env.VITE_SOCIAL_URL ?? (env.DEV ? 'http://localhost:8083' : sameOrigin),
+  chatUrl: env.VITE_CHAT_URL ?? (env.DEV ? 'http://localhost:8084' : sameOrigin),
 };
 
 export interface ConfigureOptions {
-  /** Base URL of the hub; sets both auth and social unless one is overridden below. */
+  /** Base URL of the hub; sets auth, social and chat unless one is overridden below. */
   hubUrl?: string;
   authUrl?: string;
   socialUrl?: string;
+  chatUrl?: string;
 }
 
 /** Point the SDK at a hub. Called by `mygame.init`; safe to call again to re-point. */
@@ -34,9 +37,11 @@ export const configure = (opts: ConfigureOptions): void => {
   if (opts.hubUrl !== undefined) {
     config.authUrl = opts.hubUrl;
     config.socialUrl = opts.hubUrl;
+    config.chatUrl = opts.hubUrl;
   }
   if (opts.authUrl !== undefined) config.authUrl = opts.authUrl;
   if (opts.socialUrl !== undefined) config.socialUrl = opts.socialUrl;
+  if (opts.chatUrl !== undefined) config.chatUrl = opts.chatUrl;
 };
 
 /** @deprecated read `config.authUrl` — kept for same-origin hub call sites that snapshot at import. */

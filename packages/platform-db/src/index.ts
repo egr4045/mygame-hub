@@ -57,6 +57,18 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       expires_at    BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS invites_expires_at_idx ON invites (expires_at);
+
+    -- Direct messages between two accounts (no group chat yet — see docs/PLAN.md).
+    CREATE TABLE IF NOT EXISTS messages (
+      id            TEXT PRIMARY KEY,
+      sender_id     TEXT NOT NULL,
+      recipient_id  TEXT NOT NULL,
+      text          TEXT NOT NULL,
+      created_at    BIGINT NOT NULL,
+      read_at       BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (sender_id, recipient_id, created_at);
+    CREATE INDEX IF NOT EXISTS messages_thread_idx_rev ON messages (recipient_id, sender_id, created_at);
   `);
 };
 

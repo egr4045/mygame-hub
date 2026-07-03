@@ -23,8 +23,9 @@
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
     "dev:auth": "pnpm --filter @mygame/auth dev",
     "dev:social": "pnpm --filter @mygame/social dev",
+    "dev:chat": "pnpm --filter @mygame/chat dev",
     "dev:orchestrator": "pnpm --filter @mygame/orchestrator dev",
-    "dev:back": "turbo run dev --filter=@mygame/auth --filter=@mygame/social --filter=@mygame/orchestrator"
+    "dev:back": "turbo run dev --filter=@mygame/auth --filter=@mygame/social --filter=@mygame/chat --filter=@mygame/orchestrator"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
