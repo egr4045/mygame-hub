@@ -12,10 +12,10 @@
 
 ## Summary
 
-The **social skeleton** of the platform (identity + friends + launcher) is real and working. Almost
-all the *content surface* around it (Steam-style store pages, messenger, achievements, profile) is
-designed UI on hardcoded data. **Nothing is persisted** — every store is in-memory, including in the
-"production" service entries.
+The **social skeleton** of the platform (identity + friends + launcher + chat + achievements +
+profile) is real, working, and Postgres-persisted. What's left mostly-mock is the Steam-style *store
+content* around it (changelog, forum, lobby browser, playtime stats) and a few unimplemented pieces
+(voice/video calls, VK linking, invite deep-links).
 
 ## Features
 
@@ -38,8 +38,8 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 | Group membership management | ❌ | v1 scope: create a group with a fixed member list only. No add/remove/leave-member yet (see `docs/PLAN.md`). |
 | Chat reactions / edit / delete / typing indicators | ❌ | Dropped from the real backend for v1 scope. Message context-menu actions (reply/edit/delete) are still `alert(...)`. |
 | Voice / video calls | ❌ | UI only (`ChatWidget.tsx`, marked `CALL VIEW MOCK`). No LiveKit/WebRTC wired. |
-| Achievements | 🟡 | Real API: `POST/GET /auth/achievements` on `services/auth` (idempotent grant, scoped per `gameId`+`achievementId`, persisted via the account store). `mygame.achievements.grant/list` in the SDK; a genuinely new unlock fires a toast automatically. **But** the display catalog (name/description/icon per achievement) is still a hardcoded local array in `ProfileView.tsx` — the platform only knows *that* an id is unlocked, not how to describe it (inherently a per-game concern; see `ARCHITECTURE.md`). Title-badge selection is still cosmetic/local-only, not persisted. |
-| Profile avatar / wallpaper / title | 🟡 | Changed locally (`URL.createObjectURL` + `useState`); **not uploaded, not persisted** — gone on reload. |
+| Achievements | 🟡 | Real API: `POST/GET /auth/achievements` on `services/auth` (idempotent grant, scoped per `gameId`+`achievementId`, persisted via the account store). `mygame.achievements.grant/list` in the SDK; a genuinely new unlock fires a toast automatically. **But** the display catalog (name/description/icon per achievement) is still a hardcoded local array in `ProfileView.tsx` — the platform only knows *that* an id is unlocked, not how to describe it (inherently a per-game concern; see `ARCHITECTURE.md`). |
+| Profile avatar / wallpaper / title | ✅ | Real: `PUT/GET /auth/profile/{avatar,wallpaper,title}` on `services/auth`, persisted on the account row as data URLs (no object storage exists — see `ARCHITECTURE.md` for the size cap and why). Title must reference an achievement the account actually has unlocked (server validates). `mygame.profile.*` in the SDK. Survives reload/restart (Postgres-backed like the rest of the account). |
 | Notifications (toasts) | 🟡 | Toast mechanism is real, but triggered by **demo buttons**. The notification center (🔔) is mock ("Нет новых уведомлений"). |
 | Game library | ✅ | Real static registry (`apps/hub/src/platform/games.ts`), mirrors the orchestrator manifest. |
 | Game launch / orchestrator | ✅ | `services/orchestrator` really runs `docker compose up/stop`, wakes a game on entry, reaps it on idle (reaper polls each game's `/metrics`). Hub calls `POST /orchestrator/games/:id/enter`. |
@@ -84,8 +84,9 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
    see `ARCHITECTURE.md`.
 5. ✅ **Friends widget in the SDK** — done (`FriendsWidget`/`FriendsSidebar` moved into
    `packages/sdk`, rendered by `MygameOverlay`).
-6. **Profile (avatar/title) persistence + upload.** *Next candidate.*
-7. **Invite deep-links + notification center.**
+6. ✅ **Profile persistence + upload** — done (avatar/wallpaper as data URLs, title achievement
+   server-validated, `mygame.profile.*` in the SDK).
+7. ⏳ **Invite deep-links + notification center.** *Next candidate.*
 8. **VK linking** (deferred by request).
 9. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/`chat` work: it still
    filters on the old `@civa/auth` package name (now `@mygame/auth`), has no `social`/`chat`/Postgres

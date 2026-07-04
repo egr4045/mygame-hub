@@ -62,26 +62,36 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   either way. Found `SteamOverlay.tsx` (a Shift+Tab overlay) imports `FriendsSidebar` but is itself
   dead — never rendered by `HubScreen`; left as-is (only repointed its import) since removing/wiring
   it wasn't this pass's job.
+- **Phase 8 — Profile persistence + uploads.** Avatar/wallpaper stored as data URLs directly on the
+  account row (no object storage service exists — see `ARCHITECTURE.md` for the size-cap tradeoff and
+  the migration path if that changes later); title achievement server-validated against the account's
+  own unlocked achievements. Routes: `PUT/GET /auth/profile/*`. `mygame.profile.*` in the SDK. First
+  real use of `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in this schema (`accounts` already had real
+  rows, unlike the earlier `messages` redesign) — the template for evolving a table with data worth
+  keeping. `readJson` gained a streaming `maxBytes` guard (413 before full buffering) since these two
+  routes take meaningfully larger bodies than the rest of the API.
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
-   DB), surfaced across games via the social `me` payload.
-2. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+1. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
    (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
-3. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
+2. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
    a fixed member list).
-4. **VK account linking.** Mirror the Telegram flow (deferred by request).
-5. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+3. **VK account linking.** Mirror the Telegram flow (deferred by request).
+4. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
-6. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
+5. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
    `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
    service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
    lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
-7. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
+6. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
    Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
+7. **Surface avatar/title to friends, not just yourself.** Today `social`'s `Friend`/`me` payloads only
+   carry `accountId`/`displayName` — extending them to include avatar/title would mean the social
+   service reading account profile fields it doesn't have today (it keeps its own minimal
+   `{id, displayName}` cache). A real but distinctly separate feature from "persist my own profile".
 
 ## Verification
 

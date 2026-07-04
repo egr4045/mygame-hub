@@ -55,6 +55,13 @@ Passwordless identity provider. Routes (`app.ts`):
   idempotent grant (`granted: false` if already held).
 - `GET /auth/achievements` (Bearer access) → `{ achievements: Achievement[] }` — every game's unlocked
   achievements for the caller.
+- `PUT /auth/profile/avatar` / `PUT /auth/profile/wallpaper` (Bearer access) `{ dataUrl }` → sets the
+  image (a data URL); the read side of these two routes has a raised body-size cap (4MB raw bytes,
+  independent of the general 200KB default — see below).
+- `PUT /auth/profile/title` (Bearer access) `{ titleAchievement: { gameId, achievementId } | null }` —
+  sets (or `null` clears) the cross-game "title" badge. Rejected (400) if the account doesn't actually
+  hold that achievement.
+- `GET /auth/profile` (Bearer access) → `{ avatarIcon, wallpaper, titleAchievement }` (all nullable).
 - `GET /health`, `GET /ready`.
 
 JWTs are HS256 via `@mygame/auth-core` (`signAccess` 15m, `signRefresh` 30d, `signHandoff` 120s,
@@ -74,6 +81,20 @@ per-game/client presentation concern (see the SDK section). Trust model: the cal
 token authorizes the grant, same as chat DMs not being restricted to friends — a game's client can
 self-report an unlock that wasn't strictly earned; a game that cares should grant from its own trusted
 backend instead of its client.
+
+**Profile (avatar/wallpaper/title).** Images are stored as **data URLs directly on the account row**
+(`accounts.avatar_icon` / `.wallpaper`, both `TEXT`) rather than in an object-storage service — none
+exists in this stack (`infra/docker-compose.yml` has Postgres/Redis/LiveKit only), and adding one
+(MinIO/S3 + a client dependency + a new env var + upload plumbing) is disproportionate to "let people
+set an avatar" at this project's scale (single small server, `docs/SERVER.md`). The tradeoff: `readJson`
+defaults to a 200KB body cap (comfortably covers every other route's tiny payloads), and the two
+profile-image routes explicitly raise it to 4MB raw bytes; the `dataUrl` field itself is capped at
+2.5M characters (~1.8MB decoded) by the zod schema. A request over the raw-byte cap is rejected
+(413) *while streaming* (`readJson`'s `maxBytes` param), before the full body is ever buffered — a
+request under that cap but over the zod string-length cap gets a clean 400 instead. If this needs to
+scale past prototype usage, swapping in real object storage is a clean, well-scoped follow-up (same
+shape as the "deploy reconciliation" follow-up already tracked) — nothing else would need to change,
+since the client already treats the avatar/wallpaper values as opaque URLs.
 
 ### social (`services/social`) — port 8083
 
@@ -151,16 +172,20 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
     `getUnreadCount`, `subscribe`. A game can either just call `open()`/`openWithUser()` and rely on
     the SDK-shipped `ChatWidget`, or build its own UI entirely on this data.
   - `achievements` — `grant(achievementId)` (scoped to `this.gameId` from `init()`; fires a toast on a
-    genuinely new unlock, silent on a re-grant) and `list()` (every game's unlocked achievements). The
-    plain `grantAchievement(gameId, achievementId)` / `getAchievements()` functions (`authClient.ts`)
-    are also exported directly for a caller that hasn't gone through `mygame.init()` — the hub uses
-    those, since it doesn't call `init()` itself (see "Hub" below).
+    genuinely new unlock, silent on a re-grant) and `list()` (every game's unlocked achievements).
+  - `profile` — `get()`, `setAvatar(dataUrl)`, `setWallpaper(dataUrl)`, `setTitle(ref | null)`. `ref`
+    is validated server-side against the account's own unlocked achievements.
   - `ui` — context menu, toasts.
+  The plain functions behind `achievements`/`profile` (`grantAchievement`, `getAchievements`,
+  `getProfile`, `setAvatar`, `setWallpaper`, `setTitleAchievement` — `authClient.ts`) are also exported
+  directly for a caller that hasn't gone through `mygame.init()` — the hub uses those, since it doesn't
+  call `init()` itself (see "Hub" below).
 - **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084`; prod → same origin; a game
   points it at the hub via `mygame.init(id, { hubUrl })`.
 - **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
-  plus Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`) and
-  achievement helpers (`grantAchievement`, `getAchievements`).
+  Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`), achievement
+  helpers (`grantAchievement`, `getAchievements`), and profile helpers (`getProfile`, `setAvatar`,
+  `setWallpaper`, `setTitleAchievement`).
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
   `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
@@ -252,9 +277,13 @@ platform schema — `accounts`, `friendships`, `invites`, `conversations`, `conv
 (`auth/src/pgStore.ts`, `social/src/pgStore.ts` + `social/src/pgInvites.ts`, `chat/src/pgStore.ts`).
 
 > The `messages` table's shape changed (DM-only `sender/recipient/read_at` → `conversation_id`-based)
-> when groups landed. This repo has no real production data yet, so the migration is additive-only
-> (no `ALTER`) — anyone with an old local dev Postgres volume from testing DM-only chat should run
-> `corepack pnpm infra:reset` before testing groups.
+> when groups landed. That happened before this repo had real production data, so it was a plain
+> additive `CREATE TABLE` (no `ALTER`) — anyone with an old local dev Postgres volume from testing
+> DM-only chat should run `corepack pnpm infra:reset` before testing groups. By contrast, the
+> `accounts` table already held real data by the time profile customization was added, so *that*
+> migration genuinely uses `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (`wallpaper`, `title_achievement`)
+> — the first real use of ALTER in this schema, and the template for any future evolution of a table
+> that already has rows worth keeping.
 
 **Write-behind model.** The in-memory store stays authoritative for **reads** (the hot
 friends/presence/chat path is synchronous and fast). Every **write** also goes to Postgres through the
