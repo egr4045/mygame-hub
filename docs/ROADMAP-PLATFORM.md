@@ -3,23 +3,30 @@
 Beyond the per-game engines, the platform itself (launcher + lobby + orchestrator) has its own
 roadmap. Top of the list:
 
-## Invite links (no codes to type) — partially done
+## Invite links (no codes to type) — platform side done
 
 Goal: share a link, the friend lands straight in your room. No "enter this 6-digit code".
 
 **Done:** the `social` service mints opaque invite codes (`createInvite` / `inviteFriend`), resolves
-them publicly via `GET /invite/:code`, and pushes invites into a friend's presence channel. The hub
-has `resolveInvite(code)` for `?invite=CODE` deep links.
+them publicly via `GET /invite/:code`, and pushes invites into a friend's presence channel. The
+launcher auto-joins: on load, `App.tsx` reads `?invite=<code>` and — once logged in (prompting login
+first if needed) — resolves it and calls `routeToInvite` (wake the game via the orchestrator, mint a
+handoff token, navigate to `?pt=<handoff>&join=<room>`). A friend's pushed invite and a shared link
+both land in the same place (the 🔔 notification center) and both resolve through the same
+`routeToInvite` call.
 
 **Still to do:**
 
-- Launcher auto-join: on load, if `?invite=<code>` / `?join=<code>` is present → after login,
-  auto-`enter` the game and auto-join that room (skip the room list). Works for not-yet-logged-in
-  users (login then join) and a cold game (orchestrator wakes it first). Today the code resolves but
-  the auto-join flow isn't wired end-to-end.
-- Per-game lobby must accept a join by the resolved room/role (the platform side is ready).
-- Nice-to-haves: room **QR code** next to the link; invite **max-uses** (TTL exists, 1h); "copy link"
-  button in the room view; deep-link straight into a specific game (`?game=civa&invite=…`).
+- **Sending** an invite from a real in-game moment. Nothing in this repo calls `createInvite`/
+  `inviteFriend` today except a hub demo button — the actual trigger belongs in the game itself (its
+  lobby/room UI), which needs `mygame.social.*` to expose those methods first (today they only exist
+  on the React `useSocialStore` hook).
+- Per-game lobby must accept a join by the resolved room/role — that's on each game (CIVA's lobby is
+  outside this repo); the platform side (resolving the code, carrying `room`/`role` to the game's URL)
+  is ready.
+- Nice-to-haves: room **QR code** next to the link; invite **max-uses** (TTL exists, 1h); deep-link
+  straight into a specific game (`?game=civa&invite=…`, useful once more than one game is launchable
+  from the same origin).
 
 ## Cool, convenient lobby features (proposed)
 

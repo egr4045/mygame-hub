@@ -31,7 +31,7 @@ content* around it (changelog, forum, lobby browser, playtime stats) and a few u
 | Presence (online/offline/in-game) | ✅ | Computed from live socket connections; activity is pushed to friends. |
 | Friends persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/social/src/pgStore.ts`): the friendship graph survives restart. Falls back to in-memory (warning) when unset / in `standalone`. |
 | Invite codes | ✅ | Real: mint a code, resolve via `GET /invite/:code`, push an invite to a friend's socket. Postgres-backed when `DATABASE_URL` is set (`pgInvites.ts`), 1h TTL; in-memory fallback otherwise. |
-| Invite **links** (deep-link join) | ❌ | Codes exist; the `?invite=CODE` / `?join=` deep-link auto-join flow is not implemented end-to-end (see `ROADMAP-PLATFORM.md`). |
+| Invite **links** (deep-link join) | ✅ | `App.tsx` reads `?invite=CODE` on load, resolves it (`resolveInvite`), and — once logged in — auto-wakes the game, mints a handoff token, and navigates (`routeToInvite`). Works whether the code came from a link someone shared or a push notification. **Creating** a shareable link/pushing one to a friend has no dedicated UI yet — `createInvite`/`inviteFriend` are only exercised via a demo button and the (still-mock) "invite to game" friend-menu item; see `ARCHITECTURE.md`. |
 | Chat: DMs + groups | ✅ | Real backend: `services/chat` (Socket.io + JWT, mirrors `social`). Unified `Conversation` model (dm = 2-member conversation, group = named + fixed member list). Send/receive, persisted history, unread counts, read receipts (dm only). Postgres-backed when `DATABASE_URL` is set, in-memory fallback otherwise. |
 | Chat widget ships with `@mygame/sdk` | ✅ | The chat UI (`ChatWidget`) lives in `packages/sdk/src/components/`, not the hub — it's rendered by the SDK's self-mounting overlay (`mountOverlay()` → `MygameOverlay`), so **any game embedding the SDK gets a working chat window + launcher button automatically**, no UI code required. The hub renders the same component directly (not through the overlay). `mygame.chat.*` also exposes a full imperative API (`createGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`) for a game that wants to build its own UI on the data instead. |
 | Friends widget ships with `@mygame/sdk` | ✅ | `FriendsWidget`/`FriendsSidebar` moved from the hub into `packages/sdk/src/components/` and render from `MygameOverlay` too — same treatment as chat. "Invite to current game" lost its (already-mock, hub-only) disabled-state gating in the move — see `ARCHITECTURE.md`. |
@@ -40,7 +40,8 @@ content* around it (changelog, forum, lobby browser, playtime stats) and a few u
 | Voice / video calls | ❌ | UI only (`ChatWidget.tsx`, marked `CALL VIEW MOCK`). No LiveKit/WebRTC wired. |
 | Achievements | 🟡 | Real API: `POST/GET /auth/achievements` on `services/auth` (idempotent grant, scoped per `gameId`+`achievementId`, persisted via the account store). `mygame.achievements.grant/list` in the SDK; a genuinely new unlock fires a toast automatically. **But** the display catalog (name/description/icon per achievement) is still a hardcoded local array in `ProfileView.tsx` — the platform only knows *that* an id is unlocked, not how to describe it (inherently a per-game concern; see `ARCHITECTURE.md`). |
 | Profile avatar / wallpaper / title | ✅ | Real: `PUT/GET /auth/profile/{avatar,wallpaper,title}` on `services/auth`, persisted on the account row as data URLs (no object storage exists — see `ARCHITECTURE.md` for the size cap and why). Title must reference an achievement the account actually has unlocked (server validates). `mygame.profile.*` in the SDK. Survives reload/restart (Postgres-backed like the rest of the account). |
-| Notifications (toasts) | 🟡 | Toast mechanism is real, but triggered by **demo buttons**. The notification center (🔔) is mock ("Нет новых уведомлений"). |
+| Notifications (toasts) | 🟡 | Toast mechanism is real. `mygame.achievements.grant()` fires one automatically on a genuinely new unlock (real, for any SDK consumer) — but the hub's own achievement/message demo buttons trigger it manually rather than from a real chat/achievement event reaching the hub. |
+| Notification center (🔔) | ✅ | Real: shows incoming friend requests (click = accept) and pushed game invites (click = join, via `routeToInvite`) with a live count badge. Falls back to "Нет новых уведомлений" when both are empty. "Настройки уведомлений" is still `alert(...)`. |
 | Game library | ✅ | Real static registry (`apps/hub/src/platform/games.ts`), mirrors the orchestrator manifest. |
 | Game launch / orchestrator | ✅ | `services/orchestrator` really runs `docker compose up/stop`, wakes a game on entry, reaps it on idle (reaper polls each game's `/metrics`). Hub calls `POST /orchestrator/games/:id/enter`. |
 | Game page: changelog | ❌ | Hardcoded ("Патч 1.0.3", dates). |
@@ -86,10 +87,16 @@ content* around it (changelog, forum, lobby browser, playtime stats) and a few u
    `packages/sdk`, rendered by `MygameOverlay`).
 6. ✅ **Profile persistence + upload** — done (avatar/wallpaper as data URLs, title achievement
    server-validated, `mygame.profile.*` in the SDK).
-7. ⏳ **Invite deep-links + notification center.** *Next candidate.*
-8. **VK linking** (deferred by request).
-9. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/`chat` work: it still
-   filters on the old `@civa/auth` package name (now `@mygame/auth`), has no `social`/`chat`/Postgres
-   containers, and the gateway has no route for either socket service (would collide with the game
-   lobby's `/socket.io/*`). Not yet blocking local dev; blocking before a real server deploy. (Flagged
-   as a follow-up task.)
+7. ✅ **Invite deep-links + notification center** — done (`?invite=CODE` auto-join, real 🔔 center for
+   friend requests + game invites). *Creating/sending* an invite from a real in-game moment has no UI
+   yet — see the next item.
+8. ⏳ **Wire a real "invite friend to my game" action.** The hub can't do this itself (it doesn't
+   track which room you're in once you've navigated into a game's own origin) — this needs the SDK's
+   imperative `mygame.social.*` to grow `createInvite`/`inviteFriend`, and the actual game (CIVA, not
+   in this repo) to call them from its own lobby/room UI. *Next candidate.*
+9. **VK linking** (deferred by request).
+10. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/`chat` work: it still
+    filters on the old `@civa/auth` package name (now `@mygame/auth`), has no `social`/`chat`/Postgres
+    containers, and the gateway has no route for either socket service (would collide with the game
+    lobby's `/socket.io/*`). Not yet blocking local dev; blocking before a real server deploy. (Flagged
+    as a follow-up task.)

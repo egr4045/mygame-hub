@@ -70,13 +70,22 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   rows, unlike the earlier `messages` redesign) — the template for evolving a table with data worth
   keeping. `readJson` gained a streaming `maxBytes` guard (413 before full buffering) since these two
   routes take meaningfully larger bodies than the rest of the API.
+- **Phase 9 — Invite deep-links + notification center.** `App.tsx` reads `?invite=CODE` on load and
+  auto-joins once logged in (`resolveInvite` → `routeToInvite`: wake the game, mint a handoff token,
+  navigate) — the same `routeToInvite` a pushed invite already used. The 🔔 center now renders real
+  incoming friend requests (click = accept) and pushed game invites (click = join) with a live count
+  badge, replacing the static "no notifications" mock. Added a demo button to actually mint a shareable
+  invite link (`createInvite`), since the *receiving* side had nothing to test against otherwise.
+  **Sending** an invite from inside an actual game session is still not wired — see "Next".
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
-   (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
+1. **Wire a real "invite friend to my game" action.** The hub can't do this itself — it stops
+   tracking your session once you navigate into a game's own origin. Needs `mygame.social.*` to grow
+   `createInvite`/`inviteFriend` (currently only on the React `useSocialStore` hook the hub uses
+   directly), and the actual game (CIVA, outside this repo) to call them from its lobby/room UI.
 2. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
    a fixed member list).
 3. **VK account linking.** Mirror the Telegram flow (deferred by request).

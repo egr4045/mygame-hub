@@ -255,6 +255,26 @@ Socket.io connection with `auth.token`, and renders whatever `social.friends` th
 
 **Invite a friend.** `inviteFriend` → server checks friendship, mints a code, pushes
 `social.invite` to the friend's sockets. Or `createInvite` → ack returns a code to share as a link.
+Both are only exercised from the hub today via a demo button — no real game calls them yet (see
+"Deep links" below).
+
+**Receive + join an invite (deep link or push).** A pushed `social.invite` lands in
+`socialStore.invites`; the hub's 🔔 notification center renders it (and pending friend requests)
+alongside a live count badge. Opening `<origin>/?invite=CODE` does the same thing without a socket:
+`App.tsx` reads the query param once on load, and — once there's an account (logging in first if
+needed) — resolves it via the unauthenticated `GET /invite/:code` (`resolveInvite`) and hands it to
+`routeToInvite` (`apps/hub/src/platform/inviteRouting.ts`): wake the game (orchestrator), mint a
+handoff token, navigate to `http://host:PORT/?pt=<handoff>&join=<room>`. Both paths — a friend's push
+and a shared link — converge on the same `routeToInvite` call, so they behave identically. The query
+param is stripped (`history.replaceState`) once consumed, whether or not resolution succeeded, so a
+page refresh doesn't retrigger it.
+
+> **Gap:** the *receiving* side (this flow) is real; the *sending* side has no real trigger yet.
+> `createInvite`/`inviteFriend` aren't exposed on `mygame.social.*` (the framework-agnostic API a game
+> would call), only on the React `useSocialStore` hook the hub uses directly — and the hub itself
+> can't meaningfully invite "to the current game" since it stops tracking your session the moment you
+> navigate into a game's own origin. Real "invite a friend to join me" has to be triggered by the game
+> itself, from its own lobby/room UI, once `mygame.social` grows those methods.
 
 **Start a DM / group.** `openChatWithUser` → `chat.openDm` (ack returns the conversation id,
 found-or-created) → `openChat`. `createGroup` → `chat.createGroup` (ack) → `openChat`.
