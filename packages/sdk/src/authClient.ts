@@ -7,8 +7,10 @@ import type {
   GrantAchievementResponse,
   HandoffResponse,
   LoginResponse,
+  ProfileResponse,
   TelegramLinkResponse,
   TelegramStatusResponse,
+  TitleAchievementRef,
 } from '@mygame/protocol';
 import { config } from './config.js';
 
@@ -137,6 +139,73 @@ export const getAchievements = async (): Promise<AchievementsResponse | null> =>
     return (await res.json()) as AchievementsResponse;
   } catch {
     return null;
+  }
+};
+
+/** The current account's profile customization (avatar/wallpaper/title). Null on failure. */
+export const getProfile = async (): Promise<ProfileResponse | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    return (await res.json()) as ProfileResponse;
+  } catch {
+    return null;
+  }
+};
+
+/** Set the profile avatar to a data URL (read the file with `FileReader.readAsDataURL`). Null on failure
+ *  (including if the server rejects an oversized image). */
+export const setAvatar = async (dataUrl: string): Promise<string | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/avatar`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ dataUrl }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { avatarIcon: string | null }).avatarIcon;
+  } catch {
+    return null;
+  }
+};
+
+/** Set the profile wallpaper to a data URL. Null on failure. */
+export const setWallpaper = async (dataUrl: string): Promise<string | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/wallpaper`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ dataUrl }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { wallpaper: string | null }).wallpaper;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Set (or clear, with `null`) the "title" badge shown across every game. The server rejects a
+ * reference to an achievement the account hasn't actually unlocked. Returns false on failure/reject.
+ */
+export const setTitleAchievement = async (ref: TitleAchievementRef): Promise<boolean> => {
+  const token = await freshAccessToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/title`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ titleAchievement: ref }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 };
 

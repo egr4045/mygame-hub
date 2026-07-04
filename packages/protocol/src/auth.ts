@@ -17,7 +17,6 @@ export const loginResponse = z.object({
   displayName: z.string(),
   accessToken: z.string(),
   refreshToken: z.string(),
-  avatarIcon: z.string().optional(),
 });
 export type LoginResponse = z.infer<typeof loginResponse>;
 
@@ -66,6 +65,36 @@ export const handoffResponse = z.object({
   displayName: z.string(),
 });
 export type HandoffResponse = z.infer<typeof handoffResponse>;
+
+/**
+ * Profile customization: avatar + wallpaper images and a "title" achievement badge shown across
+ * every game. Images are uploaded as data URLs and stored on the account row — no object storage
+ * service exists yet, so a size cap keeps this reasonable (see docs/ARCHITECTURE.md). `titleAchievement`
+ * references one of the account's own unlocked achievements (`gameId` + `achievementId`); the server
+ * rejects setting a title the account doesn't actually hold.
+ */
+const MAX_DATA_URL_CHARS = 2_500_000; // ~1.8MB decoded, comfortably covers a compressed avatar/wallpaper
+
+export const titleAchievementRef = z
+  .object({ gameId: z.string().min(1), achievementId: z.string().min(1) })
+  .nullable();
+export type TitleAchievementRef = z.infer<typeof titleAchievementRef>;
+
+export const setAvatarRequest = z.object({ dataUrl: z.string().min(1).max(MAX_DATA_URL_CHARS) });
+export type SetAvatarRequest = z.infer<typeof setAvatarRequest>;
+
+export const setWallpaperRequest = z.object({ dataUrl: z.string().min(1).max(MAX_DATA_URL_CHARS) });
+export type SetWallpaperRequest = z.infer<typeof setWallpaperRequest>;
+
+export const setTitleRequest = z.object({ titleAchievement: titleAchievementRef });
+export type SetTitleRequest = z.infer<typeof setTitleRequest>;
+
+export const profileResponse = z.object({
+  avatarIcon: z.string().nullable(),
+  wallpaper: z.string().nullable(),
+  titleAchievement: titleAchievementRef,
+});
+export type ProfileResponse = z.infer<typeof profileResponse>;
 
 /** Verified JWT claims. `sub` is the accountId. */
 export interface AuthClaims {

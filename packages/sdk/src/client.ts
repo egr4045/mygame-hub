@@ -3,7 +3,7 @@
  * No React: games (React, Vue, vanilla) call these methods and listen to events; the SDK renders the
  * overlay itself (Phase 2 step 2). The hub uses the React hooks instead (same underlying stores).
  */
-import type { social, Achievement } from '@mygame/protocol';
+import type { social, Achievement, ProfileResponse, TitleAchievementRef } from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
 import {
   loadSession,
@@ -12,6 +12,10 @@ import {
   getHandoff,
   grantAchievement,
   getAchievements,
+  getProfile,
+  setAvatar,
+  setWallpaper,
+  setTitleAchievement,
   type Session,
 } from './authClient.js';
 import { useSocialStore } from './state/socialStore.js';
@@ -115,6 +119,16 @@ class MygameClient {
     },
     /** The player's unlocked achievements across every game. Empty on failure/not logged in. */
     list: async (): Promise<Achievement[]> => (await getAchievements())?.achievements ?? [],
+  };
+
+  readonly profile = {
+    /** Avatar/wallpaper/title, shown across every game. Null on failure/not logged in. */
+    get: (): Promise<ProfileResponse | null> => getProfile(),
+    /** `dataUrl` from `FileReader.readAsDataURL(file)`. Null if rejected (e.g. too large). */
+    setAvatar: (dataUrl: string): Promise<string | null> => setAvatar(dataUrl),
+    setWallpaper: (dataUrl: string): Promise<string | null> => setWallpaper(dataUrl),
+    /** `null` clears it. Rejected if the account hasn't actually unlocked that achievement. */
+    setTitle: (ref: TitleAchievementRef): Promise<boolean> => setTitleAchievement(ref),
   };
 
   readonly ui = {

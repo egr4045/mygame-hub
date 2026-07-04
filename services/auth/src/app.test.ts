@@ -6,6 +6,7 @@ import type {
   AchievementsResponse,
   HandoffResponse,
   LoginResponse,
+  ProfileResponse,
   RefreshResponse,
 } from '@mygame/protocol';
 import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
@@ -43,6 +44,16 @@ const post = (base: string, path: string, body: unknown, token?: string) =>
 
 const get = (base: string, path: string, token?: string) =>
   fetch(base + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+
+const put = (base: string, path: string, body: unknown, token?: string) =>
+  fetch(base + path, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
 
 describe('auth service', () => {
   it('issues an account + tokens on login', async () => {
@@ -148,5 +159,77 @@ describe('auth service — achievements', () => {
     const { base } = await start();
     expect((await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'x' })).status).toBe(401);
     expect((await get(base, '/auth/achievements')).status).toBe(401);
+  });
+});
+
+describe('auth service — profile', () => {
+  it('defaults to an empty profile', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile).toEqual({ avatarIcon: null, wallpaper: null, titleAchievement: null });
+  });
+
+  it('sets and persists an avatar and a wallpaper', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+
+    const avatarRes = await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' }, login.accessToken);
+    expect(avatarRes.status).toBe(200);
+    const wallpaperRes = await put(base, '/auth/profile/wallpaper', { dataUrl: 'data:image/png;base64,BBB' }, login.accessToken);
+    expect(wallpaperRes.status).toBe(200);
+
+    const profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile).toMatchObject({
+      avatarIcon: 'data:image/png;base64,AAA',
+      wallpaper: 'data:image/png;base64,BBB',
+    });
+  });
+
+  it('rejects an oversized avatar payload', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const huge = 'A'.repeat(5_000_000); // over the 4MB raw-body cap for this route
+    const res = await put(base, '/auth/profile/avatar', { dataUrl: huge }, login.accessToken);
+    expect(res.status).toBe(413);
+  });
+
+  it('rejects a title referencing an achievement the account has not unlocked', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const res = await put(
+      base,
+      '/auth/profile/title',
+      { titleAchievement: { gameId: 'civa', achievementId: 'first_blood' } },
+      login.accessToken,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a title once the achievement is unlocked, and clears it with null', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
+
+    const setRes = await put(
+      base,
+      '/auth/profile/title',
+      { titleAchievement: { gameId: 'civa', achievementId: 'first_blood' } },
+      login.accessToken,
+    );
+    expect(setRes.status).toBe(200);
+    let profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile.titleAchievement).toEqual({ gameId: 'civa', achievementId: 'first_blood' });
+
+    await put(base, '/auth/profile/title', { titleAchievement: null }, login.accessToken);
+    profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile.titleAchievement).toBeNull();
+  });
+
+  it('rejects unauthenticated profile reads/writes', async () => {
+    const { base } = await start();
+    expect((await get(base, '/auth/profile')).status).toBe(401);
+    expect((await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' })).status).toBe(401);
+    expect((await put(base, '/auth/profile/title', { titleAchievement: null })).status).toBe(401);
   });
 });

@@ -1,6 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Clock, Logger } from '@mygame/shared-types';
-import { grantAchievementRequest, handoffRequest, loginRequest, refreshRequest, socialLoginRequest } from '@mygame/protocol';
+import {
+  grantAchievementRequest,
+  handoffRequest,
+  loginRequest,
+  refreshRequest,
+  setAvatarRequest,
+  setTitleRequest,
+  setWallpaperRequest,
+  socialLoginRequest,
+} from '@mygame/protocol';
 import type { AuthClaims } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import { TokenError } from '@mygame/auth-core';
@@ -22,7 +31,7 @@ export interface AppDeps {
 
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization',
 };
 
@@ -31,9 +40,18 @@ const send = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(JSON.stringify(body));
 };
 
-const readJson = async (req: IncomingMessage): Promise<unknown> => {
+/** Thrown by `readJson` when the body exceeds `maxBytes` — mapped to 413 by the top-level handler. */
+class PayloadTooLargeError extends Error {}
+
+/** Reads and JSON-parses the body, aborting (rather than buffering unbounded data) past `maxBytes`. */
+const readJson = async (req: IncomingMessage, maxBytes = 200_000): Promise<unknown> => {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    if (total > maxBytes) throw new PayloadTooLargeError('payload too large');
+    chunks.push(chunk as Buffer);
+  }
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
 };
@@ -70,8 +88,13 @@ const requireAccount = async (
 export const createApp = (deps: AppDeps): Server =>
   createServer((req, res) => {
     void handle(req, res, deps).catch((err) => {
+      if (res.headersSent) return;
+      if (err instanceof PayloadTooLargeError) {
+        send(res, 413, { code: 'validation', message: 'payload too large' });
+        return;
+      }
       deps.logger.error('unhandled', { err: String(err) });
-      if (!res.headersSent) send(res, 500, { code: 'internal', message: 'internal error' });
+      send(res, 500, { code: 'internal', message: 'internal error' });
     });
   });
 
@@ -233,6 +256,86 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     if (!claims) return;
     const account = deps.accounts.get(claims.sub);
     send(res, 200, { achievements: account?.achievements ?? [] });
+    return;
+  }
+
+  // --- Profile: avatar/wallpaper/title, persisted on the account -----------------------------
+  // No object storage exists yet, so images are stored as data URLs directly on the account row
+  // (see docs/ARCHITECTURE.md) — the 200KB default readJson cap doesn't apply to these two routes.
+  if (method === 'PUT' && url === '/auth/profile/avatar') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = setAvatarRequest.safeParse(await readJson(req, 4_000_000));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid avatar' });
+      return;
+    }
+    const account = deps.accounts.setAvatar(claims.sub, parsed.data.dataUrl);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    send(res, 200, { avatarIcon: account.avatarIcon ?? null });
+    return;
+  }
+
+  if (method === 'PUT' && url === '/auth/profile/wallpaper') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = setWallpaperRequest.safeParse(await readJson(req, 4_000_000));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid wallpaper' });
+      return;
+    }
+    const account = deps.accounts.setWallpaper(claims.sub, parsed.data.dataUrl);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    send(res, 200, { wallpaper: account.wallpaper ?? null });
+    return;
+  }
+
+  // Sets the "title" badge shown across every game. Must reference one of the account's OWN
+  // unlocked achievements (or null to clear) — real validation, unlike achievement granting itself.
+  if (method === 'PUT' && url === '/auth/profile/title') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = setTitleRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid title' });
+      return;
+    }
+    const ref = parsed.data.titleAchievement;
+    if (ref) {
+      const account = deps.accounts.get(claims.sub);
+      const owned = account?.achievements.some(
+        (a) => a.gameId === ref.gameId && a.achievementId === ref.achievementId,
+      );
+      if (!owned) {
+        send(res, 400, { code: 'validation', message: 'achievement not unlocked' });
+        return;
+      }
+    }
+    const account = deps.accounts.setTitleAchievement(claims.sub, ref);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    send(res, 200, { titleAchievement: account.titleAchievement });
+    return;
+  }
+
+  // The caller's full profile customization (avatar/wallpaper/title).
+  if (method === 'GET' && url === '/auth/profile') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const account = deps.accounts.get(claims.sub);
+    send(res, 200, {
+      avatarIcon: account?.avatarIcon ?? null,
+      wallpaper: account?.wallpaper ?? null,
+      titleAchievement: account?.titleAchievement ?? null,
+    });
     return;
   }
 

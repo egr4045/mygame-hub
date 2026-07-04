@@ -36,6 +36,11 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- Profile customization, added after accounts already had real rows — ALTER (not a fresh
+    -- CREATE TABLE shape) so existing accounts/friendships/etc. aren't lost, unlike the earlier
+    -- messages-table redesign which predated any real data.
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wallpaper TEXT;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS title_achievement JSONB;
 
     CREATE TABLE IF NOT EXISTS friendships (
       lo            TEXT NOT NULL,

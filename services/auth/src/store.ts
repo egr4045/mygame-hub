@@ -10,12 +10,19 @@ export interface AccountAchievement {
   unlockedAt: number;
 }
 
+/** A title badge references one of the account's own achievements; null clears it. */
+export type TitleAchievementRef = { gameId: string; achievementId: string } | null;
+
 export interface Account {
   id: string;
   displayName: string;
   telegramId?: string;
   vkId?: string;
+  /** Profile avatar image, as a data URL. */
   avatarIcon?: string;
+  /** Profile wallpaper image, as a data URL. */
+  wallpaper?: string;
+  titleAchievement: TitleAchievementRef;
   achievements: AccountAchievement[];
 }
 
@@ -33,6 +40,11 @@ export interface AccountStore {
   ): { achievement: AccountAchievement; granted: boolean } | undefined;
   /** Bulk-load previously persisted achievements verbatim (timestamps preserved). Hydration only. */
   hydrateAchievements(id: string, achievements: AccountAchievement[]): void;
+  /** `null` clears the avatar. */
+  setAvatar(id: string, dataUrl: string | null): Account | undefined;
+  /** `null` clears the wallpaper. */
+  setWallpaper(id: string, dataUrl: string | null): Account | undefined;
+  setTitleAchievement(id: string, ref: TitleAchievementRef): Account | undefined;
 }
 
 export interface AccountStoreOptions {
@@ -52,7 +64,7 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
           return existing;
         }
       }
-      const account: Account = { id: id ?? randomUUID(), displayName, achievements: [] };
+      const account: Account = { id: id ?? randomUUID(), displayName, titleAchievement: null, achievements: [] };
       accounts.set(account.id, account);
       return account;
     },
@@ -83,6 +95,26 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
     hydrateAchievements(id, achievements) {
       const acc = accounts.get(id);
       if (acc) acc.achievements = achievements;
+    },
+    setAvatar(id, dataUrl) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      if (dataUrl === null) delete acc.avatarIcon;
+      else acc.avatarIcon = dataUrl;
+      return acc;
+    },
+    setWallpaper(id, dataUrl) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      if (dataUrl === null) delete acc.wallpaper;
+      else acc.wallpaper = dataUrl;
+      return acc;
+    },
+    setTitleAchievement(id, ref) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      acc.titleAchievement = ref;
+      return acc;
     },
   };
 };

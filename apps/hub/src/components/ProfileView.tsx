@@ -1,6 +1,27 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { useMenuStore, createTelegramLinkCode, getTelegramStatus, getAchievements } from '@mygame/sdk';
+import {
+  useMenuStore,
+  createTelegramLinkCode,
+  getTelegramStatus,
+  getAchievements,
+  getProfile,
+  setAvatar as apiSetAvatar,
+  setWallpaper as apiSetWallpaper,
+  setTitleAchievement as apiSetTitleAchievement,
+} from '@mygame/sdk';
+
+/** Reads a File as a data URL (what the profile API stores/serves). */
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+/** Matches the server's per-route body cap (4MB) with headroom for base64 + JSON overhead. */
+const MAX_IMAGE_BYTES = 2_500_000;
 
 /**
  * Display catalog for CIVA's achievements — name/description/icon are presentation details the
@@ -24,8 +45,18 @@ export const ProfileView = (): JSX.Element => {
   const [avatar, setAvatar] = useState<string | null>(null);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const [titleAchievement, setTitleAchievement] = useState<string | null>(null);
-  
+
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
+
+  // Load the persisted profile (avatar/wallpaper/title) once on mount.
+  useEffect(() => {
+    void getProfile().then((p) => {
+      if (!p) return;
+      setAvatar(p.avatarIcon);
+      setWallpaper(p.wallpaper);
+      setTitleAchievement(p.titleAchievement?.gameId === CIVA_GAME_ID ? p.titleAchievement.achievementId : null);
+    });
+  }, []);
 
   // Telegram linking state
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
@@ -82,16 +113,48 @@ export const ProfileView = (): JSX.Element => {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setAvatar(URL.createObjectURL(e.target.files[0]));
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
+      return;
     }
+    const dataUrl = await readAsDataUrl(file);
+    const saved = await apiSetAvatar(dataUrl);
+    if (saved === null) {
+      alert('Не удалось сохранить аватар. Попробуйте позже.');
+      return;
+    }
+    setAvatar(saved);
   };
 
-  const handleWallpaperChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setWallpaper(URL.createObjectURL(e.target.files[0]));
+  const handleWallpaperChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
+      return;
     }
+    const dataUrl = await readAsDataUrl(file);
+    const saved = await apiSetWallpaper(dataUrl);
+    if (saved === null) {
+      alert('Не удалось сохранить фон. Попробуйте позже.');
+      return;
+    }
+    setWallpaper(saved);
+  };
+
+  /** Persist the title choice, then reflect it locally once the server confirms it. */
+  const chooseTitle = async (achievementId: string | null) => {
+    const ok = await apiSetTitleAchievement(
+      achievementId ? { gameId: CIVA_GAME_ID, achievementId } : null,
+    );
+    if (!ok) {
+      alert('Не удалось сохранить титул. Попробуйте позже.');
+      return;
+    }
+    setTitleAchievement(achievementId);
   };
 
   const selectedAchiev = ACHIEVEMENTS.find(a => a.id === titleAchievement);
@@ -275,7 +338,7 @@ export const ProfileView = (): JSX.Element => {
                   e.stopPropagation();
                   if (!unlocked) return;
                   openMenu(e.clientX, e.clientY, [
-                    { label: '👑 Сделать титульной', action: () => setTitleAchievement(ach.id) },
+                    { label: '👑 Сделать титульной', action: () => void chooseTitle(ach.id) },
                     { label: '✈️ Поделиться в Telegram', action: () => alert('Поделились в ТГ') }
                   ]);
                 }}
@@ -300,17 +363,17 @@ export const ProfileView = (): JSX.Element => {
             </p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 400, overflowY: 'auto' }}>
-              <div 
-                onClick={() => { setTitleAchievement(null); setIsChoosingAchievement(false); }}
+              <div
+                onClick={() => { void chooseTitle(null); setIsChoosingAchievement(false); }}
                 style={{ background: !titleAchievement ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 4, cursor: 'pointer', color: '#fff' }}
               >
                 Без титула
               </div>
-              
+
               {ACHIEVEMENTS.filter(ach => unlockedIds.has(ach.id)).map(ach => (
                 <div
                   key={ach.id}
-                  onClick={() => { setTitleAchievement(ach.id); setIsChoosingAchievement(false); }}
+                  onClick={() => { void chooseTitle(ach.id); setIsChoosingAchievement(false); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 16,
                     background: titleAchievement === ach.id ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)',
