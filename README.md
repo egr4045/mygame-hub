@@ -16,19 +16,22 @@ in-memory vs. UI-only mock). The short version:
 
 - ✅ **Real, with a backend:** account login (JWT), cross-game SSO handoff, Telegram account
   linking/login (real bot), friends graph + live presence/activity, invite codes, chat (DMs **and**
-  groups, persisted, read receipts), on-demand game launch (Docker orchestrator), **Postgres
-  persistence** for accounts/friends/invites/conversations (gated on `DATABASE_URL`). The chat UI ships
-  as part of `@mygame/sdk` — any game embedding the SDK gets it for free.
+  groups, persisted, read receipts), achievements (grant/list, per-game, idempotent), on-demand game
+  launch (Docker orchestrator), **Postgres persistence** for accounts/friends/invites/conversations
+  (gated on `DATABASE_URL`). The chat UI ships as part of `@mygame/sdk` — any game embedding the SDK
+  gets it for free.
 - 🟡 **Partial:** persistence falls back to in-memory when `DATABASE_URL` is unset; login is
-  passwordless (the password field is ignored); groups have no add/remove-member yet.
-- ❌ **UI-only mock (no backend):** voice/video calls, achievements, game store pages
-  (changelog/forum/lobby browser), playtime stats, VK linking (deferred by request).
+  passwordless (the password field is ignored); groups have no add/remove-member yet; the achievements
+  *display catalog* (name/icon/description) is still a hardcoded per-game client concern, not an API.
+- ❌ **UI-only mock (no backend):** voice/video calls, game store pages (changelog/forum/lobby
+  browser), playtime stats, VK linking (deferred by request).
 
 ## Stack
 
 - **Hub (frontend):** React + Vite + TypeScript + Zustand (`apps/hub`). No game engine here.
 - **Platform services:** Node.js + TypeScript, dependency-injected ports & adapters (`services/*`):
-  - `auth` — passwordless login, JWT access/refresh, short-lived SSO handoff tokens, Telegram linking.
+  - `auth` — passwordless login, JWT access/refresh, short-lived SSO handoff tokens, Telegram linking,
+    per-game achievement grant/list.
   - `social` — Socket.io friends + presence + invites.
   - `chat` — Socket.io direct messages + groups, persisted history + read receipts.
   - `orchestrator` — wakes/reaps per-game Docker stacks on player entry/idle.
@@ -51,7 +54,7 @@ services/
   chat/                Socket.io DMs + groups (Postgres or in-memory)
   orchestrator/        Docker compose wake/reap per game
 packages/
-  protocol/            zod wire schemas (auth, social, chat, invite, envelope, errors)
+  protocol/            zod wire schemas (auth, social, chat, achievements, invite, envelope, errors)
   sdk/                 @mygame/sdk — embeddable client + overlay
   auth-core/           JWT sign/verify (HS256)
   platform-db/         shared Postgres pool + migrations + write-behind queue

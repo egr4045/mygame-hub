@@ -51,6 +51,10 @@ Passwordless identity provider. Routes (`app.ts`):
 - `GET /auth/telegram/status` (Bearer access) → `{ linked, telegramId? }`.
 - `POST /auth/social/login` `{ network, recoveryCode }` → session — redeem a `/login` code from the
   bot to sign in on a new device (currently `network: 'telegram'` only).
+- `POST /auth/achievements` (Bearer access) `{ gameId, achievementId }` → `{ achievement, granted }` —
+  idempotent grant (`granted: false` if already held).
+- `GET /auth/achievements` (Bearer access) → `{ achievements: Achievement[] }` — every game's unlocked
+  achievements for the caller.
 - `GET /health`, `GET /ready`.
 
 JWTs are HS256 via `@mygame/auth-core` (`signAccess` 15m, `signRefresh` 30d, `signHandoff` 120s,
@@ -61,6 +65,15 @@ Bot API client using **long polling** (no public webhook needed — run a single
 `telegramLinking.ts` holds short-lived (5 min) link/login codes and handles `/start <code>` (binds the
 chat to the account) and `/login` (issues a login code). The `telegram_id` mapping persists via the
 account store.
+
+**Achievements.** An `Account`'s `achievements: AccountAchievement[]` is a flat list of
+`{ gameId, achievementId, unlockedAt }` — deliberately opaque ids, so two games can reuse the same
+`achievementId` without colliding (scoped by `gameId`). The platform stores only *that* something is
+unlocked and *when*; it has no notion of what the achievement is called or looks like — that's a
+per-game/client presentation concern (see the SDK section). Trust model: the caller's own access
+token authorizes the grant, same as chat DMs not being restricted to friends — a game's client can
+self-report an unlock that wasn't strictly earned; a game that cares should grant from its own trusted
+backend instead of its client.
 
 ### social (`services/social`) — port 8083
 
@@ -137,11 +150,17 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
   - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `send`, `getThreads`,
     `getUnreadCount`, `subscribe`. A game can either just call `open()`/`openWithUser()` and rely on
     the SDK-shipped `ChatWidget`, or build its own UI entirely on this data.
+  - `achievements` — `grant(achievementId)` (scoped to `this.gameId` from `init()`; fires a toast on a
+    genuinely new unlock, silent on a re-grant) and `list()` (every game's unlocked achievements). The
+    plain `grantAchievement(gameId, achievementId)` / `getAchievements()` functions (`authClient.ts`)
+    are also exported directly for a caller that hasn't gone through `mygame.init()` — the hub uses
+    those, since it doesn't call `init()` itself (see "Hub" below).
   - `ui` — context menu, toasts.
 - **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084`; prod → same origin; a game
   points it at the hub via `mygame.init(id, { hubUrl })`.
 - **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
-  plus Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`).
+  plus Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`) and
+  achievement helpers (`grantAchievement`, `getAchievements`).
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
   `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
@@ -172,12 +191,20 @@ Steam-style library/launcher). State:
 The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget` itself inside `HubScreen` rather than
 using the SDK's self-mount overlay (that mounting path is for embedded games).
 
+> **The hub never calls `mygame.init()`.** It wires `socialStore`/`chatStore` `connect()` directly
+> (`App.tsx`) instead, so `mygame.gameId` is always `null` there. Anything gated on `this.gameId`
+> (e.g. `mygame.achievements.grant`, which scopes to "the current game") won't work from the hub's own
+> code for that reason — the hub calls the lower-level exported functions directly instead
+> (`grantAchievement('civa', id)`), passing the game id explicitly. This only matters for hub-side
+> code; a real embedded game that calls `init()` doesn't hit this.
+
 ## Contract (`packages/protocol` → `@mygame/protocol`)
 
-The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `chat.ts`, `invite.ts`,
-`envelope.ts` (the WS envelope `{ v, type, seq, ts, traceId?, payload }` + `CONTRACT_VERSION`),
-`errors.ts` (`ErrorCode` + `ContractError.toProtocol()`). Per-game protocols live in each game's repo
-and may re-export these primitives.
+The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `chat.ts`,
+`achievements.ts`, `invite.ts`, `envelope.ts` (the WS envelope
+`{ v, type, seq, ts, traceId?, payload }` + `CONTRACT_VERSION`), `errors.ts` (`ErrorCode` +
+`ContractError.toProtocol()`). Per-game protocols live in each game's repo and may re-export these
+primitives.
 
 ## Supporting packages
 

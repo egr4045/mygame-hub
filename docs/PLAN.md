@@ -47,26 +47,32 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   (`createGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`) for games that want their own
   UI. Group membership changes (add/remove/leave), reactions, typing indicators and message edit/
   delete are deliberately deferred (see `STATUS.md`).
+- **Phase 6 — Achievements API.** `auth` grants (idempotent, per `gameId`+`achievementId`) and lists
+  an account's achievements (`AccountAchievement[]`, no schema change needed — the account store
+  already had an unused `achievements` field). `mygame.achievements.grant/list` in the SDK; a
+  genuinely new unlock fires a toast automatically. The **display catalog** (name/icon/description)
+  is deliberately *not* server-side — the platform can't know what a game's achievement means or
+  looks like, only that it's unlocked; each game (the hub's `ProfileView` included) keeps its own
+  small catalog for presentation. Trust model matches the rest of the platform: the caller's own
+  token authorizes the grant, no server-side proof of "actually earned".
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Achievements API.** Expose the account store's existing `achievements`; let games award them via
-   the SDK; render the real set in the profile.
-2. **Extract the friends widget into the SDK.** Same treatment `ChatWidget` just got — move
+1. **Extract the friends widget into the SDK.** Same treatment `ChatWidget` just got — move
    `FriendsWidget`/`FriendsSidebar` into `packages/sdk` and render them from `MygameOverlay`, so an
    embedded game gets the friends list UI too, not just the data (`mygame.social.*`).
-3. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
+2. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
    DB), surfaced across games via the social `me` payload.
-4. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+3. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
    (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
-5. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
+4. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
    a fixed member list).
-6. **VK account linking.** Mirror the Telegram flow (deferred by request).
-7. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+5. **VK account linking.** Mirror the Telegram flow (deferred by request).
+6. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
-8. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
+7. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
    `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
    service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
    lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
