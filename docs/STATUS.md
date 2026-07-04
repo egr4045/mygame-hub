@@ -34,6 +34,7 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 | Invite **links** (deep-link join) | ❌ | Codes exist; the `?invite=CODE` / `?join=` deep-link auto-join flow is not implemented end-to-end (see `ROADMAP-PLATFORM.md`). |
 | Chat: DMs + groups | ✅ | Real backend: `services/chat` (Socket.io + JWT, mirrors `social`). Unified `Conversation` model (dm = 2-member conversation, group = named + fixed member list). Send/receive, persisted history, unread counts, read receipts (dm only). Postgres-backed when `DATABASE_URL` is set, in-memory fallback otherwise. |
 | Chat widget ships with `@mygame/sdk` | ✅ | The chat UI (`ChatWidget`) lives in `packages/sdk/src/components/`, not the hub — it's rendered by the SDK's self-mounting overlay (`mountOverlay()` → `MygameOverlay`), so **any game embedding the SDK gets a working chat window + launcher button automatically**, no UI code required. The hub renders the same component directly (not through the overlay). `mygame.chat.*` also exposes a full imperative API (`createGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`) for a game that wants to build its own UI on the data instead. |
+| Friends widget ships with `@mygame/sdk` | ✅ | `FriendsWidget`/`FriendsSidebar` moved from the hub into `packages/sdk/src/components/` and render from `MygameOverlay` too — same treatment as chat. "Invite to current game" lost its (already-mock, hub-only) disabled-state gating in the move — see `ARCHITECTURE.md`. |
 | Group membership management | ❌ | v1 scope: create a group with a fixed member list only. No add/remove/leave-member yet (see `docs/PLAN.md`). |
 | Chat reactions / edit / delete / typing indicators | ❌ | Dropped from the real backend for v1 scope. Message context-menu actions (reply/edit/delete) are still `alert(...)`. |
 | Voice / video calls | ❌ | UI only (`ChatWidget.tsx`, marked `CALL VIEW MOCK`). No LiveKit/WebRTC wired. |
@@ -63,11 +64,13 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
   copy). Pick one platform name.
 - **`@mygame/shared-types` carries CIVA game-domain types** (resources, biomes, buildings, units,
   tech, diplomacy) the platform doesn't use. They're forward-looking/leftover from the game design.
-- **Only the chat widget ships with the SDK so far.** The friends list/presence UI
-  (`FriendsWidget`/`FriendsSidebar`) is still hub-only (`apps/hub/src/components`,
-  `apps/hub/src/platform`) — an embedded game gets friends **data** via `mygame.social.*` but not a
-  ready-made widget. Extracting it into `packages/sdk` (mirroring what was just done for chat) is a
-  natural next step if the goal is "any game gets the full platform UI for free."
+- **Chat and friends now ship as SDK widgets; achievements/profile don't have one yet** (achievements
+  arguably don't need one — see `ARCHITECTURE.md`; a profile/showcase page might, if built).
+- **`SteamOverlay.tsx`** (a Shift+Tab-toggle in-game-style overlay showing a floating friends panel)
+  is imported by `HubScreen.tsx` but never actually rendered (`<SteamOverlay />` doesn't appear in its
+  JSX) — dead/unwired, found while moving `FriendsSidebar`. Left as-is (repointed its import, changed
+  nothing else) since it's a real, functioning feature, just not one this pass was scoped to finish or
+  remove.
 
 ## Mock → real, progress
 
@@ -79,8 +82,9 @@ designed UI on hardcoded data. **Nothing is persisted** — every store is in-me
 4. ✅ **Achievements API** — done (`auth` grants/lists per-game achievements, `mygame.achievements.*`
    in the SDK). Display catalog (name/icon/description) stays a per-game/client concern by design —
    see `ARCHITECTURE.md`.
-5. ⏳ **Extract the friends widget into the SDK** — same treatment chat just got. *Next candidate.*
-6. **Profile (avatar/title) persistence + upload.**
+5. ✅ **Friends widget in the SDK** — done (`FriendsWidget`/`FriendsSidebar` moved into
+   `packages/sdk`, rendered by `MygameOverlay`).
+6. **Profile (avatar/title) persistence + upload.** *Next candidate.*
 7. **Invite deep-links + notification center.**
 8. **VK linking** (deferred by request).
 9. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/`chat` work: it still

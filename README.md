@@ -37,9 +37,8 @@ in-memory vs. UI-only mock). The short version:
   - `orchestrator` — wakes/reaps per-game Docker stacks on player entry/idle.
 - **SDK:** `@mygame/sdk` — the framework-agnostic client a game embeds (`mygame.init()`), built to be
   usable by third-party games (dual ESM/CJS + a global IIFE, React as a peer dep). Ships a
-  self-mounting Shadow-DOM overlay with a working **chat widget** (DMs + groups), toasts and a context
-  menu — a game gets a real messenger with zero UI code. Friends UI isn't extracted into the SDK yet
-  (data only, via `mygame.social.*`); see `docs/STATUS.md`.
+  self-mounting Shadow-DOM overlay with a working **chat widget** (DMs + groups) and **friends
+  widget**, toasts and a context menu — a game gets real social features with zero UI code.
 - **Contract:** `@mygame/protocol` — zod schemas for every platform message (the isolation boundary).
 - **Monorepo:** pnpm workspaces + Turborepo.
 

@@ -55,27 +55,33 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   looks like, only that it's unlocked; each game (the hub's `ProfileView` included) keeps its own
   small catalog for presentation. Trust model matches the rest of the platform: the caller's own
   token authorizes the grant, no server-side proof of "actually earned".
+- **Phase 7 — Friends widget into the SDK.** `FriendsWidget`/`FriendsSidebar` moved from the hub into
+  `packages/sdk/src/components/`, rendered by `MygameOverlay` — same treatment chat got. The one
+  hub-specific dependency (`usePlatformStore().selectedGame`, gating the already-mock "invite to
+  current game" menu item) was dropped rather than plumbed through, since the action was `alert(...)`
+  either way. Found `SteamOverlay.tsx` (a Shift+Tab overlay) imports `FriendsSidebar` but is itself
+  dead — never rendered by `HubScreen`; left as-is (only repointed its import) since removing/wiring
+  it wasn't this pass's job.
 
 ## Next (mock → real)
 
 Ordered by leverage. Each item is built in isolation, then integrated. Testing is manual for now.
 
-1. **Extract the friends widget into the SDK.** Same treatment `ChatWidget` just got — move
-   `FriendsWidget`/`FriendsSidebar` into `packages/sdk` and render them from `MygameOverlay`, so an
-   embedded game gets the friends list UI too, not just the data (`mygame.social.*`).
-2. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
+1. **Profile persistence + uploads.** Avatar/wallpaper/title stored server-side (object storage or
    DB), surfaced across games via the social `me` payload.
-3. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
+2. **Invite deep-links + notification center.** Finish the `?invite=`/`?join=` auto-join flow
    (`ROADMAP-PLATFORM.md`); make the 🔔 center show real invites/requests.
-4. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
+3. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
    a fixed member list).
-5. **VK account linking.** Mirror the Telegram flow (deferred by request).
-6. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+4. **VK account linking.** Mirror the Telegram flow (deferred by request).
+5. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
-7. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
+6. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
    `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
    service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
    lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
+7. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
+   Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
 
 ## Verification
 

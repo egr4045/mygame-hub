@@ -164,15 +164,19 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
   `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
-  `MygameOverlay` (toasts, context menu, **`ChatWidget`**) so a game gets the platform UI — including a
-  working messenger — without writing any of its own. The host is click-through
+  `MygameOverlay` (toasts, context menu, **`ChatWidget`**, **`FriendsWidget`**) so a game gets the
+  platform's social UI without writing any of its own. The host is click-through
   (`pointer-events: none`); every interactive component explicitly re-enables `pointerEvents: 'auto'`
   on its own root.
-- **`ChatWidget`** (`components/ChatWidget.tsx`) is the one platform widget that ships with the SDK
-  today (moved out of the hub in the same pass that added groups). It renders as a small launcher
-  button with an unread badge when closed, and the full draggable/resizable messenger (DM + group
-  list, create-group form, message view) when open. `FriendsWidget`/`FriendsSidebar` have **not** been
-  extracted yet — still hub-only (see `STATUS.md`).
+- **`ChatWidget`** (`components/ChatWidget.tsx`) and **`FriendsWidget`**/**`FriendsSidebar`**
+  (`components/FriendsWidget.tsx`, `FriendsSidebar.tsx`) are the platform widgets that ship with the
+  SDK. `ChatWidget` renders as a small launcher button with an unread badge when closed, and the full
+  draggable/resizable messenger (DM + group list, create-group form, message view) when open.
+  `FriendsWidget` similarly renders as a minimized "friends & chat" button (online count) or the
+  expanded friends list. Moving `FriendsSidebar` dropped its one hub-specific dependency
+  (`usePlatformStore().selectedGame`, used only to disable the already-mock "Invite to current game"
+  menu item) rather than plumbing hub-only state into a component meant to be generic — the action was
+  `alert(...)` either way, so nothing real was lost; the item is just no longer conditionally disabled.
 - Built with `tsup` (`tsup.config.ts`) for external consumption.
 
 ## Hub (`apps/hub`)
@@ -184,12 +188,14 @@ Steam-style library/launcher). State:
 - **`platform/games.ts`** — the front-end game registry; `externalPort` marks a game that is its own
   SPA (selecting it wakes it via the orchestrator, then navigates with a handoff token).
 - Social/chat/menu/toast come from `@mygame/sdk` stores (single source shared with embedded games).
-  `ChatWidget` is likewise imported straight from `@mygame/sdk` (not a local hub component) —
-  `HubScreen` renders it directly in its own tree, `MygameOverlay` renders the *same* component for
-  embedded games via the Shadow-DOM mount. One component, two mounting paths.
+  `ChatWidget`/`FriendsWidget` are likewise imported straight from `@mygame/sdk` (not local hub
+  components) — `HubScreen` renders them directly in its own tree, `MygameOverlay` renders the *same*
+  components for embedded games via the Shadow-DOM mount. One component each, two mounting paths.
+  `SteamOverlay.tsx` (`apps/hub/src/components`) also imports `FriendsSidebar` from `@mygame/sdk`, but
+  is itself dead code — imported by `HubScreen` but never actually rendered.
 
-The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget` itself inside `HubScreen` rather than
-using the SDK's self-mount overlay (that mounting path is for embedded games).
+The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget`/`FriendsWidget` itself inside
+`HubScreen` rather than using the SDK's self-mount overlay (that mounting path is for embedded games).
 
 > **The hub never calls `mygame.init()`.** It wires `socialStore`/`chatStore` `connect()` directly
 > (`App.tsx`) instead, so `mygame.gameId` is always `null` there. Anything gated on `this.gameId`
