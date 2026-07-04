@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Clock, Logger } from '@mygame/shared-types';
-import { handoffRequest, loginRequest, refreshRequest, socialLoginRequest } from '@mygame/protocol';
+import { grantAchievementRequest, handoffRequest, loginRequest, refreshRequest, socialLoginRequest } from '@mygame/protocol';
 import type { AuthClaims } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import { TokenError } from '@mygame/auth-core';
@@ -203,6 +203,36 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       accessToken,
       refreshToken,
     });
+    return;
+  }
+
+  // --- Achievements ---------------------------------------------------------------------------
+  // Grant (idempotently) an achievement for a game to the caller's own account. Trust model: the
+  // caller's access token is the only authorization — see docs/ARCHITECTURE.md.
+  if (method === 'POST' && url === '/auth/achievements') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = grantAchievementRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid achievement grant' });
+      return;
+    }
+    const result = deps.accounts.grantAchievement(claims.sub, parsed.data.gameId, parsed.data.achievementId);
+    if (!result) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    if (result.granted) deps.logger.info('achievement granted', { accountId: claims.sub, ...parsed.data });
+    send(res, 200, result);
+    return;
+  }
+
+  // The caller's own unlocked achievements, across every game.
+  if (method === 'GET' && url === '/auth/achievements') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const account = deps.accounts.get(claims.sub);
+    send(res, 200, { achievements: account?.achievements ?? [] });
     return;
   }
 

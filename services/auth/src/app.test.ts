@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createAuthCore } from '@mygame/auth-core';
-import type { HandoffResponse, LoginResponse, RefreshResponse } from '@mygame/protocol';
+import type {
+  GrantAchievementResponse,
+  AchievementsResponse,
+  HandoffResponse,
+  LoginResponse,
+  RefreshResponse,
+} from '@mygame/protocol';
 import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
 import { createApp } from './app.js';
 import { createMemoryAccountStore } from './store.js';
@@ -25,8 +31,18 @@ const start = async () => {
   return { base: `http://127.0.0.1:${port}`, auth };
 };
 
-const post = (base: string, path: string, body: unknown) =>
-  fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (base: string, path: string, body: unknown, token?: string) =>
+  fetch(base + path, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+const get = (base: string, path: string, token?: string) =>
+  fetch(base + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
 
 describe('auth service', () => {
   it('issues an account + tokens on login', async () => {
@@ -86,5 +102,51 @@ describe('auth service', () => {
   it('400s an invalid login body', async () => {
     const { base } = await start();
     expect((await post(base, '/auth/login', { displayName: '' })).status).toBe(400);
+  });
+});
+
+describe('auth service — achievements', () => {
+  it('grants an achievement and lists it back', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+
+    const grantRes = await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
+    expect(grantRes.status).toBe(200);
+    const grant = await json<GrantAchievementResponse>(grantRes);
+    expect(grant).toMatchObject({ granted: true, achievement: { gameId: 'civa', achievementId: 'first_blood' } });
+
+    const listRes = await get(base, '/auth/achievements', login.accessToken);
+    const list = await json<AchievementsResponse>(listRes);
+    expect(list.achievements).toEqual([grant.achievement]);
+  });
+
+  it('re-granting the same achievement is idempotent', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
+
+    const again = await json<GrantAchievementResponse>(
+      await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken),
+    );
+    expect(again.granted).toBe(false);
+
+    const list = await json<AchievementsResponse>(await get(base, '/auth/achievements', login.accessToken));
+    expect(list.achievements).toHaveLength(1); // not duplicated
+  });
+
+  it('scopes achievements per game — the same id in two games is two achievements', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
+    await post(base, '/auth/achievements', { gameId: 'svoyak', achievementId: 'first_blood' }, login.accessToken);
+
+    const list = await json<AchievementsResponse>(await get(base, '/auth/achievements', login.accessToken));
+    expect(list.achievements).toHaveLength(2);
+  });
+
+  it('rejects an unauthenticated grant/list', async () => {
+    const { base } = await start();
+    expect((await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'x' })).status).toBe(401);
+    expect((await get(base, '/auth/achievements')).status).toBe(401);
   });
 });

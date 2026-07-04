@@ -3,9 +3,17 @@
  * No React: games (React, Vue, vanilla) call these methods and listen to events; the SDK renders the
  * overlay itself (Phase 2 step 2). The hub uses the React hooks instead (same underlying stores).
  */
-import type { social } from '@mygame/protocol';
+import type { social, Achievement } from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
-import { loadSession, login as authLogin, clearSession, getHandoff, type Session } from './authClient.js';
+import {
+  loadSession,
+  login as authLogin,
+  clearSession,
+  getHandoff,
+  grantAchievement,
+  getAchievements,
+  type Session,
+} from './authClient.js';
 import { useSocialStore } from './state/socialStore.js';
 import { useChatStore, type ChatSession } from './state/chatStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
@@ -85,6 +93,28 @@ class MygameClient {
       useChatStore.getState().sessions.reduce((n, s) => n + (s.unreadCount ?? 0), 0),
     /** Subscribe to chat-store changes (new messages, thread updates); returns an unsubscribe. */
     subscribe: (cb: () => void): (() => void) => useChatStore.subscribe(cb),
+  };
+
+  readonly achievements = {
+    /**
+     * Grant (idempotently) an achievement for the current game to the player. Fires a toast on a
+     * genuinely new unlock (never on a re-grant of one already held). Returns whether it was new.
+     */
+    grant: async (achievementId: string): Promise<boolean> => {
+      if (!this.gameId) return false;
+      const result = await grantAchievement(this.gameId, achievementId);
+      if (result?.granted) {
+        useToastStore.getState().addToast({
+          type: 'achievement',
+          title: 'Достижение получено',
+          content: achievementId,
+          icon: '🏆',
+        });
+      }
+      return result?.granted ?? false;
+    },
+    /** The player's unlocked achievements across every game. Empty on failure/not logged in. */
+    list: async (): Promise<Achievement[]> => (await getAchievements())?.achievements ?? [],
   };
 
   readonly ui = {

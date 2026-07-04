@@ -12,6 +12,7 @@ export * from './envelope.js';
 export * from './errors.js';
 export * from './auth.js';
 export * from './invite.js';
+export * from './achievements.js';
 export * as social from './social.js';
 export * as chat from './chat.js';
 

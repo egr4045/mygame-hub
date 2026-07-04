@@ -5,7 +5,7 @@ import { FriendsWidget } from '../components/FriendsWidget.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
-import { getHandoff } from '@mygame/sdk';
+import { getHandoff, grantAchievement } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
@@ -181,10 +181,17 @@ export const HubScreen = (): JSX.Element => {
           style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
           🔔 Тест: Сообщение
         </button>
-        <button 
-          onClick={() => addToast({ type: 'achievement', title: 'Достижение получено', content: 'Первая кровь (CIVA 2)', icon: '🏆' })}
+        <button
+          onClick={() => void (async () => {
+            const result = await grantAchievement('civa', 'first_blood');
+            if (result?.granted) {
+              addToast({ type: 'achievement', title: 'Достижение получено', content: 'Первая кровь (CIVA)', icon: '🏆' });
+            } else if (result) {
+              addToast({ type: 'achievement', title: 'Уже получено', content: 'Первая кровь (CIVA)', icon: '🏆' });
+            }
+          })()}
           style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
-          🔔 Тест: Ачивка
+          🔔 Тест: Ачивка (реальный API)
         </button>
       </div>
 

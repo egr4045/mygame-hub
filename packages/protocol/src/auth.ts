@@ -17,7 +17,6 @@ export const loginResponse = z.object({
   displayName: z.string(),
   accessToken: z.string(),
   refreshToken: z.string(),
-  achievements: z.array(z.string()).default([]),
   avatarIcon: z.string().optional(),
 });
 export type LoginResponse = z.infer<typeof loginResponse>;

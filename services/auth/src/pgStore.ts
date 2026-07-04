@@ -50,7 +50,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
         const acc = mem.upsert(r.display_name as string, r.id as string);
         if (r.telegram_id) mem.linkSocial(acc.id, 'telegram', r.telegram_id as string);
         if (r.vk_id) mem.linkSocial(acc.id, 'vk', r.vk_id as string);
-        for (const ach of (r.achievements as string[] | null) ?? []) mem.addAchievement(acc.id, ach);
+        mem.hydrateAchievements(acc.id, (r.achievements as Account['achievements'] | null) ?? []);
       }
       logger.info('accounts hydrated', { count: rows.length });
     },
@@ -67,10 +67,14 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       if (a) persist(a);
       return a;
     },
-    addAchievement(id, achievement) {
-      mem.addAchievement(id, achievement);
-      const a = mem.get(id);
-      if (a) persist(a);
+    grantAchievement(id, gameId, achievementId) {
+      const result = mem.grantAchievement(id, gameId, achievementId);
+      if (result?.granted) {
+        const a = mem.get(id);
+        if (a) persist(a);
+      }
+      return result;
     },
+    hydrateAchievements: (id, achievements) => mem.hydrateAchievements(id, achievements),
   };
 };

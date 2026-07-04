@@ -3,6 +3,8 @@
  * re-claims the *same* account (durable identity) — that's what lets the lobby restore your seat.
  */
 import type {
+  AchievementsResponse,
+  GrantAchievementResponse,
   HandoffResponse,
   LoginResponse,
   TelegramLinkResponse,
@@ -101,6 +103,38 @@ export const loginWithTelegram = async (recoveryCode: string): Promise<Session |
     const session = (await res.json()) as LoginResponse;
     saveSession(session);
     return session;
+  } catch {
+    return null;
+  }
+};
+
+/** Grant (idempotently) an achievement for `gameId` to the current account. Null on failure. */
+export const grantAchievement = async (gameId: string, achievementId: string): Promise<GrantAchievementResponse | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/achievements`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ gameId, achievementId }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as GrantAchievementResponse;
+  } catch {
+    return null;
+  }
+};
+
+/** The current account's unlocked achievements, across every game. Null on failure. */
+export const getAchievements = async (): Promise<AchievementsResponse | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/achievements`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as AchievementsResponse;
   } catch {
     return null;
   }

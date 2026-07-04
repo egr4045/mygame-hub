@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { useMenuStore, createTelegramLinkCode, getTelegramStatus } from '@mygame/sdk';
+import { useMenuStore, createTelegramLinkCode, getTelegramStatus, getAchievements } from '@mygame/sdk';
 
-// Mock achievements data
+/**
+ * Display catalog for CIVA's achievements — name/description/icon are presentation details the
+ * platform's achievements API doesn't (and can't, being cross-game) know about; only the fact that
+ * `gameId + achievementId` is unlocked is real (`mygame.achievements.list()`). A game with its own
+ * achievements would keep its own such catalog.
+ */
+const CIVA_GAME_ID = 'civa';
 const ACHIEVEMENTS = [
   { id: 'first_blood', name: 'Первая кровь', desc: 'Одержите свою первую победу.', icon: '🏆', color: '#ffd700' },
   { id: 'veteran', name: 'Ветеран', desc: 'Сыграйте 100 матчей.', icon: '⚔', color: '#c0c0c0' },
@@ -25,6 +31,15 @@ export const ProfileView = (): JSX.Element => {
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
   const [tgId, setTgId] = useState<string | undefined>(undefined);
   const [tgModal, setTgModal] = useState<{ code: string; url: string } | null>(null);
+
+  // Real unlocked achievements (CIVA only — the showcase catalog above is CIVA-specific).
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+  const refreshAchievements = () =>
+    void getAchievements().then((res) => {
+      const list = res?.achievements ?? [];
+      setUnlockedIds(new Set(list.filter((a) => a.gameId === CIVA_GAME_ID).map((a) => a.achievementId)));
+    });
+  useEffect(refreshAchievements, []);
 
   useEffect(() => {
     void getTelegramStatus().then((s) => {
@@ -231,29 +246,34 @@ export const ProfileView = (): JSX.Element => {
           <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>ВИТРИНА ДОСТИЖЕНИЙ</h2>
-              <span style={{ color: '#8f98a0', fontSize: '14px' }}>5 из 50</span>
+              <span style={{ color: '#8f98a0', fontSize: '14px' }}>{unlockedIds.size} из {ACHIEVEMENTS.length}</span>
             </div>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 16 }}>
-              {ACHIEVEMENTS.map(ach => (
-                <div key={ach.id} style={{ 
-                  aspectRatio: '1/1', 
-                  background: '#171a21', 
-                  borderRadius: 8, 
-                  border: `2px solid ${ach.color}40`,
+              {ACHIEVEMENTS.map(ach => {
+                const unlocked = unlockedIds.has(ach.id);
+                return (
+                <div key={ach.id} style={{
+                  aspectRatio: '1/1',
+                  background: '#171a21',
+                  borderRadius: 8,
+                  border: `2px solid ${unlocked ? ach.color : '#3d4450'}${unlocked ? '40' : ''}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 28,
                   cursor: 'pointer',
+                  opacity: unlocked ? 1 : 0.35,
+                  filter: unlocked ? 'none' : 'grayscale(1)',
                   transition: 'transform 0.2s'
                 }}
-                title={`${ach.name} - ${ach.desc}`}
+                title={unlocked ? `${ach.name} - ${ach.desc}` : `${ach.name} (не получено) - ${ach.desc}`}
                 onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
                 onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  if (!unlocked) return;
                   openMenu(e.clientX, e.clientY, [
                     { label: '👑 Сделать титульной', action: () => setTitleAchievement(ach.id) },
                     { label: '✈️ Поделиться в Telegram', action: () => alert('Поделились в ТГ') }
@@ -262,7 +282,8 @@ export const ProfileView = (): JSX.Element => {
                 >
                   {ach.icon}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -286,13 +307,13 @@ export const ProfileView = (): JSX.Element => {
                 Без титула
               </div>
               
-              {ACHIEVEMENTS.map(ach => (
-                <div 
+              {ACHIEVEMENTS.filter(ach => unlockedIds.has(ach.id)).map(ach => (
+                <div
                   key={ach.id}
                   onClick={() => { setTitleAchievement(ach.id); setIsChoosingAchievement(false); }}
-                  style={{ 
-                    display: 'flex', alignItems: 'center', gap: 16, 
-                    background: titleAchievement === ach.id ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)', 
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 16,
+                    background: titleAchievement === ach.id ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)',
                     padding: 16, borderRadius: 4, cursor: 'pointer',
                     border: titleAchievement === ach.id ? `1px solid ${ach.color}` : '1px solid transparent'
                   }}

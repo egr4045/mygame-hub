@@ -4,13 +4,19 @@ import { randomUUID } from 'node:crypto';
  * Account store port. The account is the durable identity sessions bind to. In-memory adapter for
  * standalone/dev; a Postgres adapter swaps in later without touching the service logic.
  */
+export interface AccountAchievement {
+  gameId: string;
+  achievementId: string;
+  unlockedAt: number;
+}
+
 export interface Account {
   id: string;
   displayName: string;
   telegramId?: string;
   vkId?: string;
   avatarIcon?: string;
-  achievements: string[];
+  achievements: AccountAchievement[];
 }
 
 export interface AccountStore {
@@ -19,10 +25,23 @@ export interface AccountStore {
   get(id: string): Account | undefined;
   findBySocial(network: 'telegram' | 'vk', socialId: string): Account | undefined;
   linkSocial(id: string, network: 'telegram' | 'vk', socialId: string): Account | undefined;
-  addAchievement(id: string, achievement: string): void;
+  /** Idempotent: `granted` is false if the account already had this game's achievement. */
+  grantAchievement(
+    id: string,
+    gameId: string,
+    achievementId: string,
+  ): { achievement: AccountAchievement; granted: boolean } | undefined;
+  /** Bulk-load previously persisted achievements verbatim (timestamps preserved). Hydration only. */
+  hydrateAchievements(id: string, achievements: AccountAchievement[]): void;
 }
 
-export const createMemoryAccountStore = (): AccountStore => {
+export interface AccountStoreOptions {
+  /** Injectable clock for tests. */
+  now?: () => number;
+}
+
+export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): AccountStore => {
+  const now = opts.now ?? (() => Date.now());
   const accounts = new Map<string, Account>();
   return {
     upsert(displayName, id) {
@@ -52,11 +71,18 @@ export const createMemoryAccountStore = (): AccountStore => {
       if (network === 'vk') acc.vkId = socialId;
       return acc;
     },
-    addAchievement: (id, ach) => {
+    grantAchievement(id, gameId, achievementId) {
       const acc = accounts.get(id);
-      if (acc && !acc.achievements.includes(ach)) {
-        acc.achievements.push(ach);
-      }
-    }
+      if (!acc) return undefined;
+      const existing = acc.achievements.find((a) => a.gameId === gameId && a.achievementId === achievementId);
+      if (existing) return { achievement: existing, granted: false };
+      const achievement: AccountAchievement = { gameId, achievementId, unlockedAt: now() };
+      acc.achievements.push(achievement);
+      return { achievement, granted: true };
+    },
+    hydrateAchievements(id, achievements) {
+      const acc = accounts.get(id);
+      if (acc) acc.achievements = achievements;
+    },
   };
 };
