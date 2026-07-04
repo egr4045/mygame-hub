@@ -4,6 +4,7 @@ import { GAMES, type GameInfo } from '../platform/games.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
+import { routeToInvite } from '../platform/inviteRouting.js';
 import { getHandoff, grantAchievement } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
@@ -19,6 +20,11 @@ export const HubScreen = (): JSX.Element => {
   const selectGame = usePlatformStore((s) => s.selectGame);
   const logout = usePlatformStore((s) => s.logout);
   const me = useSocialStore((s) => s.me);
+  const friends = useSocialStore((s) => s.friends);
+  const invites = useSocialStore((s) => s.invites);
+  const { accept, dismissInvite, createInvite } = useSocialStore.getState();
+  const incomingRequests = friends.filter((f) => f.status === 'incoming');
+  const notificationCount = incomingRequests.length + invites.length;
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
 
@@ -71,19 +77,38 @@ export const HubScreen = (): JSX.Element => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             {/* Notification Center */}
-            <div 
+            <div
               style={{ position: 'relative', cursor: 'pointer', color: '#dcdedf', fontSize: 16 }}
               onClick={(e) => {
                 e.stopPropagation();
+                const items = notificationCount === 0
+                  ? [{ label: '🔔 Нет новых уведомлений', action: () => {} }]
+                  : [
+                      ...incomingRequests.map((f) => ({
+                        label: `👤 Заявка от ${f.displayName} — принять`,
+                        action: () => accept(f.accountId),
+                      })),
+                      ...invites.map((inv) => ({
+                        label: `🎮 ${inv.inviterName}: ${inv.gameName} — присоединиться`,
+                        action: () => void routeToInvite(inv),
+                      })),
+                    ];
                 openMenu(e.clientX, e.clientY + 20, [
-                  { label: '🔔 Нет новых уведомлений', action: () => {} },
+                  ...items,
                   { separator: true, action: () => {} },
+                  ...(invites.length > 0
+                    ? [{ label: '🗑️ Скрыть приглашения', action: () => invites.forEach((inv) => dismissInvite(inv.code)) }]
+                    : []),
                   { label: '⚙️ Настройки уведомлений', action: () => alert('Открытие настроек...') }
                 ]);
               }}
             >
               🔔
-              <div style={{ position: 'absolute', top: -2, right: -4, background: '#2AABEE', width: 6, height: 6, borderRadius: '50%' }} />
+              {notificationCount > 0 && (
+                <div style={{ position: 'absolute', top: -6, right: -8, background: '#2AABEE', color: '#fff', minWidth: 14, height: 14, padding: '0 3px', borderRadius: 7, fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {notificationCount}
+                </div>
+              )}
             </div>
 
             {/* Profile Menu */}
@@ -192,6 +217,20 @@ export const HubScreen = (): JSX.Element => {
           })()}
           style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
           🔔 Тест: Ачивка (реальный API)
+        </button>
+        <button
+          onClick={() => void (async () => {
+            const code = await createInvite({ game: 'civa', gameName: 'CIVA', room: 'test-room', role: 'player' });
+            if (!code) {
+              alert('Не удалось создать приглашение (сокет не подключён?).');
+              return;
+            }
+            const link = `${window.location.origin}${window.location.pathname}?invite=${code}`;
+            void navigator.clipboard?.writeText(link);
+            alert(`Ссылка-приглашение скопирована в буфер:\n${link}\n\nОткрой её в другой вкладке/окне (можно под другим логином), чтобы проверить авто-вход в игру.`);
+          })()}
+          style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
+          📨 Тест: Создать инвайт-ссылку
         </button>
       </div>
 

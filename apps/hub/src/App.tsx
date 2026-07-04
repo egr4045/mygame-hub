@@ -1,8 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePlatformStore } from './platform/platformStore.js';
 import { useSocialStore, useChatStore } from '@mygame/sdk';
+import { resolveInvite } from './net/inviteClient.js';
+import { routeToInvite } from './platform/inviteRouting.js';
 import { AuthScreen } from './screens/AuthScreen.js';
 import { HubScreen } from './screens/HubScreen.js';
+
+/** Reads `?invite=CODE` once on load (before any navigation strips it) — null if absent. */
+const readInviteCodeFromUrl = (): string | null => new URLSearchParams(window.location.search).get('invite');
 
 /**
  * Top-level router for the mygame hub:
@@ -15,6 +20,7 @@ import { HubScreen } from './screens/HubScreen.js';
  */
 export const App = (): JSX.Element => {
   const account = usePlatformStore((s) => s.account);
+  const [inviteCode] = useState(readInviteCodeFromUrl);
 
   useEffect(() => {
     usePlatformStore.getState().restore();
@@ -29,6 +35,24 @@ export const App = (): JSX.Element => {
       useChatStore.getState().disconnect();
     }
   }, [account?.accountId]);
+
+  // A `?invite=CODE` deep link auto-joins once we have an account (logging in first if needed —
+  // AuthScreen renders below until then). Strips the param either way so a refresh doesn't retrigger.
+  useEffect(() => {
+    if (!account || !inviteCode) return;
+    void (async () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('invite');
+      window.history.replaceState({}, '', url);
+
+      const invite = await resolveInvite(inviteCode);
+      if (!invite) {
+        alert('Приглашение не найдено или истекло.');
+        return;
+      }
+      await routeToInvite(invite);
+    })();
+  }, [account?.accountId, inviteCode]);
 
   return account ? <HubScreen /> : <AuthScreen />;
 };
