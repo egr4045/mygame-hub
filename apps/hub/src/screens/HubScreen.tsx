@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
 import { GAMES, type GameInfo } from '../platform/games.js';
-import { FriendsWidget } from '../components/FriendsWidget.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
@@ -11,6 +10,7 @@ import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
 import { ContextMenu } from '@mygame/sdk';
 import { ChatWidget } from '@mygame/sdk';
+import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';

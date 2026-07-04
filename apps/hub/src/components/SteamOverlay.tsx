@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { FriendsSidebar } from '../platform/FriendsSidebar.js';
+import { FriendsSidebar } from '@mygame/sdk';
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',

@@ -1,10 +1,8 @@
 import { useState, type CSSProperties } from 'react';
 import type { social } from '@mygame/protocol';
-import { useSocialStore } from '@mygame/sdk';
-import { routeToInvite } from './inviteRouting.js';
-import { useMenuStore } from '@mygame/sdk';
-import { usePlatformStore } from './platformStore.js';
-import { useChatStore } from '@mygame/sdk';
+import { useSocialStore } from '../state/socialStore.js';
+import { useMenuStore } from '../state/menuStore.js';
+import { useChatStore } from '../state/chatStore.js';
 
 const inputStyle: CSSProperties = {
   flex: 1,
@@ -48,18 +46,15 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
   const me = useSocialStore((s) => s.me);
   const openMenu = useMenuStore((s) => s.openMenu);
   const openChatWithUser = useChatStore((s) => s.openChatWithUser);
-  const activeGameId = usePlatformStore((s) => s.selectedGame);
   const friends = useSocialStore((s) => s.friends);
-  const invites = useSocialStore((s) => s.invites);
   const status = useSocialStore((s) => s.status);
-  const { addByCode, accept, decline, removeFriend, dismissInvite } = useSocialStore.getState();
+  const { addByCode, accept, decline, removeFriend } = useSocialStore.getState();
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
 
   const incoming = friends.filter((f) => f.status === 'incoming');
   const accepted = friends.filter((f) => f.status === 'accepted');
-  const outgoing = friends.filter((f) => f.status === 'outgoing');
-  
+
   const inGame = accepted.filter(f => f.presence === 'online' && f.activity);
   const online = accepted.filter(f => f.presence === 'online' && !f.activity);
   const offline = accepted.filter(f => f.presence === 'offline');
@@ -86,7 +81,7 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
       { label: '👤 Посмотреть профиль', action: () => alert(`Открыт профиль ${f.displayName}`) },
       { label: '💬 Написать сообщение', action: () => openChatWithUser(f.accountId, f.displayName) },
       { separator: true, action: () => {} },
-      { label: '🎮 Пригласить в текущую игру', action: () => alert('Приглашение отправлено!'), disabled: !activeGameId },
+      { label: '🎮 Пригласить в игру', action: () => alert('Приглашение отправлено!') },
       { label: '🚀 Присоединиться к игре', action: () => alert('Присоединяемся...'), disabled: !f.presence },
       { label: '🎤 Позвонить', action: () => alert('Звонок...') },
       { separator: true, action: () => {} },
