@@ -30,10 +30,11 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
 
   const persistConversation = (c: Conversation): void =>
     queue.push('chat.conversation', () =>
-      pool.query(`INSERT INTO conversations (id, type, name, created_at) VALUES ($1, $2, $3, $4)`, [
+      pool.query(`INSERT INTO conversations (id, type, name, owner_id, created_at) VALUES ($1, $2, $3, $4, $5)`, [
         c.id,
         c.type,
         c.name,
+        c.ownerId,
         c.createdAt,
       ]),
     );
@@ -46,6 +47,14 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
          ON CONFLICT (conversation_id, account_id) DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
         [conversationId, accountId, lastReadAt],
       ),
+    );
+
+  const removeMemberRow = (conversationId: string, accountId: string): void =>
+    queue.push('chat.member.remove', () =>
+      pool.query(`DELETE FROM conversation_members WHERE conversation_id = $1 AND account_id = $2`, [
+        conversationId,
+        accountId,
+      ]),
     );
 
   const persistMessage = (m: ChatMessage): void =>
@@ -63,15 +72,16 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       for (const r of accounts.rows) mem.upsertAccount(r.id as string, r.display_name as string);
 
       const convRows = await pool.query(
-        `SELECT c.id, c.type, c.name, c.created_at, array_agg(cm.account_id) AS participant_ids
+        `SELECT c.id, c.type, c.name, c.owner_id, c.created_at, array_agg(cm.account_id) AS participant_ids
          FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id
-         GROUP BY c.id, c.type, c.name, c.created_at`,
+         GROUP BY c.id, c.type, c.name, c.owner_id, c.created_at`,
       );
       const conversations: Conversation[] = convRows.rows.map((r) => ({
         id: r.id as string,
         type: r.type as Conversation['type'],
         name: (r.name as string | null) ?? null,
         participantIds: r.participant_ids as string[],
+        ownerId: (r.owner_id as string | null) ?? null,
         createdAt: Number(r.created_at),
       }));
 
@@ -112,7 +122,7 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
     getAccount: (id) => mem.getAccount(id),
 
     openDm(a, b) {
-      const before = mem.threads(a).find((t) => t.type === 'dm' && t.participantIds.includes(b));
+      const before = mem.threads(a).find((t) => t.type === 'dm' && t.participants.some((p) => p.accountId === b));
       const conv = mem.openDm(a, b);
       if (!before) {
         persistConversation(conv);
@@ -132,6 +142,23 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
 
     isParticipant: (conversationId, accountId) => mem.isParticipant(conversationId, accountId),
     participantsOf: (conversationId) => mem.participantsOf(conversationId),
+    ownerOf: (conversationId) => mem.ownerOf(conversationId),
+
+    addMembers(conversationId, memberIds) {
+      const before = mem.participantsOf(conversationId);
+      const result = mem.addMembers(conversationId, memberIds);
+      if (typeof result !== 'string') {
+        const newIds = result.participantIds.filter((id) => !before.includes(id));
+        for (const id of newIds) persistMember(conversationId, id, 0);
+      }
+      return result;
+    },
+
+    removeMember(conversationId, targetId) {
+      const result = mem.removeMember(conversationId, targetId);
+      if (typeof result !== 'string') removeMemberRow(conversationId, targetId);
+      return result;
+    },
 
     send(conversationId, senderId, text) {
       const m = mem.send(conversationId, senderId, text);

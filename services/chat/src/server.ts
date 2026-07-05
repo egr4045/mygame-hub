@@ -131,6 +131,38 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       }),
     );
 
+    socket.on(chat.C2S.addMembers, (raw, ack?: (res: chat.AddMembersAck) => void) =>
+      guard(() => {
+        const { conversationId, memberIds } = parse(chat.addMembersPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const result = deps.store.addMembers(conversationId, memberIds);
+        if (typeof result === 'string') throw new ContractError('validation', result);
+        if (typeof ack === 'function') ack({ conversationId: result.id });
+        for (const p of result.participantIds) emitThreads(p);
+      }),
+    );
+
+    socket.on(chat.C2S.removeMember, (raw, ack?: (res: chat.RemoveMemberAck) => void) =>
+      guard(() => {
+        const { conversationId, accountId: targetId } = parse(chat.removeMemberPayload, raw);
+        const isSelf = targetId === accountId;
+        // Ownership doesn't transfer on leave, so also require the caller still be a participant —
+        // otherwise a departed owner would retain kick power forever over a group they already left.
+        const isOwner =
+          deps.store.isParticipant(conversationId, accountId) && deps.store.ownerOf(conversationId) === accountId;
+        if (!isSelf && !isOwner) {
+          throw new ContractError('forbidden', 'only the group owner may remove other members');
+        }
+        const before = deps.store.participantsOf(conversationId);
+        const result = deps.store.removeMember(conversationId, targetId);
+        if (typeof result === 'string') throw new ContractError('validation', result);
+        if (typeof ack === 'function') ack({ ok: true });
+        for (const p of before) emitThreads(p);
+      }),
+    );
+
     socket.on(chat.C2S.send, (raw, ack?: (res: chat.SendAck) => void) =>
       guard(() => {
         const { conversationId, text } = parse(chat.sendPayload, raw);

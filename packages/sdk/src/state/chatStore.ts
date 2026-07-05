@@ -30,12 +30,14 @@ export interface ChatSession {
   id: string;
   type: 'dm' | 'group';
   name: string;
-  participants: string[];
+  participants: chat.ChatParticipant[];
   messages: ChatMessage[];
   avatar?: string;
   unreadCount?: number;
   /** Internal: dm only, drives read-receipt recomputation on every thread push. */
   otherReadAt?: number | null;
+  /** group only: the creator, who alone may remove *other* members. Null for dm. */
+  ownerId?: string | null;
 }
 
 interface ChatState {
@@ -54,12 +56,19 @@ interface ChatState {
   openChatWithUser: (userId: string, userName: string) => void;
   /** Create a group with `memberIds` (I'm added automatically) and open it. */
   createGroup: (name: string, memberIds: string[]) => void;
+  /** group only; any current member may add others. */
+  addMembers: (chatId: string, memberIds: string[]) => void;
+  /** group only; self-removal (leave) is always allowed, removing someone else requires being the owner. */
+  removeMember: (chatId: string, accountId: string) => void;
+  /** Convenience: remove myself from a group. */
+  leaveGroup: (chatId: string) => void;
   /** `_senderId` is accepted for call-site compatibility but ignored — the server derives it from the JWT. */
   sendMessage: (chatId: string, text: string, _senderId?: string) => void;
 }
 
 let socket: Socket | null = null;
 let meId: string | null = null;
+let meName: string | null = null;
 
 const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -89,11 +98,14 @@ const applyOtherReadAt = (messages: ChatMessage[], otherReadAt: number | null): 
       : m,
   );
 
-/** Merge a pushed thread list into existing sessions, re-deriving dm read status from `otherReadAt`. */
+/** Merge a pushed thread list into existing sessions, re-deriving dm read status from `otherReadAt`.
+ *  The push is the *complete* current list for this account (server "push the full view" model), so
+ *  any local session whose id is absent from `threads` is one I've left/been removed from — dropped,
+ *  not carried over — while everything still present keeps its locally-loaded messages/avatar. */
 const mergeThreads = (sessions: ChatSession[], threads: chat.ChatThread[]): ChatSession[] => {
-  const byId = new Map(sessions.map((s) => [s.id, s]));
-  for (const t of threads) {
-    const existing = byId.get(t.conversationId);
+  const existingById = new Map(sessions.map((s) => [s.id, s]));
+  return threads.map((t) => {
+    const existing = existingById.get(t.conversationId);
     const hasLoaded = existing?.messages && existing.messages.length > 0 && existing.messages[0]!.id !== 'sys-empty';
     const messages = hasLoaded
       ? t.type === 'dm'
@@ -102,18 +114,18 @@ const mergeThreads = (sessions: ChatSession[], threads: chat.ChatThread[]): Chat
       : t.lastMessage
         ? [toUiMessage(t.lastMessage, t.type, t.otherReadAt)]
         : [];
-    byId.set(t.conversationId, {
+    return {
       id: t.conversationId,
       type: t.type,
       name: t.name,
-      participants: t.participantIds,
+      participants: t.participants,
       ...(existing?.avatar !== undefined ? { avatar: existing.avatar } : {}),
       messages,
       unreadCount: t.unreadCount,
       otherReadAt: t.otherReadAt,
-    });
-  }
-  return [...byId.values()];
+      ownerId: t.ownerId,
+    };
+  });
 };
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -136,6 +148,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const session = await login(prev.displayName, prev.accountId);
       token = session.accessToken;
       meId = session.accountId;
+      meName = session.displayName;
     } catch (err) {
       set({ status: 'error', error: String(err) });
       return;
@@ -162,7 +175,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             id: p.message.conversationId,
             type: 'dm',
             name: p.message.senderName,
-            participants: meId ? [meId, p.message.senderId] : [p.message.senderId],
+            participants: [
+              ...(meId ? [{ accountId: meId, displayName: meName ?? meId }] : []),
+              { accountId: p.message.senderId, displayName: p.message.senderName },
+            ],
             messages: [toUiMessage(p.message, 'dm', null)],
           };
           return { sessions: [...s.sessions, fresh] };
@@ -194,6 +210,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket?.close();
     socket = null;
     meId = null;
+    meName = null;
     set({ status: 'idle', sessions: [] });
   },
 
@@ -216,7 +233,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   openChatWithUser: (userId, userName) => {
-    const existing = get().sessions.find((s) => s.type === 'dm' && s.participants.includes(userId));
+    const existing = get().sessions.find(
+      (s) => s.type === 'dm' && s.participants.some((p) => p.accountId === userId),
+    );
     if (existing) {
       get().openChat(existing.id);
       return;
@@ -235,7 +254,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: conversationId,
           type: 'dm',
           name: userName,
-          participants: meId ? [meId, userId] : [userId],
+          participants: [
+            ...(meId ? [{ accountId: meId, displayName: meName ?? meId }] : []),
+            { accountId: userId, displayName: userName },
+          ],
           messages: EMPTY_HISTORY_PLACEHOLDER,
         };
         return { sessions: [...s.sessions, placeholder] };
@@ -253,6 +275,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       get().openChat(ack.conversationId);
     });
+  },
+
+  addMembers: (chatId, memberIds) => {
+    if (!socket?.connected || memberIds.length === 0) return;
+    socket.emit(chat.C2S.addMembers, { conversationId: chatId, memberIds }, (ack: chat.AddMembersAck) => {
+      if (ack?.error) set({ error: ack.error });
+    });
+  },
+
+  removeMember: (chatId, accountId) => {
+    if (!socket?.connected) return;
+    socket.emit(chat.C2S.removeMember, { conversationId: chatId, accountId }, (ack: chat.RemoveMemberAck) => {
+      if (ack?.error) set({ error: ack.error });
+    });
+  },
+
+  leaveGroup: (chatId) => {
+    if (!meId) return;
+    get().removeMember(chatId, meId);
   },
 
   sendMessage: (chatId, text) => {

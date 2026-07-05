@@ -63,15 +63,17 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     );
     CREATE INDEX IF NOT EXISTS invites_expires_at_idx ON invites (expires_at);
 
-    -- Chat: a conversation is either a 2-member 'dm' or a named 'group' (fixed membership for now —
-    -- no add/remove member yet, see docs/PLAN.md). Membership carries per-member read state, so a
-    -- message has no per-recipient row to update — "read" is "created_at <= my last_read_at".
+    -- Chat: a conversation is either a 2-member 'dm' or a named 'group' with mutable membership.
+    -- Membership carries per-member read state, so a message has no per-recipient row to update —
+    -- "read" is "created_at <= my last_read_at".
     CREATE TABLE IF NOT EXISTS conversations (
       id            TEXT PRIMARY KEY,
       type          TEXT NOT NULL, -- 'dm' | 'group'
       name          TEXT,          -- set for groups; null for dm (name is derived client-side)
       created_at    BIGINT NOT NULL
     );
+    -- group only: the creator, who alone may remove *other* members. Null for dm.
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_id TEXT;
 
     CREATE TABLE IF NOT EXISTS conversation_members (
       conversation_id  TEXT NOT NULL,

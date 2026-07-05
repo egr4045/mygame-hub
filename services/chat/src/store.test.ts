@@ -75,11 +75,72 @@ describe('chat store — groups', () => {
   });
 });
 
+describe('chat store — group membership', () => {
+  it('ownerOf is the creator for a group and null for a dm', () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b']);
+    expect(s.ownerOf(group.id)).toBe('a');
+    const dm = s.openDm('a', 'b');
+    expect(s.ownerOf(dm.id)).toBeNull();
+  });
+
+  it('addMembers adds new members who start fully unread', () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b']);
+    s.send(group.id, 'a', 'before c joined');
+    const result = s.addMembers(group.id, ['c']);
+    expect(result).toMatchObject({ participantIds: ['a', 'b', 'c'] });
+    const cThread = s.threads('c').find((t) => t.conversationId === group.id);
+    // c sees the pre-existing message as unread, not "caught up" — same rule as a fresh dm/group.
+    expect(cThread).toMatchObject({ unreadCount: 1 });
+  });
+
+  it('addMembers silently skips members already present (no duplicates, no error)', () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b']);
+    const result = s.addMembers(group.id, ['b', 'c']);
+    expect(result).toMatchObject({ participantIds: ['a', 'b', 'c'] });
+  });
+
+  it('addMembers rejects an unknown conversation or a dm', () => {
+    const s = createMemoryChatStore();
+    expect(s.addMembers('missing', ['x'])).toBe('not_found');
+    const dm = s.openDm('a', 'b');
+    expect(s.addMembers(dm.id, ['c'])).toBe('not_a_group');
+  });
+
+  it('removeMember drops a member (kick) so they no longer see the thread', () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b', 'c']);
+    const result = s.removeMember(group.id, 'c');
+    expect(result).toMatchObject({ participantIds: ['a', 'b'] });
+    expect(s.threads('c').find((t) => t.conversationId === group.id)).toBeUndefined();
+    expect(s.isParticipant(group.id, 'c')).toBe(false);
+  });
+
+  it('removeMember allows a member to remove themselves (leave)', () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b']);
+    expect(s.removeMember(group.id, 'b')).toMatchObject({ participantIds: ['a'] });
+  });
+
+  it('removeMember rejects an unknown conversation, a dm, or a non-member', () => {
+    const s = createMemoryChatStore();
+    expect(s.removeMember('missing', 'a')).toBe('not_found');
+    const dm = s.openDm('a', 'b');
+    expect(s.removeMember(dm.id, 'a')).toBe('not_a_group');
+    const group = s.createGroup('a', 'Squad', ['b']);
+    expect(s.removeMember(group.id, 'stranger')).toBe('not_a_member');
+  });
+});
+
 describe('chat store — hydration', () => {
   it('hydrate() reconstructs conversations, membership and messages verbatim', () => {
     const s = createMemoryChatStore();
     s.hydrate({
-      conversations: [{ id: 'c1', type: 'dm', name: null, participantIds: ['a', 'b'], createdAt: 50 }],
+      conversations: [
+        { id: 'c1', type: 'dm', name: null, participantIds: ['a', 'b'], ownerId: null, createdAt: 50 },
+      ],
       memberships: [
         { conversationId: 'c1', accountId: 'a', lastReadAt: 100 },
         { conversationId: 'c1', accountId: 'b', lastReadAt: 0 },

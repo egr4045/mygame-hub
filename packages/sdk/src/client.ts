@@ -89,6 +89,15 @@ class MygameClient {
       useChatStore.getState().openChatWithUser(userId, userName),
     /** Create a group (I'm added automatically) and open it. */
     createGroup: (name: string, memberIds: string[]): void => useChatStore.getState().createGroup(name, memberIds),
+    /** Group only; any current member may add others. */
+    addMembers: (conversationId: string, memberIds: string[]): void =>
+      useChatStore.getState().addMembers(conversationId, memberIds),
+    /** Group only; removes `accountId` — self-removal (leave) is always allowed, removing someone
+     *  else requires being the group's owner. */
+    removeMember: (conversationId: string, accountId: string): void =>
+      useChatStore.getState().removeMember(conversationId, accountId),
+    /** Convenience: leave a group (remove myself). */
+    leaveGroup: (conversationId: string): void => useChatStore.getState().leaveGroup(conversationId),
     /** Send into an already-open conversation (dm or group) by its id. */
     send: (conversationId: string, text: string): void => useChatStore.getState().sendMessage(conversationId, text),
     /** All of my conversations (DMs + groups), newest activity first. */

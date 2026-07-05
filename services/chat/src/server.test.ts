@@ -61,6 +61,12 @@ const createGroup = (c: ClientSocket, name: string, memberIds: string[]) =>
 const send = (c: ClientSocket, conversationId: string, text: string) =>
   new Promise<chat.SendAck>((res) => c.emit(chat.C2S.send, { conversationId, text }, res));
 
+const addMembers = (c: ClientSocket, conversationId: string, memberIds: string[]) =>
+  new Promise<chat.AddMembersAck>((res) => c.emit(chat.C2S.addMembers, { conversationId, memberIds }, res));
+
+const removeMember = (c: ClientSocket, conversationId: string, accountId: string) =>
+  new Promise<chat.RemoveMemberAck>((res) => c.emit(chat.C2S.removeMember, { conversationId, accountId }, res));
+
 describe('chat server — DMs', () => {
   it('opens the same DM conversation for both sides and delivers a message', async () => {
     const port = await startServer();
@@ -171,6 +177,88 @@ describe('chat server — groups', () => {
 
     const err = new Promise<{ code: string }>((res) => outsider.once(chat.S2C.error, res));
     outsider.emit(chat.C2S.send, { conversationId, text: 'sneaky' });
+    expect((await err).code).toBe('forbidden');
+  });
+});
+
+describe('chat server — group membership', () => {
+  it('any current member can add a new member, who is immediately pushed the thread', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const c3 = await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+
+    // c2 is a plain member (not the owner) and can still add a3.
+    const c3Threads = waitThreads(c3, (t) => t.some((x) => x.conversationId === conversationId));
+    const ack = await addMembers(c2, conversationId!, ['a3']);
+    expect(ack.conversationId).toBe(conversationId);
+
+    const threads = await c3Threads;
+    expect(threads.find((t) => t.conversationId === conversationId)).toMatchObject({ type: 'group', name: 'Squad' });
+  });
+
+  it('rejects addMembers from someone who is not a participant', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    const outsider = await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+
+    const err = new Promise<{ code: string }>((res) => outsider.once(chat.S2C.error, res));
+    outsider.emit(chat.C2S.addMembers, { conversationId, memberIds: ['a3'] });
+    expect((await err).code).toBe('forbidden');
+  });
+
+  it('the group owner can remove another member, who is dropped from their own thread list', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2', 'a3']);
+
+    const c2Dropped = waitThreads(c2, (t) => !t.some((x) => x.conversationId === conversationId));
+    const ack = await removeMember(c1, conversationId!, 'a2');
+    expect(ack.ok).toBe(true);
+    await c2Dropped;
+  });
+
+  it('a non-owner member cannot remove someone else', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2', 'a3']);
+
+    const err = new Promise<{ code: string }>((res) => c2.once(chat.S2C.error, res));
+    c2.emit(chat.C2S.removeMember, { conversationId, accountId: 'a3' });
+    expect((await err).code).toBe('forbidden');
+  });
+
+  it('any member — including the owner — can remove themselves (leave)', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+
+    const c1Left = waitThreads(c1, (t) => !t.some((x) => x.conversationId === conversationId));
+    const ownerAck = await removeMember(c1, conversationId!, 'a1');
+    expect(ownerAck.ok).toBe(true);
+    await c1Left;
+
+    const memberAck = await removeMember(c2, conversationId!, 'a2');
+    expect(memberAck.ok).toBe(true);
+  });
+
+  it('a removed member can no longer send into the group', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+    await removeMember(c1, conversationId!, 'a2');
+
+    const err = new Promise<{ code: string }>((res) => c2.once(chat.S2C.error, res));
+    c2.emit(chat.C2S.send, { conversationId, text: 'sneaky' });
     expect((await err).code).toBe('forbidden');
   });
 });

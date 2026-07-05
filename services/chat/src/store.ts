@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 /**
  * Chat store port: conversations (DMs and groups) + messages. A DM is just a 2-member conversation
  * (`type: 'dm'`), found-or-created deterministically per account pair via `openDm`; a group is
- * created explicitly with a name and a fixed initial member list (no add/remove member yet — see
- * docs/PLAN.md). "Read" is tracked per member per conversation (`lastReadAt`), not per message — that
- * scales to N-member groups without a combinatorial per-message read-by-whom state.
+ * created explicitly with a name and an initial member list, and its membership can change afterward
+ * (`addMembers`/`removeMember`). "Read" is tracked per member per conversation (`lastReadAt`), not per
+ * message — that scales to N-member groups without a combinatorial per-message read-by-whom state.
  *
  * In-memory adapter for standalone/dev and tests; a Postgres adapter (`pgStore.ts`) swaps in for
  * durable history without touching the service logic (ports & adapters).
@@ -23,6 +23,8 @@ export interface Conversation {
   /** Set for groups; null for dm (the hub derives a dm's display name from the other participant). */
   name: string | null;
   participantIds: string[];
+  /** group only: the creator, who alone may remove *other* members. Null for dm. */
+  ownerId: string | null;
   createdAt: number;
 }
 
@@ -35,26 +37,41 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+export interface ChatParticipant {
+  accountId: string;
+  displayName: string;
+}
+
 export interface ChatThread {
   conversationId: string;
   type: ConversationType;
   name: string;
-  participantIds: string[];
+  participants: ChatParticipant[];
   lastMessage: ChatMessage | null;
   unreadCount: number;
   /** dm only: the other participant's last-read timestamp (read-receipt UI). Null for groups. */
   otherReadAt: number | null;
+  ownerId: string | null;
 }
+
+/** Why an `addMembers`/`removeMember` call was rejected by the store (not found or wrong type). */
+export type MembershipChangeError = 'not_found' | 'not_a_group' | 'not_a_member';
 
 export interface ChatStore {
   upsertAccount(id: string, displayName: string): Account;
   getAccount(id: string): Account | undefined;
   /** Find-or-create the DM conversation between `a` and `b`. Deterministic for a given pair. */
   openDm(a: string, b: string): Conversation;
-  /** Create a group; `creator` is added to `memberIds` automatically. */
+  /** Create a group; `creator` is added to `memberIds` automatically and becomes its owner. */
   createGroup(creator: string, name: string, memberIds: string[]): Conversation;
   isParticipant(conversationId: string, accountId: string): boolean;
   participantsOf(conversationId: string): string[];
+  /** group only: the creator, who alone may remove other members. Null for dm/not-found. */
+  ownerOf(conversationId: string): string | null;
+  /** group only. Members already present are silently skipped (no error, no duplicate). */
+  addMembers(conversationId: string, memberIds: string[]): Conversation | MembershipChangeError;
+  /** group only. Removes `targetId` (self-removal = "leave"). */
+  removeMember(conversationId: string, targetId: string): Conversation | MembershipChangeError;
   /** Null if `senderId` isn't a participant of `conversationId`. */
   send(conversationId: string, senderId: string, text: string): ChatMessage | null;
   /** Mark everything up to now as read for `accountId`. Null if there was nothing unread. */
@@ -91,8 +108,8 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
   /** New members start having read nothing (0), not "caught up to now" — a message landing in the
    *  same tick as conversation creation must still count as unread. */
   const initMembers = (conversationId: string, participantIds: string[]): void => {
-    const m = new Map<string, number>();
-    for (const p of participantIds) m.set(p, 0);
+    const m = membership.get(conversationId) ?? new Map<string, number>();
+    for (const p of participantIds) if (!m.has(p)) m.set(p, 0);
     membership.set(conversationId, m);
   };
 
@@ -113,7 +130,14 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       const key = sortedKey(a, b);
       const existingId = dmIndex.get(key);
       if (existingId) return conversations.get(existingId)!;
-      const conv: Conversation = { id: randomUUID(), type: 'dm', name: null, participantIds: [a, b], createdAt: now() };
+      const conv: Conversation = {
+        id: randomUUID(),
+        type: 'dm',
+        name: null,
+        participantIds: [a, b],
+        ownerId: null,
+        createdAt: now(),
+      };
       conversations.set(conv.id, conv);
       dmIndex.set(key, conv.id);
       initMembers(conv.id, [a, b]);
@@ -122,7 +146,14 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
 
     createGroup(creator, name, memberIds) {
       const participantIds = [...new Set([creator, ...memberIds])];
-      const conv: Conversation = { id: randomUUID(), type: 'group', name, participantIds, createdAt: now() };
+      const conv: Conversation = {
+        id: randomUUID(),
+        type: 'group',
+        name,
+        participantIds,
+        ownerId: creator,
+        createdAt: now(),
+      };
       conversations.set(conv.id, conv);
       initMembers(conv.id, participantIds);
       return conv;
@@ -131,6 +162,29 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
     isParticipant: (conversationId, accountId) =>
       conversations.get(conversationId)?.participantIds.includes(accountId) ?? false,
     participantsOf: (conversationId) => conversations.get(conversationId)?.participantIds ?? [],
+    ownerOf: (conversationId) => conversations.get(conversationId)?.ownerId ?? null,
+
+    addMembers(conversationId, memberIds) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return 'not_found';
+      if (conv.type !== 'group') return 'not_a_group';
+      const newIds = memberIds.filter((id) => !conv.participantIds.includes(id));
+      if (newIds.length > 0) {
+        conv.participantIds = [...conv.participantIds, ...newIds];
+        initMembers(conversationId, newIds);
+      }
+      return conv;
+    },
+
+    removeMember(conversationId, targetId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return 'not_found';
+      if (conv.type !== 'group') return 'not_a_group';
+      if (!conv.participantIds.includes(targetId)) return 'not_a_member';
+      conv.participantIds = conv.participantIds.filter((id) => id !== targetId);
+      membership.get(conversationId)?.delete(targetId);
+      return conv;
+    },
 
     send(conversationId, senderId, text) {
       const conv = conversations.get(conversationId);
@@ -181,10 +235,11 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
           conversationId: conv.id,
           type: conv.type,
           name,
-          participantIds: conv.participantIds,
+          participants: conv.participantIds.map((id) => ({ accountId: id, displayName: displayNameOf(id) })),
           lastMessage: arr[arr.length - 1] ?? null,
           unreadCount,
           otherReadAt,
+          ownerId: conv.ownerId,
         });
       }
       return out.sort((a, b) => (b.lastMessage?.createdAt ?? 0) - (a.lastMessage?.createdAt ?? 0));

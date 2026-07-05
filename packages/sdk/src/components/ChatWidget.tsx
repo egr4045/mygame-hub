@@ -17,6 +17,8 @@ export const ChatWidget = (): JSX.Element => {
   const toggleChat = useChatStore((s) => s.toggleChat);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const createGroup = useChatStore((s) => s.createGroup);
+  const addMembers = useChatStore((s) => s.addMembers);
+  const leaveGroup = useChatStore((s) => s.leaveGroup);
   const openMenu = useMenuStore((s) => s.openMenu);
 
   const me = useSocialStore((s) => s.me);
@@ -34,6 +36,10 @@ export const ChatWidget = (): JSX.Element => {
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
+  // Add-members-to-existing-group form
+  const [isAddingMembers, setIsAddingMembers] = useState(false);
+  const [addMemberIds, setAddMemberIds] = useState<string[]>([]);
 
   // Dragging state
   const [position, setPosition] = useState({ x: window.innerWidth - 650, y: window.innerHeight - 500 });
@@ -113,6 +119,16 @@ export const ChatWidget = (): JSX.Element => {
     setIsCreatingGroup(false);
   };
 
+  const toggleAddMember = (id: string) =>
+    setAddMemberIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const submitAddMembers = () => {
+    if (!activeChatId || addMemberIds.length === 0) return;
+    addMembers(activeChatId, addMemberIds);
+    setAddMemberIds([]);
+    setIsAddingMembers(false);
+  };
+
   return (
     <div
       className="civa-fade-in"
@@ -158,7 +174,7 @@ export const ChatWidget = (): JSX.Element => {
           {sessions.map(s => (
             <div
               key={s.id}
-              onClick={() => { openChat(s.id); setCallState('none'); }}
+              onClick={() => { openChat(s.id); setCallState('none'); setIsAddingMembers(false); }}
               style={{
                 padding: '12px 16px',
                 cursor: 'pointer',
@@ -224,6 +240,44 @@ export const ChatWidget = (): JSX.Element => {
               </button>
             </div>
           </div>
+        ) : isAddingMembers && activeSession ? (
+          /* --- ADD MEMBERS FORM --- */
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Добавить в «{activeSession.name}»</div>
+            {(() => {
+              const addable = acceptedFriends.filter(
+                (f) => !activeSession.participants.some((p) => p.accountId === f.accountId),
+              );
+              return (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+                  {addable.length === 0 && (
+                    <div style={{ color: '#6c7784', fontSize: 12 }}>Все друзья уже в группе.</div>
+                  )}
+                  {addable.map((f) => (
+                    <label key={f.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13 }}>
+                      <input type="checkbox" checked={addMemberIds.includes(f.accountId)} onChange={() => toggleAddMember(f.accountId)} />
+                      {f.displayName}
+                    </label>
+                  ))}
+                </div>
+              );
+            })()}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => { setIsAddingMembers(false); setAddMemberIds([]); }}
+                style={{ flex: 1, background: '#3d4450', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={submitAddMembers}
+                disabled={addMemberIds.length === 0}
+                style={{ flex: 1, background: '#1a9fff', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: addMemberIds.length === 0 ? 0.5 : 1 }}
+              >
+                Добавить
+              </button>
+            </div>
+          </div>
         ) : activeSession ? (
           <>
             {/* Header */}
@@ -240,6 +294,24 @@ export const ChatWidget = (): JSX.Element => {
 
               {/* Call Action Buttons */}
               <div style={{ display: 'flex', gap: 8 }}>
+                {activeSession.type === 'group' && (
+                  <>
+                    <button
+                      onClick={() => setIsAddingMembers(true)}
+                      style={{ background: '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                      title="Добавить участника"
+                    >
+                      ➕
+                    </button>
+                    <button
+                      onClick={() => leaveGroup(activeSession.id)}
+                      style={{ background: '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                      title="Покинуть группу"
+                    >
+                      🚪
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => setCallState(callState === 'audio' ? 'none' : 'audio')}
                   style={{ background: callState === 'audio' ? '#5c7e10' : '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
