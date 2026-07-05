@@ -9,6 +9,7 @@
  */
 import { type Pool, WriteQueue } from '@mygame/platform-db';
 import type { Logger } from '@mygame/shared-types';
+import type { TitleAchievementRef } from '@mygame/protocol';
 import { createMemorySocialStore, type SocialStore } from './store.js';
 
 export interface PgSocialStore extends SocialStore {
@@ -57,8 +58,14 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
 
   return {
     async init() {
-      const accounts = await pool.query(`SELECT id, display_name FROM accounts`);
-      for (const r of accounts.rows) mem.upsertAccount(r.id as string, r.display_name as string);
+      const accounts = await pool.query(`SELECT id, display_name, avatar_icon, title_achievement FROM accounts`);
+      for (const r of accounts.rows) {
+        mem.upsertAccount(r.id as string, r.display_name as string);
+        mem.updateProfile(r.id as string, {
+          avatarIcon: (r.avatar_icon as string | null) ?? null,
+          titleAchievement: (r.title_achievement as TitleAchievementRef | null) ?? null,
+        });
+      }
 
       const friendships = await pool.query(
         `SELECT lo, hi, accepted, requested_by FROM friendships`,
@@ -81,6 +88,17 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
       return a;
     },
     getAccount: (id) => mem.getAccount(id),
+    // Social never writes avatar/title back — auth owns them. This just mirrors into memory.
+    updateProfile: (id, profile) => mem.updateProfile(id, profile),
+    async refreshProfile(id) {
+      const r = await pool.query(`SELECT avatar_icon, title_achievement FROM accounts WHERE id = $1`, [id]);
+      const row = r.rows[0];
+      if (!row) return;
+      mem.updateProfile(id, {
+        avatarIcon: (row.avatar_icon as string | null) ?? null,
+        titleAchievement: (row.title_achievement as TitleAchievementRef | null) ?? null,
+      });
+    },
     request(from, to) {
       mem.request(from, to);
       persistEdge(from, to);

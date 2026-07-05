@@ -20,10 +20,10 @@ afterEach(() => {
   server = undefined;
 });
 
-const startServer = (): Promise<number> => {
+const startServer = (store = createMemorySocialStore()): Promise<number> => {
   server = createSocialServer({
     auth,
-    store: createMemorySocialStore(),
+    store,
     invites: createMemoryInviteStore(),
     logger: createCapturingLogger(),
     corsOrigin: '*',
@@ -158,5 +158,50 @@ describe('social server — friends + presence', () => {
     const err = new Promise<{ code: string }>((res) => c1.once(social.S2C.error, res));
     c1.emit(social.C2S.inviteFriend, { accountId: 'a2', game: 'civa', gameName: 'CIVA', room: 'r', role: 'player' });
     expect((await err).code).toBe('forbidden');
+  });
+});
+
+describe('social server — profile fields', () => {
+  it('surfaces avatarIcon/titleAchievement on me and to friends', async () => {
+    // Simulate what a Postgres-backed store's refreshProfile would already have populated.
+    const store = createMemorySocialStore();
+    store.upsertAccount('a1', 'Mara');
+    store.updateProfile('a1', {
+      avatarIcon: 'data:image/png;base64,abc',
+      titleAchievement: { gameId: 'civa', achievementId: 'veteran' },
+    });
+    const port = await startServer(store);
+
+    // Register the `me` listener before the connect handshake completes -- the server pushes it
+    // the instant it accepts the connection (a one-shot event, not a queryable state), so awaiting
+    // `connect()` first (which itself waits on the client 'connect' event) risks missing it.
+    const token = await auth.signAccess('a1', 'Mara');
+    const c1 = ioc(`http://127.0.0.1:${port}`, { auth: { token }, transports: ['websocket'], forceNew: true });
+    clients.push(c1);
+    const me = new Promise<social.MeEvent>((res) => c1.once(social.S2C.me, res));
+    await new Promise<void>((res) => c1.once('connect', () => res()));
+    expect(await me).toMatchObject({
+      avatarIcon: 'data:image/png;base64,abc',
+      titleAchievement: { gameId: 'civa', achievementId: 'veteran' },
+    });
+
+    const c2 = await connect(port, 'a2', 'Wei');
+    const incoming = waitFriends(c2, (f) => find(f, 'a1')?.status === 'incoming');
+    c1.emit(social.C2S.request, { code: 'a2' });
+    const list = await incoming;
+    expect(find(list, 'a1')).toMatchObject({
+      avatarIcon: 'data:image/png;base64,abc',
+      titleAchievement: { gameId: 'civa', achievementId: 'veteran' },
+    });
+  });
+
+  it('a friend with no profile set shows null avatar/title, not a crash', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const incoming = waitFriends(c2, (f) => find(f, 'a1')?.status === 'incoming');
+    c1.emit(social.C2S.request, { code: 'a2' });
+    const list = await incoming;
+    expect(find(list, 'a1')).toMatchObject({ avatarIcon: null, titleAchievement: null });
   });
 });

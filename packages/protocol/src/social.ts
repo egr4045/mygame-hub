@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { errorSchema } from './errors.js';
 import { invite, inviteRole } from './invite.js';
+import { titleAchievementRef } from './auth.js';
 
 /**
  * Social contract (Socket.io) — the game-agnostic platform layer: friends + presence. A player is
@@ -29,6 +30,9 @@ export type FriendStatus = z.infer<typeof friendStatus>;
 export const friend = z.object({
   accountId: z.string(),
   displayName: z.string(),
+  /** Mirrored from the shared `accounts` table (auth is authoritative) — see ARCHITECTURE.md. */
+  avatarIcon: z.string().nullable(),
+  titleAchievement: titleAchievementRef,
   status: friendStatus,
   presence,
   activity,
@@ -80,7 +84,12 @@ export const S2C = {
 } as const;
 
 export const friendsEvent = z.object({ friends: z.array(friend) });
-export const meEvent = z.object({ accountId: z.string(), displayName: z.string() });
+export const meEvent = z.object({
+  accountId: z.string(),
+  displayName: z.string(),
+  avatarIcon: z.string().nullable(),
+  titleAchievement: titleAchievementRef,
+});
 export const inviteEvent = z.object({ invite });
 export const errorEvent = errorSchema;
 

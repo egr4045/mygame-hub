@@ -73,7 +73,8 @@ class MygameClient {
   readonly social = {
     connect: (): Promise<void> => useSocialStore.getState().connect(),
     disconnect: (): void => useSocialStore.getState().disconnect(),
-    getMe: (): MygameAccount | null => useSocialStore.getState().me,
+    /** The live, connected identity — richer than `auth.getAccount()` (also carries avatar/title). */
+    getMe: (): social.MeEvent | null => useSocialStore.getState().me,
     getFriends: (): social.Friend[] => useSocialStore.getState().friends,
     addByCode: (code: string): void => useSocialStore.getState().addByCode(code),
     setActivity: (activity: social.Activity): void => useSocialStore.getState().setActivity(activity),

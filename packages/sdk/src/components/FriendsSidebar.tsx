@@ -104,8 +104,10 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
     }}>
       {/* Header */}
       <div style={{ padding: 12, background: '#171a21', display: 'flex', alignItems: 'center' }}>
-        <div style={{ width: 40, height: 40, background: '#3d4450', borderRadius: 4, marginRight: 12 }}>
-          {/* Fake Avatar */}
+        <div style={{ width: 40, height: 40, background: '#3d4450', borderRadius: 4, marginRight: 12, overflow: 'hidden' }}>
+          {me?.avatarIcon && (
+            <img src={me.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          )}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: '15px' }}>{me?.displayName || 'Загрузка...'}</div>
@@ -197,12 +199,19 @@ const FriendRow = ({ f, onContextMenu }: { f: social.Friend, onContextMenu: (e: 
       onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
       onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
     >
-      <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2 }}>
-        <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+      <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
+        {f.avatarIcon ? (
+          <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+        )}
       </div>
       <div>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>
+        <div style={{ fontSize: '13px', fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0'), display: 'flex', alignItems: 'center', gap: 4 }}>
           {f.displayName}
+          {/* Generic "has an equipped title" indicator -- resolving it to a name/icon needs a
+              per-game display catalog the SDK deliberately doesn't own (see ARCHITECTURE.md). */}
+          {f.titleAchievement && <span title="Есть титул">🏅</span>}
         </div>
         <div style={{ fontSize: '11px', color: isInGame ? '#a3d928' : '#8f98a0' }}>
           {activityText(f)}

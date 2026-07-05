@@ -131,8 +131,8 @@ export const HubScreen = (): JSX.Element => {
                 <div style={{ fontWeight: 700, color: '#dcdedf' }}>{me?.displayName || 'Загрузка...'}</div>
               </div>
               <div style={{ width: 24, height: 24, borderRadius: 4, background: '#3d4450', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {me?.avatarUrl ? (
-                  <img src={me.avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {me?.avatarIcon ? (
+                  <img src={me.avatarIcon} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <span style={{ fontSize: 14, color: '#8f98a0' }}>👤</span>
                 )}

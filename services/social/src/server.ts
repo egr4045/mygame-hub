@@ -110,14 +110,28 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
   const friendView = (account: string): social.Friend[] =>
     deps.store.friendsOf(account).map((edge) => {
       const online = isOnline(edge.accountId);
+      const acc = deps.store.getAccount(edge.accountId);
       return {
         accountId: edge.accountId,
-        displayName: deps.store.getAccount(edge.accountId)?.displayName ?? shortCode(edge.accountId),
+        displayName: acc?.displayName ?? shortCode(edge.accountId),
+        avatarIcon: acc?.avatarIcon ?? null,
+        titleAchievement: acc?.titleAchievement ?? null,
         status: edge.status,
         presence: online ? 'online' : 'offline',
         activity: online ? (activityOf.get(edge.accountId) ?? null) : null,
       };
     });
+
+  /** My own identity as pushed on connect/profile-refresh. */
+  const meView = (accountId: string): social.MeEvent => {
+    const acc = deps.store.getAccount(accountId);
+    return {
+      accountId,
+      displayName: acc?.displayName ?? shortCode(accountId),
+      avatarIcon: acc?.avatarIcon ?? null,
+      titleAchievement: acc?.titleAchievement ?? null,
+    };
+  };
 
   const emitFriendsTo = (account: string): void => {
     const sockets = socketsOf.get(account);
@@ -142,9 +156,17 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
     socketsOf.set(accountId, set);
     deps.logger.info('connect', { accountId, socket: socket.id });
 
-    socket.emit(social.S2C.me, { accountId, displayName });
+    socket.emit(social.S2C.me, meView(accountId));
     emitFriendsTo(accountId);
     if (wasOffline) for (const edge of deps.store.friendsOf(accountId)) emitFriendsTo(edge.accountId);
+
+    // Avatar/title live on the shared `accounts` table, owned by `auth` — nothing pushes a live
+    // signal when they change elsewhere, so re-read on every connect (cheap, indexed). Once
+    // resolved, re-push so I see my own fresh profile and my friends see it too.
+    void deps.store.refreshProfile(accountId).then(() => {
+      socket.emit(social.S2C.me, meView(accountId));
+      refresh(accountId);
+    });
 
     const guard = (fn: () => void): void => {
       try {

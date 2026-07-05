@@ -20,7 +20,7 @@ const emit = (type: string, payload?: unknown): void => {
 
 interface SocialUIState {
   status: SocialStatus;
-  me: { accountId: string; displayName: string; avatarUrl?: string } | null;
+  me: social.MeEvent | null;
   friends: social.Friend[];
   /** Invites pushed to me by friends ("X invited you to CIVA"). */
   invites: Invite[];
@@ -72,7 +72,7 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     socket.on('disconnect', () => set({ status: 'connecting' }));
     socket.on('connect_error', (err: Error) => set({ status: 'error', error: err.message }));
 
-    socket.on(social.S2C.me, (p: social.MeEvent) => set({ me: { accountId: p.accountId, displayName: p.displayName } }));
+    socket.on(social.S2C.me, (p: social.MeEvent) => set({ me: p }));
     socket.on(social.S2C.friends, (p: social.FriendsEvent) => set({ friends: p.friends }));
     socket.on(social.S2C.invite, (p: social.InviteEvent) =>
       set((s) => ({ invites: [p.invite, ...s.invites.filter((i) => i.code !== p.invite.code)] })),

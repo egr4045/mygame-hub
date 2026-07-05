@@ -63,3 +63,34 @@ describe('social store — friendship graph', () => {
     expect(s.getAccount('a')?.displayName).toBe('Mara II');
   });
 });
+
+describe('social store — profile mirroring', () => {
+  it('a new account starts with no avatar/title', () => {
+    const s = createMemorySocialStore();
+    s.upsertAccount('a', 'Mara');
+    expect(s.getAccount('a')).toMatchObject({ avatarIcon: null, titleAchievement: null });
+  });
+
+  it('updateProfile merges avatar/title into an existing account', () => {
+    const s = createMemorySocialStore();
+    s.upsertAccount('a', 'Mara');
+    s.updateProfile('a', { avatarIcon: 'data:image/png;base64,abc', titleAchievement: { gameId: 'civa', achievementId: 'veteran' } });
+    expect(s.getAccount('a')).toMatchObject({
+      avatarIcon: 'data:image/png;base64,abc',
+      titleAchievement: { gameId: 'civa', achievementId: 'veteran' },
+    });
+  });
+
+  it('updateProfile is a no-op for an account that has never connected', () => {
+    const s = createMemorySocialStore();
+    expect(() => s.updateProfile('ghost', { avatarIcon: 'x', titleAchievement: null })).not.toThrow();
+    expect(s.getAccount('ghost')).toBeUndefined();
+  });
+
+  it('refreshProfile is a safe no-op in memory-only mode (nothing to refresh from)', async () => {
+    const s = createMemorySocialStore();
+    s.upsertAccount('a', 'Mara');
+    await expect(s.refreshProfile('a')).resolves.toBeUndefined();
+    expect(s.getAccount('a')).toMatchObject({ avatarIcon: null, titleAchievement: null });
+  });
+});

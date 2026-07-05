@@ -4,11 +4,15 @@
  * touching the service logic (ports & adapters). Live presence/activity are NOT here — they belong
  * to the connection layer in server.ts; this store is the persistent social graph.
  */
-import type { social } from '@mygame/protocol';
+import type { social, TitleAchievementRef } from '@mygame/protocol';
 
 export interface Account {
   id: string;
   displayName: string;
+  /** Mirrored from the shared `accounts` table; null until a Postgres-backed store refreshes it
+   *  (see `refreshProfile`). Always null in pure in-memory mode — there's nothing to mirror from. */
+  avatarIcon: string | null;
+  titleAchievement: TitleAchievementRef | null;
 }
 
 /** A friend edge seen from one account's perspective. */
@@ -20,6 +24,12 @@ export interface FriendEdge {
 export interface SocialStore {
   upsertAccount(id: string, displayName: string): Account;
   getAccount(id: string): Account | undefined;
+  /** Merge in profile display fields social mirrors from auth's account row (never writes them). */
+  updateProfile(id: string, profile: { avatarIcon: string | null; titleAchievement: TitleAchievementRef | null }): void;
+  /** Postgres-backed only: re-read this account's profile fields from the shared `accounts` table
+   *  (auth is authoritative) and merge via `updateProfile`. No-op in-memory — there's no other
+   *  source of truth to pull from, so avatar/title just stay null there. */
+  refreshProfile(id: string): Promise<void>;
   /** Send a request from `from` to `to`. Auto-accepts if `to` had already requested `from`. */
   request(from: string, to: string): void;
   /** Accept an incoming request (only if `other` requested `account`). */
@@ -53,11 +63,16 @@ export const createMemorySocialStore = (): SocialStore => {
         existing.displayName = displayName;
         return existing;
       }
-      const account: Account = { id, displayName };
+      const account: Account = { id, displayName, avatarIcon: null, titleAchievement: null };
       accounts.set(id, account);
       return account;
     },
     getAccount: (id) => accounts.get(id),
+    updateProfile(id, profile) {
+      const existing = accounts.get(id);
+      if (existing) Object.assign(existing, profile);
+    },
+    refreshProfile: async () => {},
 
     request(from, to) {
       if (from === to) return;
