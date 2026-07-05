@@ -15,19 +15,21 @@ See **`docs/STATUS.md`** for the authoritative, audited feature-by-feature break
 in-memory vs. UI-only mock). The short version:
 
 - ✅ **Real, with a backend:** account login (JWT), cross-game SSO handoff, Telegram account
-  linking/login (real bot), friends graph + live presence/activity, invite codes **and** deep-link
-  auto-join (`?invite=CODE`), a real 🔔 notification center, chat (DMs **and** groups, persisted, read
-  receipts, group membership management — add/remove/leave, owner-enforced), achievements (grant/list,
-  per-game, idempotent), profile (avatar/wallpaper/title, persisted, server-validated title), on-demand
-  game launch (Docker orchestrator), **Postgres persistence** for accounts/friends/invites/conversations
-  (gated on `DATABASE_URL`). The chat and friends UI ship as part of `@mygame/sdk` — any game embedding
-  the SDK gets them for free.
+  linking/login (real bot), friends graph + live presence/activity **and** avatar/title (mirrored
+  read-only from the account row), invite codes **and** deep-link auto-join (`?invite=CODE`), a real
+  🔔 notification center, chat (DMs **and** groups, persisted, read receipts, group membership
+  management — add/remove/leave, owner-enforced), achievements (grant/list, per-game, idempotent),
+  profile (avatar/wallpaper/title, persisted, server-validated title), on-demand game launch (Docker
+  orchestrator), **Postgres persistence** for accounts/friends/invites/conversations (gated on
+  `DATABASE_URL`). The chat and friends UI ship as part of `@mygame/sdk` — any game embedding the SDK
+  gets them for free.
 - 🟡 **Partial:** persistence falls back to in-memory when `DATABASE_URL` is unset; login is
   passwordless (the password field is ignored); kicking a specific group member has no UI yet (only
   leave + add — the API supports it); the achievements *display catalog* (name/icon/description) is
-  still a hardcoded per-game client concern, not an API; avatar/title aren't yet surfaced to friends
-  (self-view only for now); *sending* an invite from inside a real game session has no UI yet (only a
-  hub demo button exercises it).
+  still a hardcoded per-game client concern, not an API; a friend's title shows as a generic 🏅, not
+  resolved to a name (same per-game-catalog reason); a friend's avatar/title is only as fresh as your
+  *own* last reconnect, not live-pushed; *sending* an invite from inside a real game session has no UI
+  yet (only a hub demo button exercises it).
 - ❌ **UI-only mock (no backend):** voice/video calls, game store pages (changelog/forum/lobby
   browser), playtime stats, VK linking (deferred by request).
 

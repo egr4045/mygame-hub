@@ -106,6 +106,12 @@ Socket.io server layering live presence over a durable friendship graph.
   `by` field for pending direction. In-memory.
 - **Presence/activity:** *not* in the store — held in `server.ts` maps (`socketsOf`, `activityOf`)
   and recomputed live. Online = has ≥1 connected socket.
+- **Profile mirroring (avatar/title):** `Account` also carries `avatarIcon`/`titleAchievement`,
+  mirrored **read-only** from the shared `accounts` table `auth` owns (`social` never writes them —
+  `updateProfile` only ever sets the in-memory copy). `refreshProfile(id)` is how they get populated:
+  a no-op on the in-memory adapter (nothing to pull from), a live `SELECT ... WHERE id = $1` on the
+  Postgres adapter, called on every socket connect since there's no cross-service push when a profile
+  changes elsewhere — freshness is reconnect-driven, same staleness profile `displayName` already had.
 - **Push model:** on any change the server pushes the **full** friends list (with presence +
   activity resolved) to the affected account and everyone it has an edge with.
 - **C2S/S2C events:** see `protocol/src/social.ts` (`request`, `accept`, `decline`, `remove`,
@@ -179,7 +185,10 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 - **`client.ts`** — the `mygame` singleton. `mygame.init(gameId, { hubUrl })` configures endpoints,
   mounts the overlay, and opens the social **and** chat connections. Sub-APIs:
   - `auth` — session, tokens, handoff.
-  - `social` — friends/presence (`getFriends`, `addByCode`, `setActivity`, `subscribe`).
+  - `social` — friends/presence (`getMe`, `getFriends`, `addByCode`, `setActivity`, `subscribe`).
+    `getMe()`/`getFriends()` both carry `avatarIcon`/`titleAchievement` now (mirrored from the
+    account row `auth` owns) alongside `accountId`/`displayName` — richer than `auth.getAccount()`,
+    which only reads the locally-cached session and knows neither field.
   - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `addMembers`,
     `removeMember`, `leaveGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`. A game can
     either just call `open()`/`openWithUser()` and rely on the SDK-shipped `ChatWidget`, or build its
@@ -217,6 +226,10 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
   (`usePlatformStore().selectedGame`, used only to disable the already-mock "Invite to current game"
   menu item) rather than plumbing hub-only state into a component meant to be generic — the action was
   `alert(...)` either way, so nothing real was lost; the item is just no longer conditionally disabled.
+  `FriendsSidebar` renders each friend's real `avatarIcon` (and your own, in the header) as a plain
+  `<img>` — no per-game catalog needed since a data URL is self-contained — plus a generic 🏅 next to
+  a friend's name when `titleAchievement` is set. It doesn't resolve *which* title (name/icon) since
+  that lookup is per-game presentation data (same reasoning as the achievements display catalog below).
 - Built with `tsup` (`tsup.config.ts`) for external consumption.
 
 ## Hub (`apps/hub`)

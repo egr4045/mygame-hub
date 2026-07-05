@@ -91,6 +91,20 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   from a group would leave a permanent "zombie" thread in the sidebar. Now rebuilt strictly from each
   push's (authoritative, complete) list. Kicking a *specific* member has no dedicated UI yet — only
   leave + add got a button this pass; the backend/API already supports it.
+- **Phase 11 — Surface avatar/title to friends.** `social`'s `Friend`/`me` payloads gained
+  `avatarIcon`/`titleAchievement`, mirrored (read-only — `social` never writes them) from the shared
+  `accounts` table `auth` owns. New `SocialStore.updateProfile`/`refreshProfile`: the in-memory
+  adapter's `refreshProfile` is a no-op (nothing to pull from), the Postgres adapter's does a live
+  `SELECT ... WHERE id = $1` on every socket connect and merges the result in — there's no live signal
+  when a profile changes elsewhere, so this re-read is the only freshness mechanism (same
+  reconnect-driven staleness profile `displayName` already had). `FriendsSidebar` renders the avatar
+  image directly (self-contained data URL, no lookup needed) and a generic 🏅 indicator for an
+  equipped title (deliberately *not* resolved to a name/icon — that needs a per-game display catalog,
+  which the SDK doesn't and shouldn't own, matching the achievements-display precedent from Phase 6).
+  Also retired a genuinely dead field found along the way: the SDK's `me.avatarUrl` was declared but
+  never populated (flagged in an earlier pass) — replaced outright by the real `avatarIcon`, and
+  `HubScreen.tsx`'s topbar (which already had working `<img>` JSX waiting on that exact field) now
+  shows a real avatar.
 
 ## Next (mock → real)
 
@@ -110,13 +124,12 @@ Ordered by leverage. Each item is built in isolation, then integrated. Testing i
    lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
 5. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
    Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
-6. **Surface avatar/title to friends, not just yourself.** Today `social`'s `Friend`/`me` payloads only
-   carry `accountId`/`displayName` — extending them to include avatar/title would mean the social
-   service reading account profile fields it doesn't have today (it keeps its own minimal
-   `{id, displayName}` cache). A real but distinctly separate feature from "persist my own profile".
-7. **Kick a specific group member from the UI.** The store/API (`removeMember`, owner-only for others)
+6. **Kick a specific group member from the UI.** The store/API (`removeMember`, owner-only for others)
    already supports it; `ChatWidget` only exposes leave + add so far — add a per-member "remove" action
    (e.g. in a member list / context menu) gated on `ownerId === me`.
+7. **Resolve a friend's title to a name/icon.** Right now `FriendsSidebar` only shows a generic 🏅 when
+   `titleAchievement` is set (see Phase 11) — showing the actual name needs a per-game display catalog
+   the friend-list rendering can call into, without the SDK itself owning game-specific data.
 
 ## Verification
 
