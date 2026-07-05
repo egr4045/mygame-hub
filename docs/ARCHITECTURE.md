@@ -122,26 +122,38 @@ is just a 2-member conversation). Mirrors `social`'s shape closely: same JWT han
 
 - **A DM is found-or-created, deterministically, per account pair** via `openDm(a, b)` (calling it
   twice for the same two accounts always returns the same conversation). A **group** is created
-  explicitly via `createGroup(creator, name, memberIds)` — membership is fixed at creation (no
-  add/remove/leave yet, see `PLAN.md`).
+  explicitly via `createGroup(creator, name, memberIds)`, and its membership can change afterward:
+  `addMembers`/`removeMember` (see "Group membership" below).
 - **Store (`store.ts`):** `conversations` + a `dmIndex` (sorted account pair → conversation id) +
   messages bucketed by conversation. `threads(accountId)` derives, per conversation, the last message,
-  unread count, and (dm only) the other participant's `otherReadAt`.
+  unread count, participants (id + display name), owner, and (dm only) the other participant's
+  `otherReadAt`.
+- **Group membership.** Groups carry an `ownerId` (the creator). Any current participant may
+  `addMembers` (new members start at `lastReadAt = 0`, same as a fresh conversation — they see any
+  pre-existing history as unread, not "caught up"). `removeMember` covers both kick and leave: removing
+  yourself is always allowed; removing someone *else* requires being the owner — enforced server-side
+  in `server.ts` (`ownerOf(conversationId) === accountId`), not just the UI. Ownership doesn't transfer
+  when the owner leaves (a documented v1 limitation — see the comment next to the check in
+  `server.ts`), so a group the owner has left can no longer have members kicked, only left. `ChatWidget`
+  exposes an add-member picker and a leave button; kicking a specific member has no UI yet even though
+  the store/API support it (`mygame.chat.removeMember`).
 - **Read state is per-member, not per-message** (`lastReadAt` in `conversation_members`) — this is
   what lets the model scale to N-member groups without a combinatorial "read by whom" state per
   message. New members start at `lastReadAt = 0` ("read nothing"), not `now()` — a message landing in
   the same tick as the conversation's creation must still count as unread.
-- **C2S/S2C events:** see `protocol/src/chat.ts` (`openDm`, `createGroup`, `send`, `markRead`,
-  `getHistory`, `getState` / `threads`, `message`, `read`, `error`). Mutating calls reply via ack;
-  `message`/`threads`/`read` are pushed to every participant of the affected conversation.
+- **C2S/S2C events:** see `protocol/src/chat.ts` (`openDm`, `createGroup`, `addMembers`,
+  `removeMember`, `send`, `markRead`, `getHistory`, `getState` / `threads`, `message`, `read`, `error`).
+  Mutating calls reply via ack; `message`/`threads`/`read` are pushed to every participant of the
+  affected conversation (for `addMembers`/`removeMember`, every participant *before* the change, so a
+  removed member's client still gets one final push confirming they're gone).
 - **Read receipts:** simplified to `sent` | `read`, **dm only** (no `delivered` state, and groups don't
   render per-message read state — `ChatThread.otherReadAt` is `null` for groups). A dm message is
   "read" once `otherReadAt >= message.createdAt`; the client recomputes this on every `chat.threads`/
   `chat.read` push using the message's raw timestamp (not the formatted display string).
-- **Known v1 simplifications** (see `STATUS.md`): no group membership changes (add/remove/leave), no
-  reactions, no typing indicators, history is capped (last 100) with no pagination, messaging isn't
-  restricted to friends (any known accountId can be DMed or added to a group — same trust model as
-  friend codes).
+- **Known v1 simplifications** (see `STATUS.md`): no reactions, no typing indicators, history is capped
+  (last 100) with no pagination, messaging isn't restricted to friends (any known accountId can be
+  DMed or added to a group — same trust model as friend codes), no UI to kick a specific member (leave
+  + add only).
 
 ### orchestrator (`services/orchestrator`) — port 8090
 
@@ -168,9 +180,10 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
   mounts the overlay, and opens the social **and** chat connections. Sub-APIs:
   - `auth` — session, tokens, handoff.
   - `social` — friends/presence (`getFriends`, `addByCode`, `setActivity`, `subscribe`).
-  - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `send`, `getThreads`,
-    `getUnreadCount`, `subscribe`. A game can either just call `open()`/`openWithUser()` and rely on
-    the SDK-shipped `ChatWidget`, or build its own UI entirely on this data.
+  - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `addMembers`,
+    `removeMember`, `leaveGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`. A game can
+    either just call `open()`/`openWithUser()` and rely on the SDK-shipped `ChatWidget`, or build its
+    own UI entirely on this data.
   - `achievements` — `grant(achievementId)` (scoped to `this.gameId` from `init()`; fires a toast on a
     genuinely new unlock, silent on a re-grant) and `list()` (every game's unlocked achievements).
   - `profile` — `get()`, `setAvatar(dataUrl)`, `setWallpaper(dataUrl)`, `setTitle(ref | null)`. `ref`
@@ -196,8 +209,10 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 - **`ChatWidget`** (`components/ChatWidget.tsx`) and **`FriendsWidget`**/**`FriendsSidebar`**
   (`components/FriendsWidget.tsx`, `FriendsSidebar.tsx`) are the platform widgets that ship with the
   SDK. `ChatWidget` renders as a small launcher button with an unread badge when closed, and the full
-  draggable/resizable messenger (DM + group list, create-group form, message view) when open.
-  `FriendsWidget` similarly renders as a minimized "friends & chat" button (online count) or the
+  draggable/resizable messenger (DM + group list, create-group form, message view) when open. A group's
+  header adds an add-member picker ("➕", reuses the create-group friend-picker filtered to non-members)
+  and a leave button ("🚪") once you're in a group. `FriendsWidget` similarly renders as a minimized
+  "friends & chat" button (online count) or the
   expanded friends list. Moving `FriendsSidebar` dropped its one hub-specific dependency
   (`usePlatformStore().selectedGame`, used only to disable the already-mock "Invite to current game"
   menu item) rather than plumbing hub-only state into a component meant to be generic — the action was
@@ -284,6 +299,15 @@ persists + pushes `chat.message` to every participant (sender included, for mult
 refreshed `chat.threads` to each. Opening a conversation (`openChat`) fetches `chat.getHistory` and
 fires `chat.markRead`, which advances the reader's `lastReadAt` and pushes `chat.read` to the other
 participants so a dm sender's checkmarks update.
+
+**Add / remove a group member.** `ChatWidget`'s add-member picker or `mygame.chat.addMembers` →
+`chat.addMembers` (ack) → server validates the caller is already a participant, then pushes a
+refreshed `chat.threads` to every member including the newcomer. Leaving/kicking →
+`chat.removeMember` (ack) → server validates (self always allowed; someone else only if the caller is
+`ownerOf` the conversation) and pushes `chat.threads` to everyone who was a participant *before* the
+removal — so the removed member's own client gets one final push that already excludes the group,
+which is what makes it disappear from their sidebar (`chatStore`'s `mergeThreads` treats each push as
+the complete list, dropping any local session absent from it).
 
 **Launch a game.** `handlePlay` → `enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort)
 → `getHandoff()` → navigate to `http://host:PORT/?pt=<handoff>`. The game exchanges the token at its

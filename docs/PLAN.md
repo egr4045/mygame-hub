@@ -45,8 +45,8 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   `packages/sdk/src/components/` and is rendered by the SDK's `MygameOverlay` — any game embedding the
   SDK gets a working chat window automatically. `mygame.chat.*` also grew a full imperative API
   (`createGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`) for games that want their own
-  UI. Group membership changes (add/remove/leave), reactions, typing indicators and message edit/
-  delete are deliberately deferred (see `STATUS.md`).
+  UI. Group membership changes (add/remove/leave) shipped in Phase 10; reactions, typing indicators
+  and message edit/delete are still deliberately deferred (see `STATUS.md`).
 - **Phase 6 — Achievements API.** `auth` grants (idempotent, per `gameId`+`achievementId`) and lists
   an account's achievements (`AccountAchievement[]`, no schema change needed — the account store
   already had an unused `achievements` field). `mygame.achievements.grant/list` in the SDK; a
@@ -77,6 +77,20 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   badge, replacing the static "no notifications" mock. Added a demo button to actually mint a shareable
   invite link (`createInvite`), since the *receiving* side had nothing to test against otherwise.
   **Sending** an invite from inside an actual game session is still not wired — see "Next".
+- **Phase 10 — Group membership management.** `services/chat`'s `Conversation` gained `ownerId` (the
+  creator); the store gained `addMembers`/`removeMember`/`ownerOf`. Authorization is enforced
+  server-side in `server.ts`, not just the UI: any current participant may add others; only the owner
+  may remove someone *else*; anyone may always remove themselves (leave), including the owner (leaving
+  doesn't transfer ownership — a documented v1 limitation, see the code comment in `server.ts`). Wire
+  change: `ChatThread.participantIds: string[]` → `participants: ChatParticipant[]` (id + display name,
+  needed so the UI can render an add-member picker without a separate lookup) plus `ownerId`. SDK:
+  `mygame.chat.addMembers/removeMember/leaveGroup`; `ChatWidget` gained a "➕" add-member picker
+  (reuses the create-group friend-picker, filtered to friends not already in the group) and a "🚪"
+  leave-group button in the header. Also fixed a latent bug this exposed: the SDK's `mergeThreads`
+  used to only ever add/update sessions from a thread push, never drop one — so leaving/being kicked
+  from a group would leave a permanent "zombie" thread in the sidebar. Now rebuilt strictly from each
+  push's (authoritative, complete) list. Kicking a *specific* member has no dedicated UI yet — only
+  leave + add got a button this pass; the backend/API already supports it.
 
 ## Next (mock → real)
 
@@ -86,21 +100,23 @@ Ordered by leverage. Each item is built in isolation, then integrated. Testing i
    tracking your session once you navigate into a game's own origin. Needs `mygame.social.*` to grow
    `createInvite`/`inviteFriend` (currently only on the React `useSocialStore` hook the hub uses
    directly), and the actual game (CIVA, outside this repo) to call them from its lobby/room UI.
-2. **Group membership management.** Add/remove/leave for existing groups (v1 only supports create with
-   a fixed member list).
-3. **VK account linking.** Mirror the Telegram flow (deferred by request).
-4. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
+   **On hold** — out of scope while work stays to hub+SDK only; the game itself is off-limits for now.
+2. **VK account linking.** Mirror the Telegram flow (deferred by request).
+3. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
-5. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
+4. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
    `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
    service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
    lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
-6. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
+5. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
    Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
-7. **Surface avatar/title to friends, not just yourself.** Today `social`'s `Friend`/`me` payloads only
+6. **Surface avatar/title to friends, not just yourself.** Today `social`'s `Friend`/`me` payloads only
    carry `accountId`/`displayName` — extending them to include avatar/title would mean the social
    service reading account profile fields it doesn't have today (it keeps its own minimal
    `{id, displayName}` cache). A real but distinctly separate feature from "persist my own profile".
+7. **Kick a specific group member from the UI.** The store/API (`removeMember`, owner-only for others)
+   already supports it; `ChatWidget` only exposes leave + add so far — add a per-member "remove" action
+   (e.g. in a member list / context menu) gated on `ownerId === me`.
 
 ## Verification
 
