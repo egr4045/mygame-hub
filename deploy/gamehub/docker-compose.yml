@@ -1,0 +1,156 @@
+# GAMEHUB platform stack — always-on. The single launcher origin (web/gateway) fronts the SPA,
+# shared auth, social (friends/presence), chat (DMs/groups), community (changelog/discussions), and
+# the orchestrator; a game's own lobby is started on demand (deploy/civa-game — the game itself is
+# still called CIVA; GAMEHUB is the platform around it). Deployed alongside the existing Leaders
+# stack on this host without touching it.
+#
+#   docker network create gamehub-net      # once
+#   cd deploy/gamehub && cp .env.example .env && set JWT_SECRET (+ COMMUNITY_ADMIN_IDS once you know
+#   your own accountId)
+#   bash build-images.sh && docker compose up -d
+name: gamehub
+
+networks:
+  gamehub-net:
+    external: true
+
+volumes:
+  gamehub-postgres-data:
+
+services:
+  # Dedicated Postgres for GAMEHUB — isolated from Leaders' own Postgres (different network,
+  # different container), so a schema mistake here can't touch Leaders' data.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: civa
+      POSTGRES_PASSWORD: civa
+      POSTGRES_DB: civa
+    volumes:
+      - gamehub-postgres-data:/var/lib/postgresql/data
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  auth:
+    image: gamehub-service:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: service
+    command: ['pnpm', '--filter', '@mygame/auth', 'start']
+    environment:
+      AUTH_PORT: '8081'
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
+      JWT_ISSUER: civa
+      DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      NODE_ENV: production
+    depends_on:
+      - postgres
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  social:
+    image: gamehub-service:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: service
+    command: ['pnpm', '--filter', '@mygame/social', 'start']
+    environment:
+      SOCIAL_PORT: '8083'
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
+      JWT_ISSUER: civa
+      CORS_ORIGIN: '*'
+      DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      NODE_ENV: production
+    depends_on:
+      - postgres
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  chat:
+    image: gamehub-service:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: service
+    command: ['pnpm', '--filter', '@mygame/chat', 'start']
+    environment:
+      CHAT_PORT: '8084'
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
+      JWT_ISSUER: civa
+      CORS_ORIGIN: '*'
+      DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      NODE_ENV: production
+    depends_on:
+      - postgres
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  community:
+    image: gamehub-service:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: service
+    command: ['pnpm', '--filter', '@mygame/community', 'start']
+    environment:
+      COMMUNITY_PORT: '8085'
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
+      JWT_ISSUER: civa
+      CORS_ORIGIN: '*'
+      DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      # Comma-separated account ids allowed to publish changelog entries. Empty = reads still work,
+      # nobody can publish yet — log in once, grab your accountId, and set it here.
+      COMMUNITY_ADMIN_IDS: ${COMMUNITY_ADMIN_IDS:-}
+      NODE_ENV: production
+    depends_on:
+      - postgres
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  orchestrator:
+    image: gamehub-orchestrator:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: orchestrator
+    environment:
+      ORCHESTRATOR_PORT: '8090'
+      CIVA_GAME_DIR: /root/gamehub/deploy/civa-game
+      CIVA_GAME_PROJECT: civa-game
+      CIVA_ACTIVITY_URL: http://lobby:8082/metrics
+      CIVA_IDLE_MS: '600000' # stop the game after 10 min with zero players
+      REAPER_MS: '30000'
+      NODE_ENV: production
+    volumes:
+      # Control the host Docker (start/stop the game compose). Mount the repo at the SAME path so
+      # the compose file path is valid for the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/gamehub:/root/gamehub
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  web:
+    image: gamehub-web:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: web
+    ports:
+      - '8088:8088'
+    networks:
+      - gamehub-net
+    depends_on:
+      - auth
+      - social
+      - chat
+      - community
+      - orchestrator
+    restart: unless-stopped

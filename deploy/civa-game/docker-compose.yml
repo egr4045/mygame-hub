@@ -1,10 +1,12 @@
 # CIVA *game* services — started on player entry and stopped when idle by the orchestrator.
-# Reached via the shared `civa-net` network (gateway proxies /socket.io here; the orchestrator
-# probes /metrics here). No host ports — only the gateway publishes a port.
+# Reached via the shared `gamehub-net` network (gateway proxies /socket.io here; the orchestrator
+# probes /metrics here). No host ports — only the gateway publishes a port. The game's own code
+# (including whatever builds `civa-service:latest` here) lives in its own repo, not this one — see
+# docs/DESIGN.md. Only the network name changed with the GAMEHUB platform rename.
 name: civa-game
 
 networks:
-  civa-net:
+  gamehub-net:
     external: true
 
 services:
@@ -17,5 +19,5 @@ services:
       JWT_ISSUER: civa
       NODE_ENV: production
     networks:
-      - civa-net
+      - gamehub-net
     restart: unless-stopped

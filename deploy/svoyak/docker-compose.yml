@@ -1,9 +1,10 @@
 # svoyak — on-demand game (own SPA + auth on its own origin/port). Started/stopped by the
-# orchestrator. Reached by the browser on host port 8089; the orchestrator probes /metrics on civa-net.
+# orchestrator. Reached by the browser on host port 8089; the orchestrator probes /metrics on
+# gamehub-net.
 name: svoyak
 
 networks:
-  civa-net:
+  gamehub-net:
     external: true
 
 services:
@@ -19,5 +20,5 @@ services:
     ports:
       - '8089:8089'
     networks:
-      - civa-net
+      - gamehub-net
     restart: unless-stopped

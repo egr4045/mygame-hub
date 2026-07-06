@@ -1,6 +1,8 @@
 # Append this block to the EXISTING Leaders Caddyfile (/root/leaders/deploy/Caddyfile) to expose
-# CIVA on a subdomain with automatic TLS. CIVA's own Caddy (on :8088) already routes /auth,
-# /socket.io and the SPA, so the host Caddy just forwards the whole subdomain to it.
+# GAMEHUB on a subdomain with automatic TLS. GAMEHUB's own Caddy (on :8088) already routes /auth,
+# /social.io, /chat.io, /community, /orchestrator, /socket.io and the SPA, so the host Caddy just
+# forwards the whole subdomain to it. Already applied on this host — re-apply only if the Leaders
+# Caddyfile is rebuilt from scratch.
 #
 # Requires DNS:  civa.mygame-quiz.ru  A  186.246.11.239
 # Apply (no Leaders downtime):
