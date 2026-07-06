@@ -10,9 +10,10 @@ GAMEHUB ships as two compose stacks sharing a `gamehub-net` network:
   `orchestrator` + the gateway Caddy (`web`, host port **8088**). The gateway fronts the SPA, auth,
   social/chat (Socket.io), community, the orchestrator, and the on-demand lobby.
 - **Game** (`deploy/civa-game`, on-demand): `lobby`. The orchestrator starts it on player entry and
-  stops it after 10 min idle. The host (Leaders) Caddy proxies `civa.mygame-quiz.ru` to :8088 — the
-  game running there is still called CIVA; GAMEHUB is the name of the platform around it (the source
-  repo is `mygame-hub`).
+  stops it after 10 min idle. The host (Leaders) Caddy already forwards the **root domain**
+  `mygame-quiz.ru` (everything except `/livekit/*`) straight to :8088 — no subdomain, no separate DNS
+  entry. The game running there is still called CIVA; GAMEHUB is the name of the platform around it
+  (the source repo is `mygame-hub`).
 
 ## 1. Get the code on the server
 
@@ -59,7 +60,7 @@ docker ps --format '{{.Names}}' | grep civa-game              # lobby now runnin
 # ...with nobody connected for 10 min, the reaper stops it (watch: docker logs gamehub-orchestrator-1)
 ```
 
-Verify locally (no DNS needed):
+Verify on the server (bypasses Leaders' Caddy/TLS, checks GAMEHUB's own gateway directly):
 
 ```sh
 curl -s localhost:8088/ | head -c 80                       # SPA html
@@ -68,20 +69,31 @@ curl -s -XPOST localhost:8088/auth/login \
 curl -s localhost:8088/community/changelog/civa             # {"entries":[]}
 ```
 
-## 3. Expose on a subdomain (TLS, real entry point)
-
-Already applied on this host — skip unless the Leaders Caddyfile is rebuilt from scratch.
-
-1. DNS: **`civa.mygame-quiz.ru` A `186.246.11.239`** (your DNS provider).
-2. Append the GAMEHUB block to the Leaders Caddyfile and reload (no Leaders downtime):
+Verify end-to-end through the real domain (from anywhere):
 
 ```sh
-cp /root/leaders/deploy/Caddyfile /root/leaders/deploy/Caddyfile.bak
-cat /root/gamehub/deploy/gamehub/leaders-caddy-civa.snippet >> /root/leaders/deploy/Caddyfile
-docker exec leaders-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+curl -s https://mygame-quiz.ru/ | head -c 80
+curl -s -XPOST https://mygame-quiz.ru/auth/login \
+  -H 'content-type: application/json' -d '{"displayName":"smoke"}' | head -c 120
 ```
 
-Caddy auto-provisions the certificate. GAMEHUB is then live at **https://civa.mygame-quiz.ru**.
+## 3. The public entry point — already live, nothing to do
+
+There is **no GAMEHUB subdomain** — none is needed, and none should be created. The Leaders Caddyfile
+(`/root/leaders/deploy/Caddyfile`) already has a block forwarding the **root domain**
+(`mygame-quiz.ru`, `www.mygame-quiz.ru`) straight to `host.docker.internal:8088` (i.e. this stack's
+`web` gateway) for everything except `/livekit/*` (LiveKit stays with Leaders). TLS is already
+provisioned for that domain. **GAMEHUB is reached at https://mygame-quiz.ru** — the same domain
+Leaders itself used to answer on directly.
+
+A verbatim copy of that live block is kept at `deploy/gamehub/leaders-caddy-reference.snippet` purely
+as a disaster-recovery reference (e.g. if `/root/leaders/deploy/Caddyfile` is ever rebuilt from
+scratch and needs re-populating) — do not re-apply it if the block is already there.
+
+> Games get a path under this same domain going forward (e.g. `mygame-quiz.ru/civa`), not their own
+> subdomain — see `docs/PLAN.md`. That's a separate, not-yet-started piece of work (Caddy per-game
+> path routes + each game's SPA base path + the hub's launch/handoff code, which currently addresses a
+> game by port, not path).
 
 ## Updating
 
@@ -93,10 +105,11 @@ git -C /root/gamehub pull && cd /root/gamehub/deploy/gamehub && docker compose u
 
 ```sh
 cd /root/gamehub/deploy/gamehub && docker compose down
-# and, if the Caddy block was added:
-cp /root/leaders/deploy/Caddyfile.bak /root/leaders/deploy/Caddyfile
-docker exec leaders-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 ```
+
+Nothing to undo on the Leaders side — its Caddyfile forwarding `mygame-quiz.ru` to `:8088` predates
+this stack and isn't touched by deploying/rolling back GAMEHUB. `docker compose down` alone just
+means that domain 502s until GAMEHUB is brought back up.
 
 ## Notes
 - Resource use: auth/social/chat/community are tiny Node processes; the web is static; `postgres` is

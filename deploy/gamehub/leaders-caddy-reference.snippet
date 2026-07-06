@@ -1,0 +1,19 @@
+# Reference snapshot of the LIVE block in /root/leaders/deploy/Caddyfile (read via SSH, not written
+# by this repo) — kept here purely for disaster recovery if that file is ever rebuilt from scratch.
+# DO NOT append this again: it's already live. There is no GAMEHUB subdomain — the root domain
+# `mygame-quiz.ru` already forwards everything except /livekit/* straight to GAMEHUB's gateway
+# (:8088). GAMEHUB is reached at https://mygame-quiz.ru — nothing else to configure.
+
+mygame-quiz.ru, www.mygame-quiz.ru {
+	encode gzip
+
+	# LiveKit signal/WebSocket (needed for CIVA too)
+	handle_path /livekit/* {
+		reverse_proxy livekit:7880
+	}
+
+	# Forward everything else to the new Hub (CIVA gateway)
+	handle {
+		reverse_proxy host.docker.internal:8088
+	}
+}

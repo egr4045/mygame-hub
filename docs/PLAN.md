@@ -121,7 +121,18 @@ Ordered by leverage. Each item is built in isolation, then integrated. Testing i
 4. ✅ **Deploy reconciliation, renamed to GAMEHUB.** `deploy/civa` → `deploy/gamehub`: fixed the
    stale `@civa/*` package filter names, added `social`/`chat`/`community`/Postgres containers, and
    gave `social`/`chat` distinct Socket.io paths (`/social.io/`, `/chat.io/`) so neither collides with
-   a game lobby's default `/socket.io/`. See `deploy/DEPLOY.md`.
+   a game lobby's default `/socket.io/`. See `deploy/DEPLOY.md`. There is no GAMEHUB subdomain —
+   `mygame-quiz.ru` (root) already forwards to it via Leaders' Caddy.
+4a. **Path-based game routing (`mygame-quiz.ru/civa`, not a subdomain).** Proposed direction, not yet
+   started: each game currently gets its own *origin* — `externalPort` in `apps/hub/src/platform/
+   games.ts`, and the hub's `handlePlay`/`routeToRoom` (`apps/hub/src/platform/inviteRouting.ts`)
+   navigate to `http://host:PORT/?pt=...`. Moving to `mygame-quiz.ru/<game>` instead needs: (a) a Caddy
+   `handle_path /<game>/*` route per game in `deploy/gamehub/Caddyfile` (or a reverse_proxy the
+   orchestrator updates dynamically), (b) each game's own SPA build configured with that path as its
+   base (asset URLs, router basename), and (c) `games.ts`/`inviteRouting.ts` switched from
+   port-based to path-based addressing. Since exactly one on-demand game runs at a time per the
+   current orchestrator model, this shouldn't reintroduce the Socket.io-path-collision problem the
+   GAMEHUB rename just fixed — worth confirming when this is picked up.
 5. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
    Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
 6. **Kick a specific group member from the UI.** The store/API (`removeMember`, owner-only for others)

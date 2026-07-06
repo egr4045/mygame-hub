@@ -18,7 +18,12 @@ Do not break one while touching another.
 - Code: `/root/leaders` (its own git, its own `CLAUDE.md`).
 - Runs as: `docker compose` (project `leaders`) → **caddy** (80/443), **livekit** (7881), **postgres**
   (127.0.0.1:5432), **redis** (127.0.0.1:6379); plus **`leaders.service`** (systemd) = NestJS on `:3000`.
-- Domain: **mygame-quiz.ru** → Caddy → static SPA + proxy `/api`,`/socket.io`,`/media`→:3000, `/livekit`→livekit.
+- **Domain routing (verified live, `/root/leaders/deploy/Caddyfile`):** `mygame-quiz.ru` +
+  `www.mygame-quiz.ru` → Leaders' Caddy → `/livekit/*` → livekit:7880; **everything else** →
+  `host.docker.internal:8088` (i.e. straight to GAMEHUB's gateway, see Product B). This is the actual
+  live config, read via SSH — it supersedes any older doc claiming `/api`/`/socket.io`/`/media` route
+  to Leaders' own `:3000` here; whether/where Leaders' NestJS is otherwise reachable wasn't
+  re-verified while writing this.
 
 ## Product B — GAMEHUB game platform (this repo)
 - Repo: **github.com/egr4045/mygame-hub** at `/root/gamehub`. Update: `git -C /root/gamehub pull`.
@@ -29,8 +34,10 @@ Do not break one while touching another.
   chat (DMs/groups) + community (changelog/discussions), an **orchestrator** that starts a game on
   player entry and **stops it when idle** (to save RAM), and per-game stacks.
 - **Always-on platform stack** (`deploy/gamehub`, project `gamehub`): `postgres` + `auth` (JWT) +
-  `social` + `chat` + `community` + `orchestrator` + `web` (gateway Caddy, host port **8088**). Entry
-  point: **http://186.246.11.239:8088**, and **https://civa.mygame-quiz.ru** via the Leaders Caddy.
+  `social` + `chat` + `community` + `orchestrator` + `web` (gateway Caddy, host port **8088**).
+  Reachable directly at **http://186.246.11.239:8088**, and — the real public entry point — at
+  **https://mygame-quiz.ru** (the root domain, no subdomain; Leaders' Caddy already forwards it here,
+  see Product A above).
 - **On-demand games** (started/stopped by the orchestrator):
   - CIVA lobby — `deploy/civa-game` (project `civa-game`). The game itself is still called CIVA;
     GAMEHUB is the platform's name, not any one game's.
@@ -78,7 +85,7 @@ Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` the
 | 3000 | Leaders NestJS | no (proxied) |
 | 7881 | LiveKit | yes (rtc) |
 | 5432 / 6379 | Leaders pg/redis | localhost |
-| 8088 | GAMEHUB gateway (launcher) | yes (http; TLS via `civa.mygame-quiz.ru` subdomain) |
+| 8088 | GAMEHUB gateway (launcher) | yes (http, direct); also https://mygame-quiz.ru via Leaders' Caddy |
 | 8081 / 8082 / 8090 | GAMEHUB auth / lobby / orchestrator | internal (gamehub-net) |
 | 8083 / 8084 / 8085 | GAMEHUB social / chat / community | internal (gamehub-net) |
 | (projectflow ports) | projectflow app/db | see its own compose — not this repo's concern |
