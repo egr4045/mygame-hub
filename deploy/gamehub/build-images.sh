@@ -3,7 +3,7 @@
 # (This host resolves the registry to IPv6 with no IPv6 route inside the default bridge network;
 #  --network=host uses the host's working IPv4 DNS. The host itself can reach the registry fine.)
 set -euo pipefail
-DEPLOY_DIR="$(dirname "$0")"
+DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"   # absolute — stays valid after the cd below
 cd "$DEPLOY_DIR/../.."   # repo root (build context)
 
 # examplegame needs GAMEHUB_PUBLIC_URL baked in at build time — read it from deploy/gamehub/.env.
