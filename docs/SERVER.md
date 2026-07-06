@@ -1,16 +1,18 @@
 # Server infrastructure — READ THIS FIRST (humans & AI agents)
 
-Server `186.246.11.239` (Ubuntu 24.04, 4 CPU, ~8 GB RAM). It runs **two independent products**.
-Do not break one while touching the other.
+Server `186.246.11.239` (Ubuntu 24.04, 4 CPU, ~8 GB RAM). It runs **three independent products**.
+Do not break one while touching another.
 
 ## 🟥 Golden rules
-1. **Never touch the live Leaders** unless explicitly asked. It is in production.
-2. **Additive only**: new things get their own containers / ports / compose, never edit Leaders'.
+1. **Never touch the live Leaders (or projectflow)** unless explicitly asked. They are in production.
+2. **Additive only**: new things get their own containers / ports / compose, never edit another
+   product's.
 3. **Docker builds must use `--network=host`** — this host resolves the npm registry to IPv6 and has
    no IPv6 route, so default-network builds fail. The host reaches the registry fine over IPv4.
 4. In Dockerfiles install pnpm via `npm i -g pnpm` (corepack's downloader fails here) and set
    `NODE_OPTIONS=--dns-result-order=ipv4first`.
-5. Public ports are **80/443 only** (Caddy). Everything else is internal or behind the gateway.
+5. Public ports are **80/443 only** (Caddy), routed by hostname. Everything else is internal or
+   behind a gateway.
 
 ## Product A — Leaders (live, do not disturb)
 - Code: `/root/leaders` (its own git, its own `CLAUDE.md`).
@@ -18,50 +20,56 @@ Do not break one while touching the other.
   (127.0.0.1:5432), **redis** (127.0.0.1:6379); plus **`leaders.service`** (systemd) = NestJS on `:3000`.
 - Domain: **mygame-quiz.ru** → Caddy → static SPA + proxy `/api`,`/socket.io`,`/media`→:3000, `/livekit`→livekit.
 
-## Product B — CIVA game platform (this repo)
-- Repo: **github.com/egr4045/leaders-2** at `/root/civa`. Update: `git -C /root/civa pull`.
-- A multi-game platform: one **launcher** (login → pick game), an **orchestrator** that starts a game
-  on player entry and **stops it when idle** (to save RAM), and per-game stacks.
-- **Always-on platform stack** (`deploy/civa`, project `civa`): `auth` (JWT) + `orchestrator` +
-  `web` (gateway Caddy, host port **8088**). Entry point: **http://186.246.11.239:8088**.
+## Product B — GAMEHUB game platform (this repo)
+- Repo: **github.com/egr4045/mygame-hub** at `/root/gamehub`. Update: `git -C /root/gamehub pull`.
+  (An older, unrelated-history checkout used to live at `/root/civa`, cloned from a different repo —
+  `leaders-2.git` — under the DEPLOY.md that predated the GAMEHUB rename. It was removed; `git pull`
+  there was never going to work since the two repos share no history.)
+- A multi-game platform: one **launcher** (login → pick game), identity + social (friends/presence) +
+  chat (DMs/groups) + community (changelog/discussions), an **orchestrator** that starts a game on
+  player entry and **stops it when idle** (to save RAM), and per-game stacks.
+- **Always-on platform stack** (`deploy/gamehub`, project `gamehub`): `postgres` + `auth` (JWT) +
+  `social` + `chat` + `community` + `orchestrator` + `web` (gateway Caddy, host port **8088**). Entry
+  point: **http://186.246.11.239:8088**, and **https://civa.mygame-quiz.ru** via the Leaders Caddy.
 - **On-demand games** (started/stopped by the orchestrator):
-  - CIVA lobby — `deploy/civa-game` (project `civa-game`).
+  - CIVA lobby — `deploy/civa-game` (project `civa-game`). The game itself is still called CIVA;
+    GAMEHUB is the platform's name, not any one game's.
   - (more games register in the orchestrator manifest + their own `deploy/<game>` compose).
-- Networking: a shared external Docker network **`civa-net`**; the gateway routes one origin:
-  `/auth/*`→auth, `/orchestrator/*`→orchestrator, `/socket.io/*`→game lobby, `/`→SPA.
+- Networking: a shared external Docker network **`gamehub-net`**; the gateway routes one origin:
+  `/auth/*`→auth, `/social.io/*`→social (Socket.io, custom path), `/chat.io/*`→chat (Socket.io, custom
+  path), `/community/*`→community, `/orchestrator/*`→orchestrator, `/socket.io/*`→game lobby
+  (Socket.io, default path — doesn't collide since social/chat moved off it), `/`→SPA.
 - Orchestrator controls Docker via the host socket; it `docker compose up/stop`s each game's compose.
   Idle policy: stop after `CIVA_IDLE_MS` (default 10 min) with zero players (polls each game `/metrics`).
 
-> ⚠️ **`deploy/civa` is stale relative to the current repo.** It predates the `social` and `chat`
-> services and the Postgres persistence work: it still filters on the old `@civa/auth` package name
-> (now `@mygame/auth`), has no `social`/`chat`/Postgres containers, and the gateway has no route for
-> either socket service (would collide with the game lobby's `/socket.io/*` if added naively). `auth`,
-> `orchestrator` and the SPA work as deployed; `social`/`chat`/persistence do not yet. See `STATUS.md`
-> and `PLAN.md` ("Deploy reconciliation") before deploying those features to this server.
-
 ### State & secrets (important)
-- **Platform state is in-memory by default.** `auth`, `social` and `chat` fall back to in-memory
-  stores unless `DATABASE_URL` is set — a restart then **wipes accounts, friends, invites and
-  messages**. Postgres adapters exist (`@mygame/platform-db`) but aren't wired into `deploy/civa` yet
-  (see above). The Leaders Postgres (127.0.0.1:5432) is Leaders-only; do not reuse it for the platform
-  without an explicit decision — CIVA needs its own Postgres container.
-- **Secrets via env only, never committed.** Set per-container in the deploy `.env`:
+- **Platform state is Postgres-backed** via a dedicated `postgres` container in `deploy/gamehub`
+  (isolated from Leaders' own Postgres — different container, different network). `auth`, `social`,
+  `chat` and `community` all point `DATABASE_URL` at it; a restart no longer wipes
+  accounts/friends/invites/messages/achievements/playtime/changelog/discussions. Do **not** reuse
+  Leaders' Postgres (127.0.0.1:5432) for the platform.
+- **Secrets via env only, never committed.** Set per-container in `deploy/gamehub/.env`:
   - `JWT_SECRET` — shared secret for SSO; the **same** value must be set on every game that accepts
-    the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat` alike.
-  - `DATABASE_URL` — e.g. `postgres://civa:civa@postgres:5432/civa`; set identically on `auth`,
-    `social` and `chat` for durable accounts/friends/invites/messages.
+    the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat`/`community` alike.
+  - `DATABASE_URL` — e.g. `postgres://civa:civa@postgres:5432/civa`; set identically on
+    `auth`/`social`/`chat`/`community` for durable state.
+  - `COMMUNITY_ADMIN_IDS` — comma-separated platform accountIds allowed to publish a changelog entry.
   - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
     a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
     token; disable any webhook). Keep the token out of git, logs and docs.
 
-### Deploy / update CIVA
-See **`/root/civa/deploy/DEPLOY.md`**. TL;DR:
+### Deploy / update GAMEHUB
+See **`/root/gamehub/deploy/DEPLOY.md`**. TL;DR:
 ```sh
-git -C /root/civa pull
-docker network create civa-net 2>/dev/null || true
-cd /root/civa/deploy/civa && bash build-images.sh && docker compose up -d
+git -C /root/gamehub pull
+docker network create gamehub-net 2>/dev/null || true
+cd /root/gamehub/deploy/gamehub && bash build-images.sh && docker compose up -d
 ```
 Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` then `docker ps | grep civa-game`.
+
+## Product C — projectflow (live, do not disturb)
+- Runs as `docker compose` project `projectflow` → `projectflow-app-1`, `projectflow-db-1` (own
+  Postgres). Unrelated to GAMEHUB/Leaders; leave its containers alone.
 
 ## Ports
 | Port | Who | Public? |
@@ -70,11 +78,14 @@ Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` the
 | 3000 | Leaders NestJS | no (proxied) |
 | 7881 | LiveKit | yes (rtc) |
 | 5432 / 6379 | Leaders pg/redis | localhost |
-| 8088 | CIVA gateway (launcher) | yes (http; TLS via subdomain later) |
-| 8081 / 8082 / 8090 | CIVA auth / lobby / orchestrator | internal (civa-net) |
-| 8083 / 8084 | CIVA social / chat | internal — **not yet in `deploy/civa`** (see the ⚠️ above) |
+| 8088 | GAMEHUB gateway (launcher) | yes (http; TLS via `civa.mygame-quiz.ru` subdomain) |
+| 8081 / 8082 / 8090 | GAMEHUB auth / lobby / orchestrator | internal (gamehub-net) |
+| 8083 / 8084 / 8085 | GAMEHUB social / chat / community | internal (gamehub-net) |
+| (projectflow ports) | projectflow app/db | see its own compose — not this repo's concern |
 
 ## Quick orientation for an agent
-- This file is the map. The CIVA repo's `docs/` has DESIGN.md (game), DEPLOY.md (ops), PLAN.md (roadmap).
-- To change CIVA: edit in the repo, `git push`, then on the server `git pull` + redeploy (above).
-- To check what's running: `docker ps`. Leaders containers are prefixed `leaders-`, CIVA `civa-`.
+- This file is the map. The GAMEHUB repo's `docs/` has DESIGN.md (game), DEPLOY.md (ops), PLAN.md
+  (roadmap), ARCHITECTURE.md (how the platform is put together), STATUS.md (real vs. mock).
+- To change GAMEHUB: edit in the repo, `git push`, then on the server `git pull` + redeploy (above).
+- To check what's running: `docker ps`. Leaders containers are prefixed `leaders-`, GAMEHUB
+  `gamehub-` (plus `civa-game-*` for the on-demand lobby), projectflow `projectflow-`.

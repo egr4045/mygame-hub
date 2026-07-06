@@ -1,6 +1,6 @@
 # Platform status — what actually works
 
-> Audited 2026-06-29 against the code on branch `refactor/hub-split`. This is the source of truth for
+> Audited 2026-07-06 against the code on branch `refactor/hub-split`. This is the source of truth for
 > "is this real or a mock". Update it whenever a mock becomes real.
 
 ## Legend
@@ -13,9 +13,13 @@
 ## Summary
 
 The **social skeleton** of the platform (identity + friends + launcher + chat + achievements +
-profile) is real, working, and Postgres-persisted. What's left mostly-mock is the Steam-style *store
-content* around it (changelog, forum, lobby browser, playtime stats) and a few unimplemented pieces
-(voice/video calls, VK linking).
+profile) is real, working, and Postgres-persisted. The Steam-style *store content* around it
+(changelog, forum, lobby browser, playtime stats) is now real too — the hub's frontend mocks were
+replaced with a new `services/community` (changelog + discussions), a `game_stats` slice on `auth`
+(playtime, driven by an in-game SDK heartbeat), and a presence-derived lobby query on `social`. A
+runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. What's left is a
+few genuinely unimplemented pieces (voice/video calls, VK linking) and lower-priority UI polish
+(profile status, "Связь с автором" idea box).
 
 ## Features
 
@@ -45,15 +49,16 @@ content* around it (changelog, forum, lobby browser, playtime stats) and a few u
 | Notification center (🔔) | ✅ | Real: shows incoming friend requests (click = accept) and pushed game invites (click = join, via `routeToInvite`) with a live count badge. Falls back to "Нет новых уведомлений" when both are empty. "Настройки уведомлений" is still `alert(...)`. |
 | Game library | ✅ | Real static registry (`apps/hub/src/platform/games.ts`), mirrors the orchestrator manifest. |
 | Game launch / orchestrator | ✅ | `services/orchestrator` really runs `docker compose up/stop`, wakes a game on entry, reaps it on idle (reaper polls each game's `/metrics`). Hub calls `POST /orchestrator/games/:id/enter`. |
-| Game page: changelog | ❌ | Hardcoded ("Патч 1.0.3", dates). |
-| Game page: find groups / lobbies | ❌ | Hardcoded; "Join" buttons do nothing. |
-| Game page: discussions / forum | ❌ | Full mock (preset threads); posting has no backend. |
-| Playtime / "last played" stats | ❌ | Hardcoded ("12 часов", "Сегодня"). |
-| Profile status (online / DND) | ❌ | `alert('Статус изменен')`. |
-| "Copy my ID" (top bar) | ❌ | Copies the literal string `'ID: 12345'` (`HubScreen.tsx`). The friends sidebar "copy code" *is* real (copies your accountId). |
-| Context menus (right-click) | 🟡 | Menus are real; some actions work (open chat, remove friend), most are `alert(...)` (invite, block, call, share). |
+| SDK starter template | ✅ | `apps/example-game` — a minimal Vite+React app exercising the full SDK surface (handoff login, achievements, activity/lobbies, chat/friends overlay, playtime, changelog/discussions). Doubles as living documentation and registered in the hub's game library (`example-game`, port 5190). |
+| Game page: changelog | ✅ | Real: `services/community` (`GET/POST /community/changelog/:gameId`), Postgres-backed when `DATABASE_URL` is set. Reads are public; publishing requires the caller's account to be in the `COMMUNITY_ADMIN_IDS` allowlist (curated patch notes, not user content — see `ARCHITECTURE.md`). `mygame.community.getChangelog`. |
+| Game page: find groups / lobbies | ✅ | Real, derived live from presence: `social.getLobbies` (socket ack) groups online accounts whose `activity.joinable` is set, by room, for the requested game — no persistence. Honestly sparse until a game actually calls `setActivity({ joinable: true })` (the example game does). "+ Создать лобби" sets your own activity and enters the room. |
+| Game page: discussions / forum | ✅ | Real forum on `services/community` (`discussion_threads`/`discussion_posts`, Postgres-backed). Reads are public; creating a thread/reply needs only a valid session (same trust model as chat/achievements — no moderation yet). `mygame.community.getThreads/getThread/createThread/createPost`. |
+| Playtime / "last played" stats | ✅ | Real: `game_stats` on `services/auth`. `last_played_at` is stamped on launch (`recordGameEnter`); `seconds_played` accrues from an **in-game** SDK heartbeat (`mygame.stats` — started automatically by `mygame.init()`) since the hub can't time a session once it navigates to the game's own origin. The server clamps each heartbeat's credited delta so a missed beat/closed tab never over-credits — see `ARCHITECTURE.md`. |
+| Profile status (online / DND) | — | Removed rather than left mocked: the fake "🟢 В сети / 🌙 Не беспокоить" menu items are gone (`HubScreen.tsx`). Presence is real but binary (online/offline, from `social`); a genuine status feature (DND, etc.) is unbuilt, not stubbed. |
+| "Copy my ID" (top bar) | ✅ | Copies the real accountId (`HubScreen.tsx`, same value as the friends sidebar's "copy code"). |
+| Context menus (right-click) | 🟡 | Menus are real; most actions now work (open chat, remove friend, play, open discussions). A few remain `alert(...)`/disabled placeholders (invite, block, call, share, favorites). |
 | "Связь с автором" | 🟡 | Real external Telegram link. "Предложить идею" has no backend. Donation = "Временно недоступно". |
-| "Protect your account" modal | ❌ | Link buttons just close the modal. |
+| "Protect your account" modal | 🟡 | Telegram button now starts the real linking flow (same as the profile page); VK is an explicit disabled "скоро", not a fake close. |
 
 ## Cross-cutting gaps
 
@@ -103,8 +108,28 @@ content* around it (changelog, forum, lobby browser, playtime stats) and a few u
    in this repo) to call them from its own lobby/room UI. On hold while work stays scoped to hub+SDK
    only (the game itself is out of bounds for now).
 10. **VK linking** (deferred by request).
-11. **Deploy reconciliation** — `deploy/civa` predates the `social`/persistence/`chat` work: it still
-    filters on the old `@civa/auth` package name (now `@mygame/auth`), has no `social`/`chat`/Postgres
-    containers, and the gateway has no route for either socket service (would collide with the game
-    lobby's `/socket.io/*`). Not yet blocking local dev; blocking before a real server deploy. (Flagged
-    as a follow-up task.)
+11. ✅ **Deploy reconciliation + rename to GAMEHUB** — done. `deploy/civa` → `deploy/gamehub`
+    (`@civa/auth` → `@mygame/auth` fixed; `social`/`chat`/`community` + a dedicated Postgres container
+    added to `docker-compose.yml`; the gateway `Caddyfile` gained routes for all three —
+    `social`/`chat` moved their Socket.io servers to custom paths, `/social.io/`/`/chat.io/`, so they
+    don't collide with the game lobby's default `/socket.io/` on the shared origin). Images renamed
+    `gamehub-*`, network `gamehub-net`. JWT issuer (`civa`) and the SDK's `localStorage` keys
+    (`civa.session`) are deliberately unchanged — see `deploy/DEPLOY.md`.
+12. ✅ **Hub frontend mock cleanup** — done. Real Copy-ID, a working Telegram link button in the
+    "protect your account" modal, `ProfileWidget` shows real avatar/achievements, `LibrarySidebar`'s
+    context menu wires Play for real, and the leftover demo-button block + fake status/settings
+    `alert()`s are gone.
+13. ✅ **Playtime + last-played stats** — done. New `game_stats` table on `auth`; `mygame.stats`
+    (`recordEnter`, `getStats`, `startHeartbeat`/`stopHeartbeat` — the last two run automatically from
+    `mygame.init()`). See `ARCHITECTURE.md` for the heartbeat-clamp design (the hub can't time a
+    session once it navigates away to the game's own origin).
+14. ✅ **Changelog + discussions (new `services/community`)** — done. Own service (port 8085, `COMMUNITY_PORT`)
+    rather than folded into `auth`, to keep unbounded user-generated content out of the
+    security-critical identity process. Changelog writes are gated to a `COMMUNITY_ADMIN_IDS`
+    allowlist; discussion threads/posts use the same open trust model as chat/achievements.
+15. ✅ **Find groups / lobbies** — done. `social.getLobbies` (socket ack) derives joinable rooms from
+    existing presence (`activityOf`/`socketsOf`) — no new persistence. Sparse until a game reports
+    joinable activity.
+16. ✅ **Starter example game** — done. `apps/example-game` exercises the whole SDK surface
+    (handoff login, achievements, activity, chat/friends, playtime, community) as both a smoke test
+    and living documentation for third-party game developers.

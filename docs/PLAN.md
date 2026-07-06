@@ -118,10 +118,10 @@ Ordered by leverage. Each item is built in isolation, then integrated. Testing i
 2. **VK account linking.** Mirror the Telegram flow (deferred by request).
 3. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
    `JWT_SECRET` handling.
-4. **Deploy reconciliation.** `deploy/civa` predates `social`/persistence/`chat`: fix the stale
-   `@civa/*` package filter names, add `social`/`chat`/Postgres containers, and give each socket
-   service a distinct gateway path (or Socket.io path option) so it doesn't collide with a game
-   lobby's `/socket.io/*`. Not blocking local dev; blocking before a real server deploy.
+4. ✅ **Deploy reconciliation, renamed to GAMEHUB.** `deploy/civa` → `deploy/gamehub`: fixed the
+   stale `@civa/*` package filter names, added `social`/`chat`/`community`/Postgres containers, and
+   gave `social`/`chat` distinct Socket.io paths (`/social.io/`, `/chat.io/`) so neither collides with
+   a game lobby's default `/socket.io/`. See `deploy/DEPLOY.md`.
 5. **Decide the fate of `SteamOverlay.tsx`.** Wire it into `HubScreen` (it's a real, working
    Shift+Tab overlay) or delete it — currently dead code (imported, never rendered).
 6. **Kick a specific group member from the UI.** The store/API (`removeMember`, owner-only for others)

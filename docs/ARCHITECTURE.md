@@ -10,15 +10,16 @@ main data flows. For *what works vs. what's mocked* see `STATUS.md`.
                  │  hub SPA (apps/hub)  — React + Zustand        │
                  │  AuthScreen → HubScreen (library/launcher)    │
                  │  embeds @mygame/sdk (overlay: friends/chat/…) │
-                 └──┬───────────┬───────────────┬───────────┬───┘
-                    │ HTTP      │ Socket.io      │ Socket.io │ HTTP
-                    ▼           ▼                ▼           ▼
-             ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
-             │ auth     │ │ social   │ │ chat     │ │ orchestrator │
-             │ JWT login│ │ friends +│ │ dm +     │ │ docker       │
-             │ + handoff│ │ presence │ │ group    │ │ compose      │
-             │ + telegram│ │ + invites│ │ messages│ │ per game     │
-             └──────────┘ └──────────┘ └──────────┘ └──────┬───────┘
+                 └──┬───────────┬───────────────┬───────────┬───┴────────┐
+                    │ HTTP      │ Socket.io      │ Socket.io │ HTTP      │ HTTP
+                    ▼           ▼                ▼           ▼           ▼
+             ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌───────────┐
+             │ auth     │ │ social   │ │ chat     │ │ orchestrator │ │ community │
+             │ JWT login│ │ friends +│ │ dm +     │ │ docker       │ │ changelog │
+             │ + handoff│ │ presence │ │ group    │ │ compose      │ │ + forum   │
+             │ + telegram│ │ + invites│ │ messages│ │ per game     │ │           │
+             │ + playtime│ │ + lobbies│ │          │ │              │ │           │
+             └──────────┘ └──────────┘ └──────────┘ └──────┬───────┘ └───────────┘
                     ▲                                       │ docker
                     │ verifies platform JWT                 ▼
              ┌──────┴──────────────────────┐       per-game stacks
@@ -32,10 +33,11 @@ import each other's internals — only the contract.
 
 ## Services (`services/*`)
 
-All four follow the same shape: a `createApp`/`createServer` that takes **ports** (deps) so the same
+All five follow the same shape: a `createApp`/`createServer` that takes **ports** (deps) so the same
 logic runs against real or in-memory adapters; an `index.ts` "production" entry; a `standalone.ts` for
-isolated dev; a `config.ts` reading env. `auth`, `social` and `chat` are Postgres-backed when
-`DATABASE_URL` is set, else fall back to in-memory (see `STATUS.md` and "Persistence" below).
+isolated dev; a `config.ts` reading env. `auth`, `social`, `chat` and `community` are Postgres-backed
+when `DATABASE_URL` is set, else fall back to in-memory (see `STATUS.md` and "Persistence" below).
+`orchestrator` is the exception — it controls Docker, not a datastore.
 
 ### auth (`services/auth`) — port 8081
 
@@ -96,12 +98,30 @@ scale past prototype usage, swapping in real object storage is a clean, well-sco
 shape as the "deploy reconciliation" follow-up already tracked) — nothing else would need to change,
 since the client already treats the avatar/wallpaper values as opaque URLs.
 
+**Playtime (`game_stats`).** Owned by `auth` because it's account-scoped data, same as achievements —
+no new service for two extra columns. `POST /auth/stats/enter` stamps `last_played_at` when a game
+launches (the hub calls it from `handlePlay`, best-effort). `seconds_played` accrues from
+`POST /auth/stats/heartbeat`, called **from inside the running game** (`mygame.stats`, started
+automatically by `mygame.init()`, ~30s interval, paused when the tab isn't visible) — the hub itself
+can't time a session because it's a full-page navigation away to the game's own origin, not a
+component that stays mounted. The server, never the client, computes the credited duration: each
+heartbeat adds `min(now - last_heartbeat_at, ~60s)` to `seconds_played` and advances
+`last_heartbeat_at` (`services/auth/src/statsStore.ts`) — the clamp means a missed beat, a
+backgrounded tab, or a crash can never over-credit more than one interval's worth. A first heartbeat
+with no prior `enter`/heartbeat credits 0 (the window just opens); a negative delta (clock skew)
+also credits 0.
+
 ### social (`services/social`) — port 8083
 
 Socket.io server layering live presence over a durable friendship graph.
 
 - **Auth:** every socket handshake carries the platform **access** token; `io.use(...)` verifies it
   and binds the socket to `accountId`.
+- **Socket path:** `/social.io/`, not the socket.io default `/socket.io/`. In production auth,
+  social, chat and community all share one origin (Caddy routes between them by path), and a game's
+  own lobby may *also* run its own socket.io server on that same origin — three servers all defaulting
+  to `/socket.io/` would collide. `chat` reserves `/chat.io/` for the same reason; the SDK's
+  `socialStore.ts`/`chatStore.ts` pass the matching `path` when connecting.
 - **Graph:** `SocialStore` (`store.ts`) — undirected edges keyed by sorted account pair, with a
   `by` field for pending direction. In-memory.
 - **Presence/activity:** *not* in the store — held in `server.ts` maps (`socketsOf`, `activityOf`)
@@ -115,10 +135,18 @@ Socket.io server layering live presence over a durable friendship graph.
 - **Push model:** on any change the server pushes the **full** friends list (with presence +
   activity resolved) to the affected account and everyone it has an edge with.
 - **C2S/S2C events:** see `protocol/src/social.ts` (`request`, `accept`, `decline`, `remove`,
-  `setActivity`, `getState`, `createInvite`, `inviteFriend` / `friends`, `me`, `invite`, `error`).
+  `setActivity`, `getState`, `createInvite`, `inviteFriend`, `getLobbies` / `friends`, `me`, `invite`,
+  `error`).
 - **Invites:** `InviteStore` (`invites.ts`) mints opaque random codes (unambiguous alphabet, 1h TTL)
   resolving to `{ game, room, role, inviter }`. Public HTTP `GET /invite/:code` resolves a code
   before any socket exists (for deep links).
+- **Find groups / lobbies (`getLobbies`).** A query, not a subscription — the hub asks (via ack) each
+  time it opens the "Найти группы" tab. The server filters `activityOf` (the *same* live map presence
+  already keeps) to entries for the requested `game` with `activity.joinable` set and the account
+  online, groups them by `room`, and resolves a `hostName` (the first online account found in that
+  room — `Activity` carries no explicit host flag, so this is just a display label). No new
+  persistence: a lobby is exactly as durable as presence itself (gone the moment everyone in the room
+  disconnects). Deliberately not restricted to friends, same trust posture as the rest of `social`.
 
 ### chat (`services/chat`) — port 8084
 
@@ -175,6 +203,37 @@ Wakes a game when a player enters and reaps it when idle, so empty games burn no
 - **Manifest:** games declared in `config.ts` (`defaultGames()`), each with its compose dir/project,
   activity URL, and idle policy. Add a game = one entry + its `deploy/<game>` compose.
 
+### community (`services/community`) — port 8085
+
+Per-game changelog + discussion forum. A **separate service** from `auth`/`social`/`chat`, not a
+route bolted onto one of them — the reasoning: this is unbounded, low-trust user-generated content
+(anyone logged in can start a thread) with its own moderation/growth profile, and keeping it out of
+the security-critical identity process (`auth`) or the always-on social graph (`social`) is the same
+isolation contract the rest of the platform follows (one domain, one service, one protocol file). The
+scaffold cost of a new service is near-zero (`scripts/gen-service.mjs` + the `auth`-style HTTP app
+template), so there was no reason to compromise the boundary for two features.
+
+- **Trust model — two different postures in the same service:**
+  - **Changelog** reads are public; **writes** require the caller's access token *and* membership in
+    the `COMMUNITY_ADMIN_IDS` allowlist (`config.ts`, comma-separated account ids) — patch notes are
+    curated content, not user content, so this is stricter than the rest of the platform's "your own
+    token authorizes it" posture (same idea as achievements' trust model, inverted: there the *player*
+    self-reports; here only a curator may publish).
+  - **Discussions** (threads + posts) use the platform's normal posture: any valid access token may
+    create a thread or reply, same as chat DMs or achievement grants — no per-game moderation yet
+    (tracked in `STATUS.md`).
+- **Routes (`app.ts`):** `GET /community/changelog/:gameId` (public); `POST /community/changelog`
+  (admin-gated) `{ gameId, version, title, body }`; `GET /community/threads/:gameId` (public, list,
+  newest-first); `GET /community/threads/:gameId/:threadId` (public, detail — thread + posts,
+  oldest-first); `POST /community/threads` `{ gameId, title, body }` (body seeds the first post);
+  `POST /community/posts` `{ threadId, body }`; `GET /health`.
+- **Store (`store.ts`):** `changelog` (flat list), `discussion_threads` + `discussion_posts` (a thread
+  view derives `replyCount`/`lastReplyAt` from its posts at read time, same pattern chat uses for
+  unread counts). `author_name` is denormalized onto both tables from the JWT `name` claim at write
+  time — `community` has no cross-service account lookup, mirroring chat's `senderName`.
+- Postgres-backed when `DATABASE_URL` is set (`pgStore.ts`, same write-behind shape as the other
+  services), in-memory fallback otherwise.
+
 ## SDK (`packages/sdk` → `@mygame/sdk`)
 
 The framework-agnostic client a game embeds, plus the overlay the hub also uses. Built with the
@@ -183,12 +242,13 @@ plus a global IIFE (`window.mygame`) for non-bundler consumers, React as a peer 
 self-mounting Shadow-DOM overlay so the platform UI works on top of any host page's CSS.
 
 - **`client.ts`** — the `mygame` singleton. `mygame.init(gameId, { hubUrl })` configures endpoints,
-  mounts the overlay, and opens the social **and** chat connections. Sub-APIs:
+  mounts the overlay, opens the social **and** chat connections, stamps a playtime "enter", and starts
+  the playtime heartbeat. Sub-APIs:
   - `auth` — session, tokens, handoff.
-  - `social` — friends/presence (`getMe`, `getFriends`, `addByCode`, `setActivity`, `subscribe`).
-    `getMe()`/`getFriends()` both carry `avatarIcon`/`titleAchievement` now (mirrored from the
-    account row `auth` owns) alongside `accountId`/`displayName` — richer than `auth.getAccount()`,
-    which only reads the locally-cached session and knows neither field.
+  - `social` — friends/presence (`getMe`, `getFriends`, `addByCode`, `setActivity`, `getLobbies`,
+    `subscribe`). `getMe()`/`getFriends()` both carry `avatarIcon`/`titleAchievement` now (mirrored
+    from the account row `auth` owns) alongside `accountId`/`displayName` — richer than
+    `auth.getAccount()`, which only reads the locally-cached session and knows neither field.
   - `chat` — `open`, `openWithUser` (find-or-create a dm), `createGroup`, `addMembers`,
     `removeMember`, `leaveGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`. A game can
     either just call `open()`/`openWithUser()` and rely on the SDK-shipped `ChatWidget`, or build its
@@ -197,17 +257,36 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
     genuinely new unlock, silent on a re-grant) and `list()` (every game's unlocked achievements).
   - `profile` — `get()`, `setAvatar(dataUrl)`, `setWallpaper(dataUrl)`, `setTitle(ref | null)`. `ref`
     is validated server-side against the account's own unlocked achievements.
+  - `stats` — `recordEnter()`, `getStats()`, `startHeartbeat()`/`stopHeartbeat()` (the latter two are
+    called automatically by `init()`/`auth.logout()`; exposed for a game that re-enters without
+    re-initializing).
+  - `community` — `getChangelog(gameId?)`, `getThreads(gameId?)`, `getThread(threadId, gameId?)`,
+    `createThread(title, body, gameId?)`, `createPost(threadId, body)`. `gameId` defaults to
+    `this.gameId` from `init()`.
   - `ui` — context menu, toasts.
-  The plain functions behind `achievements`/`profile` (`grantAchievement`, `getAchievements`,
-  `getProfile`, `setAvatar`, `setWallpaper`, `setTitleAchievement` — `authClient.ts`) are also exported
-  directly for a caller that hasn't gone through `mygame.init()` — the hub uses those, since it doesn't
-  call `init()` itself (see "Hub" below).
-- **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084`; prod → same origin; a game
-  points it at the hub via `mygame.init(id, { hubUrl })`.
+  The plain functions behind `achievements`/`profile`/`stats`/`community` (`grantAchievement`,
+  `getAchievements`, `getProfile`, `setAvatar`, `setWallpaper`, `setTitleAchievement`,
+  `recordGameEnter`, `getGameStats`, `getChangelog`, `getThreads`, `getThread`, `createThread`,
+  `createPost`) are also exported directly for a caller that hasn't gone through `mygame.init()` — the
+  hub uses those, since it doesn't call `init()` itself (see "Hub" below). `MenuItem` (needed to type
+  `ui.showContextMenu`'s `items`), `Activity` (needed to type `social.setActivity`'s argument) and
+  `TitleAchievementRef` (needed to type `profile.setTitle`'s argument) are all re-exported from
+  `@mygame/sdk` directly too — a consumer shouldn't need to also import `@mygame/protocol` just to
+  type a call into the SDK it's already using.
+- **`config.ts`** — runtime endpoints. Dev → `localhost:8081/8083/8084/8085`; prod → same origin; a
+  game points it at the hub via `mygame.init(id, { hubUrl })`. `import.meta.env` is read as a single
+  inline-cast expression (`(import.meta as unknown as {...}).env`), not split across a variable —
+  splitting it silently defeats Vite's dev-mode static analysis, so every default below would fall
+  through to `sameOrigin` even in dev (found and fixed while wiring `apps/example-game`; see its
+  `vite.config.ts` alias for how a game consuming the SDK from source hits this same code path).
 - **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
   Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`), achievement
   helpers (`grantAchievement`, `getAchievements`), and profile helpers (`getProfile`, `setAvatar`,
-  `setWallpaper`, `setTitleAchievement`).
+  `setWallpaper`, `setTitleAchievement`). `freshAccessToken` (re-mints a token for the stored account)
+  is exported for sibling clients (`statsClient.ts`, `communityClient.ts`) that need an authed call
+  without duplicating the refresh dance.
+- **`statsClient.ts`** / **`communityClient.ts`** — thin fetch wrappers for `auth`'s `/stats/*` routes
+  and `community`'s routes, behind `mygame.stats`/`mygame.community` above.
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
   `menuStore`, `toastStore`.
 - **Overlay (`overlay/mount.tsx`, `components/*`)** — self-mounting Shadow-DOM overlay rendering
@@ -231,6 +310,29 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
   a friend's name when `titleAchievement` is set. It doesn't resolve *which* title (name/icon) since
   that lookup is per-game presentation data (same reasoning as the achievements display catalog below).
 - Built with `tsup` (`tsup.config.ts`) for external consumption.
+
+## Example game (`apps/example-game`)
+
+A minimal Vite+React app — living documentation for a third-party game developer, not a real game.
+Registered in the hub's game library (`example-game`, port 5190) so it's reachable via the normal
+launch flow. It exercises the whole SDK surface end-to-end: reads `?pt=` on boot and logs into its own
+origin as the same platform account (decoding the handoff JWT's `sub`/`name` claims client-side,
+without verifying its signature — safe here only because the very next step re-verifies identity the
+same way `mygame.auth.login` always does on this platform, passwordless re-claim by account id; a real
+game with its own backend should instead verify server-side at its own `POST /auth/platform`, see
+`SSO-FEDERATION.md`), then `mygame.init()`, a "win" button (`achievements.grant`), a joinable-activity
+toggle (`social.setActivity`, populates the hub's "Найти группы"), a chat-open button, and read-only
+panels for playtime/changelog/discussions. `vite.config.ts` aliases `@mygame/sdk` to source, same as
+the hub, for HMR.
+
+> Two real bugs surfaced (and were fixed) while wiring this: (1) a JWT payload's UTF-8 bytes need
+> re-assembling before `JSON.parse` — a bare `atob()` mangles non-ASCII display names (see
+> `decodeHandoffClaims` in `App.tsx`); (2) seeding React state from `mygame.auth.getAccount()` on
+> mount races the async handoff-login when a *different, stale* session already exists on this origin
+> — the bootstrap effect can fire on the stale account before the handoff corrects it, and the loser
+> of that race can overwrite the correct login with the stale one. Fixed by starting `account` at
+> `null` whenever a `?pt=` is still unconsumed (`hasPendingHandoff()`), so nothing reads the stale
+> session until the handoff has had its say.
 
 ## Hub (`apps/hub`)
 
@@ -260,10 +362,12 @@ The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget`/`FriendsWidget
 ## Contract (`packages/protocol` → `@mygame/protocol`)
 
 The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `chat.ts`,
-`achievements.ts`, `invite.ts`, `envelope.ts` (the WS envelope
+`achievements.ts`, `stats.ts`, `community.ts`, `invite.ts`, `envelope.ts` (the WS envelope
 `{ v, type, seq, ts, traceId?, payload }` + `CONTRACT_VERSION`), `errors.ts` (`ErrorCode` +
 `ContractError.toProtocol()`). Per-game protocols live in each game's repo and may re-export these
-primitives.
+primitives. `stats.ts` and `community.ts` are flat, account-scoped HTTP contracts (like
+`achievements.ts`); `social.ts`/`chat.ts` are namespaced (`export * as social`/`chat`) since they're
+richer Socket.io domains.
 
 ## Supporting packages
 
@@ -322,16 +426,25 @@ removal — so the removed member's own client gets one final push that already 
 which is what makes it disappear from their sidebar (`chatStore`'s `mergeThreads` treats each push as
 the complete list, dropping any local session absent from it).
 
-**Launch a game.** `handlePlay` → `enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort)
-→ `getHandoff()` → navigate to `http://host:PORT/?pt=<handoff>`. The game exchanges the token at its
-own `/auth/platform` and federates the identity.
+**Launch a game.** `handlePlay` → `recordGameEnter(id)` (best-effort, stamps `last_played_at`) →
+`enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort) → `getHandoff()` → navigate to
+`http://host:PORT/?pt=<handoff>`. The game exchanges the token at its own `/auth/platform` and
+federates the identity; `mygame.init()` then starts the playtime heartbeat from inside the game.
+
+**Find a lobby / report activity.** A game calls `mygame.social.setActivity({ game, gameName, room,
+joinable: true })` when its room is open to join. `mygame.social.getLobbies(gameId)` (or the hub's
+"Найти группы" tab) asks the social service, live, for every currently-joinable room for that game —
+purely a query over presence, nothing persisted. "+ Создать лобби" in the hub is the same
+`setActivity` call plus `routeToRoom` (join your own new room immediately).
 
 ## Persistence
 
 `@mygame/platform-db` provides the shared Postgres plumbing: `createPool`, `runMigrations` (the
 platform schema — `accounts`, `friendships`, `invites`, `conversations`, `conversation_members`,
-`messages`), and a `WriteQueue`. Each service has its own adapter next to its port
-(`auth/src/pgStore.ts`, `social/src/pgStore.ts` + `social/src/pgInvites.ts`, `chat/src/pgStore.ts`).
+`messages`, `game_stats`, `changelog`, `discussion_threads`, `discussion_posts`), and a `WriteQueue`.
+Each service has its own adapter next to its port (`auth/src/pgStore.ts` + `pgStatsStore.ts`,
+`social/src/pgStore.ts` + `social/src/pgInvites.ts`, `chat/src/pgStore.ts`,
+`community/src/pgStore.ts`).
 
 > The `messages` table's shape changed (DM-only `sender/recipient/read_at` → `conversation_id`-based)
 > when groups landed. That happened before this repo had real production data, so it was a plain
@@ -352,8 +465,10 @@ loses data.
 **Wiring.** Production entries (`index.ts`) use Postgres when `DATABASE_URL` is set, else fall back to
 the in-memory store with a loud warning. `standalone.ts` is always in-memory (isolation/dev). The
 `accounts` table is shared: `auth` is authoritative for profile fields; `social`/`chat` only refresh
-`display_name`. Set `DATABASE_URL=postgres://civa:civa@localhost:5432/civa` (matches
-`infra/docker-compose.yml`) to enable it. Redis is provisioned but not yet used.
+`display_name`. `game_stats` is auth-only; `changelog`/`discussion_threads`/`discussion_posts` are
+community-only — neither is shared with another service. Set
+`DATABASE_URL=postgres://civa:civa@localhost:5432/civa` (matches `infra/docker-compose.yml`) to enable
+it. Redis is provisioned but not yet used.
 
 > Trade-off: write-behind means a crash in the gap between the in-memory write and the DB write can
 > lose that single write. Acceptable for now; a synchronous/transactional path can replace it later if
