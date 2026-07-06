@@ -3,7 +3,12 @@ import { mygame, type MygameAccount } from '@mygame/sdk';
 import type { ChangelogEntry, DiscussionThread, GameStat } from '@mygame/protocol';
 
 const GAME_ID = 'example-game';
-const HUB_ORIGIN = `${typeof window !== 'undefined' ? window.location.protocol : 'http:'}//${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:5180`;
+// In prod this is the same VITE_HUB_URL baked in for mygame.init() below — the hub lives on the
+// platform's public domain there, not on a dev port. Dev falls back to the hub's own dev server
+// (port 5180); never inherit window.location.protocol (this app's own port isn't TLS-terminated).
+const HUB_ORIGIN =
+  (import.meta.env.VITE_HUB_URL as string | undefined) ??
+  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:5180`;
 
 /**
  * Reads the `sub`/`name` claims out of a handoff JWT without verifying its signature. That's fine

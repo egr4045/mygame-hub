@@ -52,6 +52,13 @@ container in this stack, isolated from Leaders' own Postgres) — data survives 
 `/auth/login` response, or the hub's "Скопировать мой ID"), then `docker compose up -d community` to
 pick it up — until then, changelog reads work but nobody can publish.
 
+`examplegame` (the SDK starter template, `apps/example-game`) is unlike every other service here: it
+runs on **its own origin** (host port **5190**), same model as an on-demand game, so its bundle needs
+`GAMEHUB_PUBLIC_URL` (set in `.env`, default `https://mygame-quiz.ru`) baked in **at build time** —
+Vite can't read env vars at container runtime, only when `vite build` runs. `build-images.sh` reads
+that value from `.env` and passes it as a Docker build arg. If `GAMEHUB_PUBLIC_URL` ever changes,
+rebuild+recreate just that image: `bash build-images.sh && docker compose up -d --build examplegame`.
+
 The orchestrator brings the lobby up on the first `enter`. To check on-demand + idle:
 
 ```sh

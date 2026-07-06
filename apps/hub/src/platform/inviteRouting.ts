@@ -18,7 +18,10 @@ export const routeToRoom = async (game: GameInfo, room: string, role: InviteRole
   if (handoff) params.set('pt', handoff);
   params.set('join', room);
   if (role === 'spectator') params.set('spectate', '1');
-  window.location.href = `${window.location.protocol}//${window.location.hostname}:${game.externalPort}/?${params.toString()}`;
+  // Always http:, never window.location.protocol: a game's own port has no TLS of its own (the
+  // hub's own domain cert doesn't cover other ports, and there's no per-port ACME setup on this
+  // host) — inheriting https: from an https: hub page would break the navigation outright.
+  window.location.href = `http://${window.location.hostname}:${game.externalPort}/?${params.toString()}`;
 };
 
 export const routeToInvite = async (inv: Invite): Promise<void> => {

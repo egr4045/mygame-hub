@@ -154,3 +154,20 @@ services:
       - community
       - orchestrator
     restart: unless-stopped
+
+  # SDK starter template — its own origin, own port (matches every other game's model). No reverse
+  # proxy: its bundle talks to GAMEHUB_PUBLIC_URL directly for auth/social/chat/community, baked in
+  # at build time (Vite can't read env at container runtime).
+  examplegame:
+    image: gamehub-examplegame:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: exampleweb
+      args:
+        VITE_HUB_URL: ${GAMEHUB_PUBLIC_URL:?set GAMEHUB_PUBLIC_URL in deploy/gamehub/.env}
+    ports:
+      - '5190:5190'
+    networks:
+      - gamehub-net
+    restart: unless-stopped

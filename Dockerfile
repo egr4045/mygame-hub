@@ -22,6 +22,20 @@ FROM caddy:2-alpine AS web
 COPY --from=webbuild /app/apps/hub/dist /srv/www
 COPY deploy/gamehub/Caddyfile /etc/caddy/Caddyfile
 
+# --- Build the example game SPA. Unlike the hub (same-origin), this app runs on its own origin
+#     (its own port), so it needs the platform's public URL baked in at build time — Vite inlines
+#     import.meta.env.VITE_* during the build, it can't be set at container runtime. ---
+FROM base AS examplegamebuild
+ARG VITE_HUB_URL
+ENV VITE_HUB_URL=$VITE_HUB_URL
+RUN pnpm --filter @mygame/example-game build
+
+# --- Static file server for the example game — no reverse proxy needed: its JS already talks to
+#     VITE_HUB_URL directly for auth/social/chat/community. ---
+FROM caddy:2-alpine AS exampleweb
+COPY --from=examplegamebuild /app/apps/example-game/dist /srv/www
+COPY deploy/gamehub/example-game.Caddyfile /etc/caddy/Caddyfile
+
 # --- Service runtime: auth/social/chat/community/orchestrator's base (command set per-service in compose) ---
 FROM base AS service
 ENV NODE_ENV=production

@@ -1,0 +1,14 @@
+# Static file server for apps/example-game. No reverse proxy here — its bundle already talks to
+# VITE_HUB_URL (baked in at build time, see the Dockerfile's examplegamebuild stage) directly for
+# auth/social/chat/community, so this container only needs to serve the built SPA.
+{
+	admin off
+	auto_https off
+}
+
+:5190 {
+	encode gzip
+	root * /srv/www
+	try_files {path} /index.html
+	file_server
+}
