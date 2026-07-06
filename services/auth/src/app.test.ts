@@ -4,7 +4,9 @@ import { createAuthCore } from '@mygame/auth-core';
 import type {
   GrantAchievementResponse,
   AchievementsResponse,
+  GameStatsResponse,
   HandoffResponse,
+  HeartbeatResponse,
   LoginResponse,
   ProfileResponse,
   RefreshResponse,
@@ -12,6 +14,7 @@ import type {
 import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
 import { createApp } from './app.js';
 import { createMemoryAccountStore } from './store.js';
+import { createMemoryGameStatsStore } from './statsStore.js';
 
 const json = <T>(res: Response): Promise<T> => res.json() as Promise<T>;
 
@@ -25,6 +28,7 @@ const start = async () => {
     logger: createCapturingLogger(),
     auth,
     accounts: createMemoryAccountStore(),
+    stats: createMemoryGameStatsStore(),
   });
   const port = await new Promise<number>((r) =>
     server!.listen(0, () => r((server!.address() as AddressInfo).port)),
@@ -231,5 +235,44 @@ describe('auth service — profile', () => {
     expect((await get(base, '/auth/profile')).status).toBe(401);
     expect((await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' })).status).toBe(401);
     expect((await put(base, '/auth/profile/title', { titleAchievement: null })).status).toBe(401);
+  });
+});
+
+describe('auth service — playtime stats', () => {
+  it('records a launch (last_played) and lists per-game stats', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+
+    const enterRes = await post(base, '/auth/stats/enter', { gameId: 'civa' }, login.accessToken);
+    expect(enterRes.status).toBe(200);
+
+    const stats = await json<GameStatsResponse>(await get(base, '/auth/stats', login.accessToken));
+    expect(stats.stats).toHaveLength(1);
+    expect(stats.stats[0]).toMatchObject({ gameId: 'civa', secondsPlayed: 0 });
+    expect(stats.stats[0]!.lastPlayedAt).toBeGreaterThan(0);
+  });
+
+  it('credits ~0 seconds for a heartbeat right after enter (no elapsed time)', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    await post(base, '/auth/stats/enter', { gameId: 'civa' }, login.accessToken);
+
+    const beat = await json<HeartbeatResponse>(
+      await post(base, '/auth/stats/heartbeat', { gameId: 'civa' }, login.accessToken),
+    );
+    expect(beat.secondsPlayed).toBe(0);
+  });
+
+  it('rejects unauthenticated stats calls', async () => {
+    const { base } = await start();
+    expect((await post(base, '/auth/stats/enter', { gameId: 'civa' })).status).toBe(401);
+    expect((await post(base, '/auth/stats/heartbeat', { gameId: 'civa' })).status).toBe(401);
+    expect((await get(base, '/auth/stats')).status).toBe(401);
+  });
+
+  it('400s an invalid stats body', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    expect((await post(base, '/auth/stats/enter', { gameId: '' }, login.accessToken)).status).toBe(400);
   });
 });

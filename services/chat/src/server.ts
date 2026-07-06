@@ -48,7 +48,12 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     res.end(JSON.stringify({ error: 'not_found' }));
   });
 
-  const io = new IOServer(httpServer, { cors: { origin: deps.corsOrigin, methods: ['GET', 'POST'] } });
+  // Custom path — see the matching comment in services/social/src/server.ts: on a shared production
+  // origin, the default `/socket.io/` would collide with social's socket and the game lobby's.
+  const io = new IOServer(httpServer, {
+    path: '/chat.io/',
+    cors: { origin: deps.corsOrigin, methods: ['GET', 'POST'] },
+  });
 
   const socketsOf = new Map<string, Set<string>>(); // accountId -> connected socket ids
 

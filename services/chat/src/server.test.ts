@@ -33,7 +33,7 @@ const startServer = (): Promise<number> => {
 
 const connect = async (port: number, accountId: string, name: string): Promise<ClientSocket> => {
   const token = await auth.signAccess(accountId, name);
-  const c = ioc(`http://127.0.0.1:${port}`, { auth: { token }, transports: ['websocket'], forceNew: true });
+  const c = ioc(`http://127.0.0.1:${port}`, { path: '/chat.io/', auth: { token }, transports: ['websocket'], forceNew: true });
   clients.push(c);
   await new Promise<void>((res) => c.once('connect', () => res()));
   return c;

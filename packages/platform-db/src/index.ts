@@ -91,6 +91,53 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at       BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at);
+
+    -- Playtime per (account, game), owned by auth. last_played_at is written on game launch;
+    -- seconds_played accrues from in-game SDK heartbeats, clamped server-side so a gap or closed
+    -- tab never over-credits (last_heartbeat_at is the window anchor).
+    CREATE TABLE IF NOT EXISTS game_stats (
+      account_id        TEXT NOT NULL,
+      game_id           TEXT NOT NULL,
+      seconds_played    BIGINT NOT NULL DEFAULT 0,
+      last_played_at    BIGINT,
+      last_heartbeat_at BIGINT,
+      PRIMARY KEY (account_id, game_id)
+    );
+    CREATE INDEX IF NOT EXISTS game_stats_account_idx ON game_stats (account_id);
+
+    -- Community: per-game changelog (curated — see @mygame/community's admin allowlist).
+    CREATE TABLE IF NOT EXISTS changelog (
+      id            TEXT PRIMARY KEY,
+      game_id       TEXT NOT NULL,
+      version       TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      published_at  BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS changelog_game_idx ON changelog (game_id, published_at DESC);
+
+    -- Community: per-game discussion forum. Any logged-in account may start a thread or reply (same
+    -- trust model as chat); author_name is denormalized at write time (community has no cross-service
+    -- account lookup), mirroring chat's senderName.
+    CREATE TABLE IF NOT EXISTS discussion_threads (
+      id            TEXT PRIMARY KEY,
+      game_id       TEXT NOT NULL,
+      author_id     TEXT NOT NULL,
+      author_name   TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      created_at    BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS discussion_threads_game_idx ON discussion_threads (game_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS discussion_posts (
+      id            TEXT PRIMARY KEY,
+      thread_id     TEXT NOT NULL,
+      author_id     TEXT NOT NULL,
+      author_name   TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      created_at    BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS discussion_posts_thread_idx ON discussion_posts (thread_id, created_at ASC);
   `);
 };
 

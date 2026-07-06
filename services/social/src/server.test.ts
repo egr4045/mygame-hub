@@ -35,7 +35,7 @@ const startServer = (store = createMemorySocialStore()): Promise<number> => {
 
 const connect = async (port: number, accountId: string, name: string): Promise<ClientSocket> => {
   const token = await auth.signAccess(accountId, name);
-  const c = ioc(`http://127.0.0.1:${port}`, { auth: { token }, transports: ['websocket'], forceNew: true });
+  const c = ioc(`http://127.0.0.1:${port}`, { path: '/social.io/', auth: { token }, transports: ['websocket'], forceNew: true });
   clients.push(c);
   await new Promise<void>((res) => c.once('connect', () => res()));
   return c;
@@ -176,7 +176,7 @@ describe('social server — profile fields', () => {
     // the instant it accepts the connection (a one-shot event, not a queryable state), so awaiting
     // `connect()` first (which itself waits on the client 'connect' event) risks missing it.
     const token = await auth.signAccess('a1', 'Mara');
-    const c1 = ioc(`http://127.0.0.1:${port}`, { auth: { token }, transports: ['websocket'], forceNew: true });
+    const c1 = ioc(`http://127.0.0.1:${port}`, { path: '/social.io/', auth: { token }, transports: ['websocket'], forceNew: true });
     clients.push(c1);
     const me = new Promise<social.MeEvent>((res) => c1.once(social.S2C.me, res));
     await new Promise<void>((res) => c1.once('connect', () => res()));
@@ -203,5 +203,58 @@ describe('social server — profile fields', () => {
     c1.emit(social.C2S.request, { code: 'a2' });
     const list = await incoming;
     expect(find(list, 'a1')).toMatchObject({ avatarIcon: null, titleAchievement: null });
+  });
+});
+
+describe('social server — lobbies (find groups)', () => {
+  const getLobbies = (c: ClientSocket, game: string): Promise<social.Lobby[]> =>
+    new Promise((res) => c.emit(social.C2S.getLobbies, { game }, (ack: social.GetLobbiesAck) => res(ack.lobbies)));
+
+  const setActivity = (c: ClientSocket, activity: social.Activity) =>
+    c.emit(social.C2S.setActivity, { activity });
+
+  it('groups two joinable accounts in the same room into one lobby with memberCount 2', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
+    setActivity(c2, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
+    // setActivity has no ack; give the server a beat to apply both before asking.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const lobbies = await getLobbies(c1, 'civa');
+    expect(lobbies).toHaveLength(1);
+    expect(lobbies[0]).toMatchObject({ room: 'room-7', joinable: true, memberCount: 2 });
+  });
+
+  it('excludes non-joinable activity', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: false });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(await getLobbies(c1, 'civa')).toEqual([]);
+  });
+
+  it('excludes an account after it goes offline', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await getLobbies(c2, 'civa')).toHaveLength(1);
+
+    c1.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await getLobbies(c2, 'civa')).toEqual([]);
+  });
+
+  it('excludes activity reported for a different game', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    setActivity(c1, { game: 'svoyak', gameName: 'Своя игра', room: 'room-7', joinable: true });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(await getLobbies(c1, 'civa')).toEqual([]);
   });
 });

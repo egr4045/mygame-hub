@@ -49,6 +49,7 @@ export const C2S = {
   getState: 'social.getState',
   createInvite: 'social.createInvite', // mint a join code for a room (ack returns { code })
   inviteFriend: 'social.inviteFriend', // mint a code and push it to a friend's presence channel
+  getLobbies: 'social.getLobbies', // list joinable rooms for a game, derived from live presence (ack)
 } as const;
 
 export const requestPayload = z.object({ code: z.string().min(1).max(64) });
@@ -68,12 +69,31 @@ export const inviteFriendPayload = inviteTarget.extend({ accountId: z.string().m
 /** Ack returned to the creator of an invite. */
 export const createInviteAck = z.object({ code: z.string() });
 
+export const getLobbiesPayload = z.object({ game: z.string().min(1) });
+
+/**
+ * A joinable room for a game, derived live from who's currently online with `activity.joinable`
+ * set — not persisted (see server.ts's `activityOf`/`socketsOf`). Sparse until games actually call
+ * `setActivity({ joinable: true, room })`.
+ */
+export const lobby = z.object({
+  room: z.string(),
+  hostAccountId: z.string(),
+  hostName: z.string(),
+  joinable: z.boolean(),
+  memberCount: z.number(),
+});
+export const getLobbiesAck = z.object({ lobbies: z.array(lobby) });
+
 export type RequestPayload = z.infer<typeof requestPayload>;
 export type TargetPayload = z.infer<typeof targetPayload>;
 export type SetActivityPayload = z.infer<typeof setActivityPayload>;
 export type InviteTarget = z.infer<typeof inviteTarget>;
 export type InviteFriendPayload = z.infer<typeof inviteFriendPayload>;
 export type CreateInviteAck = z.infer<typeof createInviteAck>;
+export type GetLobbiesPayload = z.infer<typeof getLobbiesPayload>;
+export type Lobby = z.infer<typeof lobby>;
+export type GetLobbiesAck = z.infer<typeof getLobbiesAck>;
 
 // --- Server -> Client events -------------------------------------------------
 export const S2C = {

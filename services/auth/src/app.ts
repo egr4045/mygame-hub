@@ -3,7 +3,9 @@ import type { Clock, Logger } from '@mygame/shared-types';
 import {
   grantAchievementRequest,
   handoffRequest,
+  heartbeatRequest,
   loginRequest,
+  recordEnterRequest,
   refreshRequest,
   setAvatarRequest,
   setTitleRequest,
@@ -14,6 +16,7 @@ import type { AuthClaims } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import { TokenError } from '@mygame/auth-core';
 import type { AccountStore } from './store.js';
+import type { GameStatsStore } from './statsStore.js';
 import type { TelegramLinking } from './telegramLinking.js';
 
 /**
@@ -26,6 +29,7 @@ export interface AppDeps {
   readonly logger: Logger;
   readonly auth: AuthCore;
   readonly accounts: AccountStore;
+  readonly stats: GameStatsStore;
   readonly telegram?: TelegramLinking | undefined;
 }
 
@@ -336,6 +340,46 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       wallpaper: account?.wallpaper ?? null,
       titleAchievement: account?.titleAchievement ?? null,
     });
+    return;
+  }
+
+  // --- Playtime stats: last-played on launch, seconds accrued via in-game heartbeats -----------
+  // Stamp a launch of `gameId` by the caller (sets last_played_at, opens the heartbeat window).
+  if (method === 'POST' && url === '/auth/stats/enter') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = recordEnterRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid enter' });
+      return;
+    }
+    const row = deps.stats.recordEnter(claims.sub, parsed.data.gameId);
+    send(res, 200, { secondsPlayed: row.secondsPlayed });
+    return;
+  }
+
+  // Credit clamped elapsed time since the caller's previous heartbeat/enter for `gameId`.
+  if (method === 'POST' && url === '/auth/stats/heartbeat') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = heartbeatRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid heartbeat' });
+      return;
+    }
+    const row = deps.stats.heartbeat(claims.sub, parsed.data.gameId);
+    send(res, 200, { secondsPlayed: row.secondsPlayed });
+    return;
+  }
+
+  // The caller's per-game playtime + last-played, across every game.
+  if (method === 'GET' && url === '/auth/stats') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const stats = deps.stats
+      .statsFor(claims.sub)
+      .map((r) => ({ gameId: r.gameId, secondsPlayed: r.secondsPlayed, lastPlayedAt: r.lastPlayedAt }));
+    send(res, 200, { stats });
     return;
   }
 

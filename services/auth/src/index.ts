@@ -10,6 +10,8 @@ import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createMemoryAccountStore, type AccountStore } from './store.js';
 import { createPgAccountStore } from './pgStore.js';
+import { createMemoryGameStatsStore, type GameStatsStore } from './statsStore.js';
+import { createPgGameStatsStore } from './pgStatsStore.js';
 import { createTelegramClient } from './telegram.js';
 import { createTelegramLinking, type TelegramLinking } from './telegramLinking.js';
 
@@ -23,17 +25,19 @@ const auth = createAuthCore({
   handoffTtl: config.handoffTtl,
 });
 
-const accounts: AccountStore = await (async () => {
+const { accounts, stats } = await (async (): Promise<{ accounts: AccountStore; stats: GameStatsStore }> => {
   if (!config.databaseUrl) {
-    logger.warn('DATABASE_URL not set — accounts are in-memory and will not survive a restart');
-    return createMemoryAccountStore();
+    logger.warn('DATABASE_URL not set — accounts + playtime are in-memory and will not survive a restart');
+    return { accounts: createMemoryAccountStore(), stats: createMemoryGameStatsStore() };
   }
   const pool = createPool(config.databaseUrl);
   await runMigrations(pool);
-  const store = createPgAccountStore(pool, logger);
-  await store.init();
-  logger.info('accounts persisted to postgres');
-  return store;
+  const accountStore = createPgAccountStore(pool, logger);
+  await accountStore.init();
+  const statsStore = createPgGameStatsStore(pool, logger);
+  await statsStore.init();
+  logger.info('accounts + playtime persisted to postgres');
+  return { accounts: accountStore, stats: statsStore };
 })();
 
 let telegram: TelegramLinking | undefined;
@@ -47,6 +51,6 @@ if (config.telegramBotToken) {
   logger.info('TELEGRAM_BOT_TOKEN not set — telegram linking disabled');
 }
 
-const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, telegram });
+const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, stats, telegram });
 
 app.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
