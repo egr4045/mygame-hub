@@ -18,5 +18,7 @@ export * from './overlay/mount.js';
 
 export * from './config.js';
 export * from './authClient.js';
+export * from './statsClient.js';
+export * from './communityClient.js';
 export * from './emitter.js';
 export * from './client.js';

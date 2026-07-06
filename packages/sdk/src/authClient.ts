@@ -51,8 +51,10 @@ export const login = async (displayName: string, accountId?: string): Promise<Se
 /**
  * Get a fresh access token for the stored account. Login is passwordless, so re-claiming the same
  * account id re-mints tokens — this avoids 401s from a stale (15m) access token before authed calls.
+ * Exported for sibling clients (stats, community) that also need an authed call without duplicating
+ * the refresh dance.
  */
-const freshAccessToken = async (): Promise<string | null> => {
+export const freshAccessToken = async (): Promise<string | null> => {
   const s = loadSession();
   if (!s) return null;
   try {

@@ -155,7 +155,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     socket?.close();
-    socket = io(config.chatUrl, { auth: { token }, transports: ['websocket'] });
+    // path must match the server's custom path (services/chat/src/server.ts) — see the matching
+    // comment in socialStore.ts.
+    socket = io(config.chatUrl, { path: '/chat.io/', auth: { token }, transports: ['websocket'] });
 
     socket.on('connect', () => set({ status: 'connected', error: null }));
     socket.on('disconnect', () => set({ status: 'connecting' }));

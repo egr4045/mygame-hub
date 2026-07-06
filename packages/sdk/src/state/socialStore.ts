@@ -39,6 +39,8 @@ interface SocialUIState {
   /** Push an invite into a friend's presence channel. */
   inviteFriend: (accountId: string, target: social.InviteTarget) => void;
   dismissInvite: (code: string) => void;
+  /** Currently-joinable rooms for `game`, derived from live presence. Empty on failure/timeout. */
+  getLobbies: (game: string) => Promise<social.Lobby[]>;
 }
 
 export const useSocialStore = create<SocialUIState>((set) => ({
@@ -66,7 +68,9 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     }
 
     socket?.close();
-    socket = io(config.socialUrl, { auth: { token }, transports: ['websocket'] });
+    // path must match the server's custom path (services/social/src/server.ts) — needed so social's
+    // socket doesn't collide with chat's or the game lobby's default `/socket.io/` on a shared origin.
+    socket = io(config.socialUrl, { path: '/social.io/', auth: { token }, transports: ['websocket'] });
 
     socket.on('connect', () => set({ status: 'connected', error: null }));
     socket.on('disconnect', () => set({ status: 'connecting' }));
@@ -106,4 +110,14 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     }),
   inviteFriend: (accountId, target) => emit(social.C2S.inviteFriend, { accountId, ...target }),
   dismissInvite: (code) => set((s) => ({ invites: s.invites.filter((i) => i.code !== code) })),
+
+  getLobbies: (game) =>
+    new Promise<social.Lobby[]>((resolve) => {
+      if (!socket?.connected) {
+        resolve([]);
+        return;
+      }
+      socket.emit(social.C2S.getLobbies, { game }, (ack: social.GetLobbiesAck) => resolve(ack?.lobbies ?? []));
+      window.setTimeout(() => resolve([]), 5000); // don't hang the UI if the ack is lost
+    }),
 }));

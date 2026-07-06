@@ -3,7 +3,16 @@
  * No React: games (React, Vue, vanilla) call these methods and listen to events; the SDK renders the
  * overlay itself (Phase 2 step 2). The hub uses the React hooks instead (same underlying stores).
  */
-import type { social, Achievement, ProfileResponse, TitleAchievementRef } from '@mygame/protocol';
+import type {
+  social,
+  Achievement,
+  ChangelogEntry,
+  DiscussionPost,
+  DiscussionThread,
+  GameStat,
+  ProfileResponse,
+  TitleAchievementRef,
+} from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
 import {
   loadSession,
@@ -18,12 +27,24 @@ import {
   setTitleAchievement,
   type Session,
 } from './authClient.js';
+import {
+  recordGameEnter,
+  getGameStats,
+  startPlaytimeHeartbeat,
+  stopPlaytimeHeartbeat,
+} from './statsClient.js';
+import { getChangelog, getThreads, getThread, createThread, createPost } from './communityClient.js';
 import { useSocialStore } from './state/socialStore.js';
 import { useChatStore, type ChatSession } from './state/chatStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
 import { useToastStore, type ToastData } from './state/toastStore.js';
 import { Emitter } from './emitter.js';
 import { mountOverlay } from './overlay/mount.js';
+
+/** Re-exported for convenience — `social.Activity` and protocol's flat `TitleAchievementRef` are
+ *  otherwise only reachable by importing `@mygame/protocol` directly. */
+export type Activity = social.Activity;
+export type { TitleAchievementRef };
 
 export interface MygameAccount {
   accountId: string;
@@ -50,6 +71,9 @@ class MygameClient {
       mountOverlay();
       void this.social.connect();
       void useChatStore.getState().connect();
+      // Playtime: stamp this launch and start the in-game heartbeat (server derives + clamps duration).
+      void recordGameEnter(gameId);
+      startPlaytimeHeartbeat(gameId);
     }
     this.emitter.emit('ready', { gameId });
   }
@@ -64,6 +88,7 @@ class MygameClient {
       authLogin(displayName, accountId),
     logout: (): void => {
       clearSession();
+      stopPlaytimeHeartbeat();
       useSocialStore.getState().disconnect();
       useChatStore.getState().disconnect();
     },
@@ -78,6 +103,11 @@ class MygameClient {
     getFriends: (): social.Friend[] => useSocialStore.getState().friends,
     addByCode: (code: string): void => useSocialStore.getState().addByCode(code),
     setActivity: (activity: social.Activity): void => useSocialStore.getState().setActivity(activity),
+    /** Currently-joinable rooms for `gameId` (defaults to the current game), from live presence. */
+    getLobbies: (gameId?: string): Promise<social.Lobby[]> => {
+      const id = gameId ?? this.gameId;
+      return id ? useSocialStore.getState().getLobbies(id) : Promise.resolve([]);
+    },
     /** Subscribe to social-store changes; returns an unsubscribe. */
     subscribe: (cb: () => void): (() => void) => useSocialStore.subscribe(cb),
   };
@@ -139,6 +169,45 @@ class MygameClient {
     setWallpaper: (dataUrl: string): Promise<string | null> => setWallpaper(dataUrl),
     /** `null` clears it. Rejected if the account hasn't actually unlocked that achievement. */
     setTitle: (ref: TitleAchievementRef): Promise<boolean> => setTitleAchievement(ref),
+  };
+
+  readonly stats = {
+    /** Stamp a launch of the current game. Called automatically by `init()`; call again if you
+     *  re-enter without re-initializing. No-op with no gameId. */
+    recordEnter: (): Promise<boolean> => (this.gameId ? recordGameEnter(this.gameId) : Promise.resolve(false)),
+    /** The player's per-game playtime + last-played, across every game. Empty on failure/not logged in. */
+    getStats: (): Promise<GameStat[]> => getGameStats().then((r) => r?.stats ?? []),
+    /** Start the ~30s in-game playtime heartbeat (init() starts it). Idempotent. */
+    startHeartbeat: (): void => {
+      if (this.gameId) startPlaytimeHeartbeat(this.gameId);
+    },
+    /** Stop the playtime heartbeat (init's is stopped on logout). */
+    stopHeartbeat: (): void => stopPlaytimeHeartbeat(),
+  };
+
+  readonly community = {
+    /** Newest-first changelog entries for `gameId` (defaults to the current game). Public — no login needed. */
+    getChangelog: (gameId?: string): Promise<ChangelogEntry[]> => {
+      const id = gameId ?? this.gameId;
+      return id ? getChangelog(id) : Promise.resolve([]);
+    },
+    /** Newest-first discussion threads for `gameId` (defaults to the current game). Public. */
+    getThreads: (gameId?: string): Promise<DiscussionThread[]> => {
+      const id = gameId ?? this.gameId;
+      return id ? getThreads(id) : Promise.resolve([]);
+    },
+    /** A thread + its posts, oldest first. Null on failure/not found. */
+    getThread: (threadId: string, gameId?: string): Promise<{ thread: DiscussionThread; posts: DiscussionPost[] } | null> => {
+      const id = gameId ?? this.gameId;
+      return id ? getThread(id, threadId) : Promise.resolve(null);
+    },
+    /** Start a discussion thread for `gameId` (defaults to the current game); `body` seeds its first post. */
+    createThread: (title: string, body: string, gameId?: string): Promise<DiscussionThread | null> => {
+      const id = gameId ?? this.gameId;
+      return id ? createThread(id, title, body) : Promise.resolve(null);
+    },
+    /** Reply to a thread. */
+    createPost: (threadId: string, body: string): Promise<DiscussionPost | null> => createPost(threadId, body),
   };
 
   readonly ui = {
