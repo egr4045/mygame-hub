@@ -1,5 +1,7 @@
-import { type CSSProperties } from 'react';
+import { type CSSProperties, useEffect, useState } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
+import { useSocialStore, getAchievements } from '@mygame/sdk';
+import { ACHIEVEMENTS, CIVA_GAME_ID, type AchievementDef } from '../platform/achievementsCatalog.js';
 
 const panelStyle: CSSProperties = {
   background: 'rgba(255, 255, 255, 0.03)',
@@ -21,6 +23,9 @@ const avatarStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   fontSize: '32px',
+  fontWeight: 800,
+  color: '#fff',
+  overflow: 'hidden',
   boxShadow: '0 8px 24px rgba(61, 169, 252, 0.3)'
 };
 
@@ -34,42 +39,60 @@ const achievementStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   fontSize: '20px',
-  cursor: 'pointer'
+  cursor: 'default'
 };
 
 export const ProfileWidget = (): JSX.Element => {
   const account = usePlatformStore((s) => s.account);
+  const me = useSocialStore((s) => s.me);
+  const online = useSocialStore((s) => s.status) === 'connected';
+
+  // Real unlocked CIVA achievements, resolved against the shared display catalog.
+  const [unlocked, setUnlocked] = useState<AchievementDef[]>([]);
+  useEffect(() => {
+    void getAchievements().then((res) => {
+      const ids = new Set(
+        (res?.achievements ?? [])
+          .filter((a) => a.gameId === CIVA_GAME_ID)
+          .map((a) => a.achievementId),
+      );
+      setUnlocked(ACHIEVEMENTS.filter((a) => ids.has(a.id)));
+    });
+  }, []);
 
   if (!account) return <></>;
 
-  // Stub data until backend supports it
-  const achievements = ['🏆', '⚔️', '🌍'];
-  const avatar = '👤';
+  const avatarUrl = me?.avatarIcon ?? null;
+  const showcase = unlocked.slice(0, 4);
 
   return (
     <div style={panelStyle} className="civa-fade-in">
       <div style={avatarStyle}>
-        {avatar}
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          account.displayName[0]?.toUpperCase() ?? '👤'
+        )}
       </div>
       <div style={{ flex: 1 }}>
         <h2 style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, margin: '0 0 4px 0' }}>{account.displayName}</h2>
         <div style={{ color: 'var(--c-text-muted)', fontSize: 'var(--fs-sm)', marginBottom: '16px' }}>
-          Status: <span style={{ color: 'var(--c-positive)' }}>Online</span>
+          Статус: <span style={{ color: online ? 'var(--c-positive)' : 'var(--c-text-muted)' }}>{online ? 'В сети' : 'Не в сети'}</span>
         </div>
-        
+
         <div>
           <div style={{ fontSize: 'var(--fs-xs)', textTransform: 'uppercase', color: 'var(--c-text-muted)', letterSpacing: 1, marginBottom: 8 }}>
-            Latest Achievements
+            Достижения
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            {achievements.map((ach, i) => (
-              <div key={i} style={achievementStyle} title="Achievement (mock)">
-                {ach}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {showcase.map((ach) => (
+              <div key={ach.id} style={{ ...achievementStyle, borderColor: `${ach.color}66` }} title={`${ach.name} — ${ach.desc}`}>
+                {ach.icon}
               </div>
             ))}
-            <div style={{ ...achievementStyle, borderStyle: 'dashed', opacity: 0.5 }} title="Locked">
-              🔒
-            </div>
+            {showcase.length === 0 && (
+              <div style={{ color: 'var(--c-text-muted)', fontSize: 'var(--fs-sm)' }}>Пока нет достижений</div>
+            )}
           </div>
         </div>
       </div>

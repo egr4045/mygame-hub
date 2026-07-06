@@ -2,7 +2,17 @@ import { useState, type CSSProperties } from 'react';
 import { GAMES, type GameInfo } from '../platform/games.js';
 import { useMenuStore } from '@mygame/sdk';
 
-export const LibrarySidebar = ({ selectedGameId, onSelectGame }: { selectedGameId: string | null, onSelectGame: (id: string) => void }): JSX.Element => {
+export const LibrarySidebar = ({
+  selectedGameId,
+  onSelectGame,
+  onPlay,
+  onOpenDiscussions,
+}: {
+  selectedGameId: string | null;
+  onSelectGame: (id: string) => void;
+  onPlay: (game: GameInfo) => void;
+  onOpenDiscussions: (game: GameInfo) => void;
+}): JSX.Element => {
   const openMenu = useMenuStore((s) => s.openMenu);
   const [search, setSearch] = useState('');
 
@@ -37,11 +47,13 @@ export const LibrarySidebar = ({ selectedGameId, onSelectGame }: { selectedGameI
           ИГРЫ ({inCategory.length})
         </div>
         {inCategory.map(g => (
-          <GameListItem 
-            key={g.id} 
-            game={g} 
-            selected={selectedGameId === g.id} 
-            onClick={() => onSelectGame(g.id)} 
+          <GameListItem
+            key={g.id}
+            game={g}
+            selected={selectedGameId === g.id}
+            onClick={() => onSelectGame(g.id)}
+            onPlay={onPlay}
+            onOpenDiscussions={onOpenDiscussions}
           />
         ))}
 
@@ -51,11 +63,13 @@ export const LibrarySidebar = ({ selectedGameId, onSelectGame }: { selectedGameI
               СКОРО ВЫЙДУТ
             </div>
             {soonCategory.map(g => (
-              <GameListItem 
-                key={g.id} 
-                game={g} 
-                selected={selectedGameId === g.id} 
-                onClick={() => onSelectGame(g.id)} 
+              <GameListItem
+                key={g.id}
+                game={g}
+                selected={selectedGameId === g.id}
+                onClick={() => onSelectGame(g.id)}
+                onPlay={onPlay}
+                onOpenDiscussions={onOpenDiscussions}
               />
             ))}
           </>
@@ -66,7 +80,19 @@ export const LibrarySidebar = ({ selectedGameId, onSelectGame }: { selectedGameI
   );
 };
 
-const GameListItem = ({ game, selected, onClick }: { game: GameInfo, selected: boolean, onClick: () => void }) => {
+const GameListItem = ({
+  game,
+  selected,
+  onClick,
+  onPlay,
+  onOpenDiscussions,
+}: {
+  game: GameInfo;
+  selected: boolean;
+  onClick: () => void;
+  onPlay: (game: GameInfo) => void;
+  onOpenDiscussions: (game: GameInfo) => void;
+}) => {
   const playable = game.status === 'playable';
   const openMenu = useMenuStore((s) => s.openMenu);
   return (
@@ -87,9 +113,9 @@ const GameListItem = ({ game, selected, onClick }: { game: GameInfo, selected: b
         e.preventDefault();
         e.stopPropagation();
         openMenu(e.clientX, e.clientY, [
-          { label: '▶️ Играть', action: () => alert('Играть') },
-          { label: '🌟 Добавить в Избранное', action: () => alert('В избранное') },
-          { label: '💬 Открыть обсуждения', action: () => alert('Обсуждения') }
+          ...(playable ? [{ label: '▶️ Играть', action: () => onPlay(game) }] : []),
+          { label: '🌟 В избранное (скоро)', action: () => {}, disabled: true },
+          { label: '💬 Открыть обсуждения', action: () => onOpenDiscussions(game) },
         ]);
       }}
     >

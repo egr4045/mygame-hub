@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
 import { GAMES, type GameInfo } from '../platform/games.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
-import { GameDetailsView } from '../components/GameDetailsView.js';
+import { GameDetailsView, type GameDetailsTab } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
 import { routeToInvite } from '../platform/inviteRouting.js';
-import { getHandoff, grantAchievement } from '@mygame/sdk';
+import { getHandoff, recordGameEnter } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
@@ -19,10 +19,11 @@ import { useToastStore } from '@mygame/sdk';
 export const HubScreen = (): JSX.Element => {
   const selectGame = usePlatformStore((s) => s.selectGame);
   const logout = usePlatformStore((s) => s.logout);
+  const account = usePlatformStore((s) => s.account);
   const me = useSocialStore((s) => s.me);
   const friends = useSocialStore((s) => s.friends);
   const invites = useSocialStore((s) => s.invites);
-  const { accept, dismissInvite, createInvite } = useSocialStore.getState();
+  const { accept, dismissInvite } = useSocialStore.getState();
   const incomingRequests = friends.filter((f) => f.status === 'incoming');
   const notificationCount = incomingRequests.length + invites.length;
   const openMenu = useMenuStore((s) => s.openMenu);
@@ -41,9 +42,11 @@ export const HubScreen = (): JSX.Element => {
   
   // Local state for library navigation (doesn't start the game yet)
   const [viewedGameId, setViewedGameId] = useState<string | null>(GAMES[0]?.id ?? null);
+  const [gameDetailsTab, setGameDetailsTab] = useState<GameDetailsTab>('changelog');
   const [activeTab, setActiveTab] = useState<'store' | 'library' | 'community' | 'contact' | 'profile'>('library');
 
   const handlePlay = (g: GameInfo): void => {
+    void recordGameEnter(g.id); // best-effort; a failed write just means stale "last played"
     if (g.externalPort) {
       void (async () => {
         await enterGame(g.id);
@@ -54,6 +57,12 @@ export const HubScreen = (): JSX.Element => {
     } else {
       selectGame(g.id);
     }
+  };
+
+  const openDiscussions = (g: GameInfo): void => {
+    setViewedGameId(g.id);
+    setGameDetailsTab('discussions');
+    setActiveTab('library');
   };
 
   const viewedGame = GAMES.find(g => g.id === viewedGameId) || null;
@@ -99,7 +108,7 @@ export const HubScreen = (): JSX.Element => {
                   ...(invites.length > 0
                     ? [{ label: '🗑️ Скрыть приглашения', action: () => invites.forEach((inv) => dismissInvite(inv.code)) }]
                     : []),
-                  { label: '⚙️ Настройки уведомлений', action: () => alert('Открытие настроек...') }
+                  { label: '⚙️ Настройки уведомлений', action: () => addToast({ type: 'system', title: 'Настройки уведомлений', content: 'Скоро', icon: '⚙️' }) }
                 ]);
               }}
             >
@@ -116,12 +125,17 @@ export const HubScreen = (): JSX.Element => {
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }} 
               onClick={(e) => {
                 e.stopPropagation();
+                const myId = me?.accountId ?? account?.accountId ?? null;
                 openMenu(e.clientX, e.clientY + 20, [
-                  { label: '🟢 В сети', action: () => alert('Статус изменен') },
-                  { label: '🌙 Не беспокоить', action: () => alert('Статус изменен') },
-                  { separator: true, action: () => {} },
-                  { label: '⚙️ Настройки Хаба', action: () => alert('Открыты глобальные настройки Хаба') },
-                  { label: '🔗 Скопировать мой ID', action: () => navigator.clipboard.writeText('ID: 12345') },
+                  { label: '⚙️ Настройки Хаба', action: () => addToast({ type: 'system', title: 'Настройки Хаба', content: 'Скоро', icon: '⚙️' }) },
+                  {
+                    label: '🔗 Скопировать мой ID',
+                    action: () => {
+                      if (!myId) return;
+                      void navigator.clipboard?.writeText(myId);
+                      addToast({ type: 'system', title: 'ID скопирован', content: myId, icon: '🔗' });
+                    },
+                  },
                   { separator: true, action: () => {} },
                   { label: '🚪 Выйти из аккаунта', action: () => setShowLogoutConfirm(true), danger: true }
                 ]);
@@ -160,8 +174,13 @@ export const HubScreen = (): JSX.Element => {
 
           {/* Split View Content */}
           <div className="mobile-split-view" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            <LibrarySidebar selectedGameId={viewedGameId} onSelectGame={setViewedGameId} />
-            <GameDetailsView game={viewedGame} onPlay={handlePlay} />
+            <LibrarySidebar
+              selectedGameId={viewedGameId}
+              onSelectGame={setViewedGameId}
+              onPlay={handlePlay}
+              onOpenDiscussions={openDiscussions}
+            />
+            <GameDetailsView game={viewedGame} onPlay={handlePlay} activeTab={gameDetailsTab} onTabChange={setGameDetailsTab} />
           </div>
         </>
       )}
@@ -185,11 +204,11 @@ export const HubScreen = (): JSX.Element => {
             </p>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <button onClick={() => setShowLinkModal(false)} style={{ background: '#2AABEE', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <button onClick={() => { setShowLinkModal(false); setActiveTab('profile'); }} style={{ background: '#2AABEE', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <span>✈</span> Привязать Telegram
               </button>
-              <button onClick={() => setShowLinkModal(false)} style={{ background: '#4C75A3', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span>K</span> Привязать ВКонтакте
+              <button disabled title="Скоро" style={{ background: '#4C75A3', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'not-allowed', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: 0.5 }}>
+                <span>K</span> Привязать ВКонтакте (скоро)
               </button>
               <button onClick={() => setShowLinkModal(false)} style={{ background: 'transparent', color: '#8f98a0', border: 'none', padding: '14px', cursor: 'pointer', fontWeight: 600, marginTop: 8 }}>
                 Позже
@@ -198,41 +217,6 @@ export const HubScreen = (): JSX.Element => {
           </div>
         </div>
       )}
-
-      {/* DEMO BUTTONS */}
-      <div style={{ position: 'fixed', bottom: 16, left: 16, display: 'flex', gap: 8, zIndex: 100 }}>
-        <button
-          onClick={() => addToast({ type: 'message', title: 'Новое сообщение', content: 'S1mple: Пойдем катать?', icon: '💬' })}
-          style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
-          🔔 Тест: Сообщение
-        </button>
-        <button
-          onClick={() => void (async () => {
-            const result = await grantAchievement('civa', 'first_blood');
-            if (result?.granted) {
-              addToast({ type: 'achievement', title: 'Достижение получено', content: 'Первая кровь (CIVA)', icon: '🏆' });
-            } else if (result) {
-              addToast({ type: 'achievement', title: 'Уже получено', content: 'Первая кровь (CIVA)', icon: '🏆' });
-            }
-          })()}
-          style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
-          🔔 Тест: Ачивка (реальный API)
-        </button>
-        <button
-          onClick={() => void (async () => {
-            const code = await createInvite({ game: 'civa', gameName: 'CIVA', room: 'test-room', role: 'player' });
-            if (!code) {
-              alert('Не удалось создать приглашение (сокет не подключён?).');
-              return;
-            }
-            const link = `${window.location.origin}${window.location.pathname}?invite=${code}`;
-            void navigator.clipboard?.writeText(link);
-            alert(`Ссылка-приглашение скопирована в буфер:\n${link}\n\nОткрой её в другой вкладке/окне (можно под другим логином), чтобы проверить авто-вход в игру.`);
-          })()}
-          style={{ background: '#23262e', border: '1px solid #3d4450', color: '#fff', padding: '8px 12px', borderRadius: 4, cursor: 'pointer' }}>
-          📨 Тест: Создать инвайт-ссылку
-        </button>
-      </div>
 
       {showLogoutConfirm && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

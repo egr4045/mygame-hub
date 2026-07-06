@@ -1,23 +1,28 @@
 /**
- * Route a resolved invite into its game. Every game is its own SPA on its own origin: we wake the
- * game (orchestrator), mint a fresh SSO handoff token and redirect carrying the join code (`?join=`),
- * so the game resolves the rest. Shared by the `?invite=` deep link and the "Join" button on a
- * pushed invite, so both paths behave identically.
+ * Route into a specific room of a game. Every game is its own SPA on its own origin: we wake the
+ * game (orchestrator), mint a fresh SSO handoff token and redirect carrying the room (`?join=`), so
+ * the game resolves the rest. Shared by the `?invite=` deep link, the "Join" button on a pushed
+ * invite, and "Присоединиться" on a live lobby (Найти группы) — all three land in the same place.
  */
-import type { Invite } from '@mygame/protocol';
+import type { GameInfo } from './games.js';
+import type { Invite, InviteRole } from '@mygame/protocol';
 import { GAMES } from './games.js';
 import { enterGame } from '../net/orchestratorClient.js';
 import { getHandoff } from '@mygame/sdk';
 
+export const routeToRoom = async (game: GameInfo, room: string, role: InviteRole = 'player'): Promise<void> => {
+  await enterGame(game.id);
+  const handoff = await getHandoff();
+  if (!game.externalPort) return;
+  const params = new URLSearchParams();
+  if (handoff) params.set('pt', handoff);
+  params.set('join', room);
+  if (role === 'spectator') params.set('spectate', '1');
+  window.location.href = `${window.location.protocol}//${window.location.hostname}:${game.externalPort}/?${params.toString()}`;
+};
+
 export const routeToInvite = async (inv: Invite): Promise<void> => {
   const game = GAMES.find((g) => g.id === inv.game);
-  await enterGame(inv.game);
-  const handoff = await getHandoff();
-  if (game?.externalPort) {
-    const params = new URLSearchParams();
-    if (handoff) params.set('pt', handoff);
-    params.set('join', inv.room);
-    if (inv.role === 'spectator') params.set('spectate', '1');
-    window.location.href = `${window.location.protocol}//${window.location.hostname}:${game.externalPort}/?${params.toString()}`;
-  }
+  if (!game) return;
+  await routeToRoom(game, inv.room, inv.role);
 };

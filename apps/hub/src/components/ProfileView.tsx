@@ -5,11 +5,16 @@ import {
   createTelegramLinkCode,
   getTelegramStatus,
   getAchievements,
+  getGameStats,
   getProfile,
   setAvatar as apiSetAvatar,
   setWallpaper as apiSetWallpaper,
   setTitleAchievement as apiSetTitleAchievement,
 } from '@mygame/sdk';
+import type { GameStat } from '@mygame/protocol';
+import { ACHIEVEMENTS, CIVA_GAME_ID } from '../platform/achievementsCatalog.js';
+import { GAMES } from '../platform/games.js';
+import { formatLastPlayed, formatPlaytime } from '../platform/statsFormat.js';
 
 /** Reads a File as a data URL (what the profile API stores/serves). */
 const readAsDataUrl = (file: File): Promise<string> =>
@@ -23,21 +28,6 @@ const readAsDataUrl = (file: File): Promise<string> =>
 /** Matches the server's per-route body cap (4MB) with headroom for base64 + JSON overhead. */
 const MAX_IMAGE_BYTES = 2_500_000;
 
-/**
- * Display catalog for CIVA's achievements — name/description/icon are presentation details the
- * platform's achievements API doesn't (and can't, being cross-game) know about; only the fact that
- * `gameId + achievementId` is unlocked is real (`mygame.achievements.list()`). A game with its own
- * achievements would keep its own such catalog.
- */
-const CIVA_GAME_ID = 'civa';
-const ACHIEVEMENTS = [
-  { id: 'first_blood', name: 'Первая кровь', desc: 'Одержите свою первую победу.', icon: '🏆', color: '#ffd700' },
-  { id: 'veteran', name: 'Ветеран', desc: 'Сыграйте 100 матчей.', icon: '⚔', color: '#c0c0c0' },
-  { id: 'rich', name: 'Богач', desc: 'Соберите 10 000 золота.', icon: '💰', color: '#ffb347' },
-  { id: 'social', name: 'Душа компании', desc: 'Добавьте 10 друзей.', icon: '🤝', color: '#66c0f4' },
-  { id: 'night_owl', name: 'Сова', desc: 'Сыграйте матч после полуночи.', icon: '🦉', color: '#a020f0' },
-];
-
 export const ProfileView = (): JSX.Element => {
   const me = usePlatformStore((s) => s.account);
   const openMenu = useMenuStore((s) => s.openMenu);
@@ -47,6 +37,16 @@ export const ProfileView = (): JSX.Element => {
   const [titleAchievement, setTitleAchievement] = useState<string | null>(null);
 
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
+
+  // Real per-game playtime, joined against the game registry for name/icon.
+  const [gameStats, setGameStats] = useState<GameStat[]>([]);
+  useEffect(() => {
+    void getGameStats().then((res) => setGameStats((res?.stats ?? []).filter((s) => s.lastPlayedAt !== null)));
+  }, []);
+  const recentActivity = [...gameStats]
+    .sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
+    .map((s) => ({ stat: s, game: GAMES.find((g) => g.id === s.gameId) }))
+    .filter((r): r is { stat: GameStat; game: NonNullable<typeof r.game> } => !!r.game);
 
   // Load the persisted profile (avatar/wallpaper/title) once on mount.
   useEffect(() => {
@@ -285,21 +285,20 @@ export const ProfileView = (): JSX.Element => {
             <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>НЕДАВНЯЯ АКТИВНОСТЬ</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <div style={{ width: 64, height: 64, background: '#2a475e', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>👑</div>
-                <div>
-                  <div style={{ color: '#fff', fontWeight: 600 }}>CIVA 2</div>
-                  <div style={{ color: '#8f98a0', fontSize: '12px' }}>Сыграно 12 часов • Последний запуск: сегодня</div>
+              {recentActivity.length === 0 && (
+                <div style={{ color: '#8f98a0', fontSize: '13px' }}>Ещё не играли ни в одну игру</div>
+              )}
+              {recentActivity.map(({ stat, game }) => (
+                <div key={game.id} style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ width: 64, height: 64, background: '#2a475e', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>{game.emoji}</div>
+                  <div>
+                    <div style={{ color: '#fff', fontWeight: 600 }}>{game.name}</div>
+                    <div style={{ color: '#8f98a0', fontSize: '12px' }}>
+                      Сыграно {formatPlaytime(stat.secondsPlayed)} • Последний запуск: {formatLastPlayed(stat.lastPlayedAt).toLowerCase()}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <div style={{ width: 64, height: 64, background: '#2a475e', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🌍</div>
-                <div>
-                  <div style={{ color: '#fff', fontWeight: 600 }}>Leaders</div>
-                  <div style={{ color: '#8f98a0', fontSize: '12px' }}>Сыграно 3 часа • Последний запуск: вчера</div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
@@ -339,7 +338,6 @@ export const ProfileView = (): JSX.Element => {
                   if (!unlocked) return;
                   openMenu(e.clientX, e.clientY, [
                     { label: '👑 Сделать титульной', action: () => void chooseTitle(ach.id) },
-                    { label: '✈️ Поделиться в Telegram', action: () => alert('Поделились в ТГ') }
                   ]);
                 }}
                 >

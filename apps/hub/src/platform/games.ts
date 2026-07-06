@@ -45,4 +45,13 @@ export const GAMES: GameInfo[] = [
     accent: '#c9a23d',
     emoji: '🏛️',
   },
+  {
+    id: 'example-game',
+    name: 'Example Game',
+    tagline: 'Живой пример @mygame/sdk — для разработчиков',
+    status: 'playable',
+    accent: '#8f6ef0',
+    emoji: '🧩',
+    externalPort: 5190,
+  },
 ];
