@@ -6,22 +6,20 @@
  */
 import type { GameInfo } from './games.js';
 import type { Invite, InviteRole } from '@mygame/protocol';
-import { GAMES } from './games.js';
+import { GAMES, getGameOrigin } from './games.js';
 import { enterGame } from '../net/orchestratorClient.js';
 import { getHandoff } from '@mygame/sdk';
 
 export const routeToRoom = async (game: GameInfo, room: string, role: InviteRole = 'player'): Promise<void> => {
   await enterGame(game.id);
   const handoff = await getHandoff();
-  if (!game.externalPort) return;
+  const base = getGameOrigin(game);
+  if (!base) return;
   const params = new URLSearchParams();
   if (handoff) params.set('pt', handoff);
   params.set('join', room);
   if (role === 'spectator') params.set('spectate', '1');
-  // Always http:, never window.location.protocol: a game's own port has no TLS of its own (the
-  // hub's own domain cert doesn't cover other ports, and there's no per-port ACME setup on this
-  // host) — inheriting https: from an https: hub page would break the navigation outright.
-  window.location.href = `http://${window.location.hostname}:${game.externalPort}/?${params.toString()}`;
+  window.location.href = `${base}/?${params.toString()}`;
 };
 
 export const routeToInvite = async (inv: Invite): Promise<void> => {

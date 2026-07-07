@@ -3,12 +3,19 @@ import { mygame, type MygameAccount } from '@mygame/sdk';
 import type { ChangelogEntry, DiscussionThread, GameStat } from '@mygame/protocol';
 
 const GAME_ID = 'example-game';
-// In prod this is the same VITE_HUB_URL baked in for mygame.init() below — the hub lives on the
-// platform's public domain there, not on a dev port. Dev falls back to the hub's own dev server
-// (port 5180); never inherit window.location.protocol (this app's own port isn't TLS-terminated).
+// Same VITE_HUB_URL baked in for mygame.init() below, if explicitly set (a deploy that puts this on
+// its own origin/port rather than a path). Otherwise: in prod this is deployed path-routed under the
+// hub's own origin (mygame-quiz.ru/example-game/) — the hub itself is right there at the origin
+// root, no port needed, no protocol mismatch possible. Dev falls back to the hub's own dev server
+// (its own port, since dev doesn't have the prod gateway's path routing) — never inherit
+// window.location.protocol there either (this app's own dev port isn't TLS-terminated).
 const HUB_ORIGIN =
   (import.meta.env.VITE_HUB_URL as string | undefined) ??
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:5180`;
+  (import.meta.env.DEV
+    ? `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:5180`
+    : typeof window !== 'undefined'
+      ? window.location.origin
+      : '');
 
 /**
  * Reads the `sub`/`name` claims out of a handoff JWT without verifying its signature. That's fine

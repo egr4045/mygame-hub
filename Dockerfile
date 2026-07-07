@@ -22,16 +22,24 @@ FROM caddy:2-alpine AS web
 COPY --from=webbuild /app/apps/hub/dist /srv/www
 COPY deploy/gamehub/Caddyfile /etc/caddy/Caddyfile
 
-# --- Build the example game SPA. Unlike the hub (same-origin), this app runs on its own origin
-#     (its own port), so it needs the platform's public URL baked in at build time — Vite inlines
-#     import.meta.env.VITE_* during the build, it can't be set at container runtime. ---
+# --- Build the example game SPA. Deployed behind a path on the SAME origin as the hub
+#     (mygame-quiz.ru/example-game/, see deploy/gamehub/Caddyfile) — Vite needs that base path baked
+#     in (VITE_BASE_PATH) so asset URLs resolve correctly; same-origin also means the SDK's own
+#     sameOrigin default already finds auth/social/chat/community with no explicit URL needed.
+#     VITE_HUB_URL stays supported (optional) for a deploy that instead puts this on its own
+#     origin/port — Vite inlines import.meta.env.VITE_* during the build, it can't be set at
+#     container runtime, so both must be provided as build args, not compose environment. ---
 FROM base AS examplegamebuild
-ARG VITE_HUB_URL
+ARG VITE_HUB_URL=
+ARG VITE_BASE_PATH=/
 ENV VITE_HUB_URL=$VITE_HUB_URL
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 RUN pnpm --filter @mygame/example-game build
 
-# --- Static file server for the example game — no reverse proxy needed: its JS already talks to
-#     VITE_HUB_URL directly for auth/social/chat/community. ---
+# --- Static file server for the example game. No reverse proxy needed on its own port: reached via
+#     the gateway's path-route (deploy/gamehub/Caddyfile strips the /example-game/ prefix before
+#     proxying here), and its JS talks to auth/social/chat/community same-origin (or VITE_HUB_URL,
+#     if that was set at build time instead). ---
 FROM caddy:2-alpine AS exampleweb
 COPY --from=examplegamebuild /app/apps/example-game/dist /srv/www
 COPY deploy/gamehub/example-game.Caddyfile /etc/caddy/Caddyfile

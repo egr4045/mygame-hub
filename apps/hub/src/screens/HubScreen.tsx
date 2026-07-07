@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { GAMES, type GameInfo } from '../platform/games.js';
+import { GAMES, getGameOrigin, type GameInfo } from '../platform/games.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView, type GameDetailsTab } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
@@ -47,13 +47,11 @@ export const HubScreen = (): JSX.Element => {
 
   const handlePlay = (g: GameInfo): void => {
     void recordGameEnter(g.id); // best-effort; a failed write just means stale "last played"
-    if (g.externalPort) {
+    const base = getGameOrigin(g);
+    if (base) {
       void (async () => {
         await enterGame(g.id);
         const handoff = await getHandoff();
-        // Always http:, never window.location.protocol — see the matching comment in
-        // inviteRouting.ts's routeToRoom (a game's own port has no TLS of its own).
-        const base = `http://${window.location.hostname}:${g.externalPort}`;
         window.location.href = handoff ? `${base}/?pt=${encodeURIComponent(handoff)}` : base;
       })();
     } else {

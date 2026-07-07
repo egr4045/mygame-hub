@@ -1,6 +1,6 @@
 # GAMEHUB gateway (launcher origin), inside the `web` container on :8088. One origin fronts the SPA,
-# auth, social, chat, community, the orchestrator, and the on-demand game lobby — all reached over
-# `gamehub-net`.
+# auth, social, chat, community, the orchestrator, the on-demand game lobby, and any path-routed
+# game (e.g. /example-game/*) — all reached over `gamehub-net`.
 {
 	admin off
 	auto_https off
@@ -33,6 +33,14 @@
 	# Orchestrator API: /orchestrator/games, /orchestrator/games/:id/enter (prefix stripped).
 	handle_path /orchestrator/* {
 		reverse_proxy orchestrator:8090
+	}
+
+	# SDK starter template, path-routed rather than its own port — same origin as the hub, so a
+	# browser's http→https auto-upgrade can't break the navigation (unlike an externalPort game).
+	# Prefix stripped: Vite's base path (VITE_BASE_PATH, Dockerfile) generates asset URLs that
+	# already include /example-game/, so the internal server sees the same paths it would at "/".
+	handle_path /example-game/* {
+		reverse_proxy examplegame:5190
 	}
 
 	# Game lobby (Socket.io, default path). Started on demand — 502s until the orchestrator brings

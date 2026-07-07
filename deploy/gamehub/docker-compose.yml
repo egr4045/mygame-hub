@@ -153,11 +153,15 @@ services:
       - chat
       - community
       - orchestrator
+      - examplegame
     restart: unless-stopped
 
-  # SDK starter template — its own origin, own port (matches every other game's model). No reverse
-  # proxy: its bundle talks to GAMEHUB_PUBLIC_URL directly for auth/social/chat/community, baked in
-  # at build time (Vite can't read env at container runtime).
+  # SDK starter template — path-routed under the hub's own origin (web's Caddyfile strips
+  # /example-game/ before proxying here), not its own port: same-origin means a browser's
+  # http->https auto-upgrade can't break the navigation the way it does for a ported game, and the
+  # SDK's own sameOrigin default already finds auth/social/chat/community with no URL to bake in.
+  # No host port published — VITE_BASE_PATH bakes in asset URLs that assume the /example-game/
+  # prefix, so direct-by-port access wouldn't serve them correctly anyway.
   examplegame:
     image: gamehub-examplegame:latest
     build:
@@ -165,9 +169,7 @@ services:
       dockerfile: Dockerfile
       target: exampleweb
       args:
-        VITE_HUB_URL: ${GAMEHUB_PUBLIC_URL:?set GAMEHUB_PUBLIC_URL in deploy/gamehub/.env}
-    ports:
-      - '5190:5190'
+        VITE_BASE_PATH: /example-game/
     networks:
       - gamehub-net
     restart: unless-stopped
