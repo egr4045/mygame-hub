@@ -25,6 +25,9 @@ interface SocialUIState {
   /** Invites pushed to me by friends ("X invited you to CIVA"). */
   invites: Invite[];
   error: string | null;
+  /** The activity I last reported via `setActivity`, tracked client-side (the server never echoes it
+   *  back) so "invite a friend to my game" has something to send without the caller re-threading it. */
+  myActivity: social.Activity | null;
 
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
@@ -41,6 +44,12 @@ interface SocialUIState {
   dismissInvite: (code: string) => void;
   /** Currently-joinable rooms for `game`, derived from live presence. Empty on failure/timeout. */
   getLobbies: (game: string) => Promise<social.Lobby[]>;
+  /** Hides presence/activity from `accountId` both ways and rejects new requests from them — doesn't
+   *  touch the friendship, so `unblock` alone restores visibility. */
+  block: (accountId: string) => Promise<boolean>;
+  unblock: (accountId: string) => Promise<boolean>;
+  /** Accounts I've blocked (for an unblock list). Empty on failure/timeout. */
+  getBlocked: () => Promise<social.BlockedAccount[]>;
 }
 
 export const useSocialStore = create<SocialUIState>((set) => ({
@@ -49,6 +58,7 @@ export const useSocialStore = create<SocialUIState>((set) => ({
   friends: [],
   invites: [],
   error: null,
+  myActivity: null,
 
   connect: async () => {
     if (socket?.connected) return;
@@ -90,14 +100,17 @@ export const useSocialStore = create<SocialUIState>((set) => ({
   disconnect: () => {
     socket?.close();
     socket = null;
-    set({ status: 'idle', friends: [], invites: [] });
+    set({ status: 'idle', friends: [], invites: [], myActivity: null });
   },
 
   addByCode: (code) => emit(social.C2S.request, { code: code.trim() }),
   accept: (accountId) => emit(social.C2S.accept, { accountId }),
   decline: (accountId) => emit(social.C2S.decline, { accountId }),
   removeFriend: (accountId) => emit(social.C2S.remove, { accountId }),
-  setActivity: (activity) => emit(social.C2S.setActivity, { activity }),
+  setActivity: (activity) => {
+    emit(social.C2S.setActivity, { activity });
+    set({ myActivity: activity });
+  },
 
   createInvite: (target) =>
     new Promise<string | null>((resolve) => {
@@ -119,5 +132,33 @@ export const useSocialStore = create<SocialUIState>((set) => ({
       }
       socket.emit(social.C2S.getLobbies, { game }, (ack: social.GetLobbiesAck) => resolve(ack?.lobbies ?? []));
       window.setTimeout(() => resolve([]), 5000); // don't hang the UI if the ack is lost
+    }),
+
+  block: (accountId) =>
+    new Promise<boolean>((resolve) => {
+      if (!socket?.connected) {
+        resolve(false);
+        return;
+      }
+      socket.emit(social.C2S.block, { accountId }, (ack: social.BlockAck) => resolve(ack?.ok ?? false));
+      window.setTimeout(() => resolve(false), 5000);
+    }),
+  unblock: (accountId) =>
+    new Promise<boolean>((resolve) => {
+      if (!socket?.connected) {
+        resolve(false);
+        return;
+      }
+      socket.emit(social.C2S.unblock, { accountId }, (ack: social.BlockAck) => resolve(ack?.ok ?? false));
+      window.setTimeout(() => resolve(false), 5000);
+    }),
+  getBlocked: () =>
+    new Promise<social.BlockedAccount[]>((resolve) => {
+      if (!socket?.connected) {
+        resolve([]);
+        return;
+      }
+      socket.emit(social.C2S.getBlocked, {}, (ack: social.GetBlockedAck) => resolve(ack?.blocked ?? []));
+      window.setTimeout(() => resolve([]), 5000);
     }),
 }));

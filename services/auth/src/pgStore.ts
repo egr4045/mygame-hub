@@ -21,17 +21,18 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   const persist = (a: Account): void =>
     queue.push('account.upsert', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, now())
+        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, now())
          ON CONFLICT (id) DO UPDATE SET
-           display_name      = EXCLUDED.display_name,
-           telegram_id        = EXCLUDED.telegram_id,
-           vk_id              = EXCLUDED.vk_id,
-           avatar_icon        = EXCLUDED.avatar_icon,
-           wallpaper          = EXCLUDED.wallpaper,
-           title_achievement  = EXCLUDED.title_achievement,
-           achievements       = EXCLUDED.achievements,
-           updated_at         = now()`,
+           display_name       = EXCLUDED.display_name,
+           telegram_id         = EXCLUDED.telegram_id,
+           vk_id               = EXCLUDED.vk_id,
+           avatar_icon         = EXCLUDED.avatar_icon,
+           wallpaper           = EXCLUDED.wallpaper,
+           title_achievement   = EXCLUDED.title_achievement,
+           achievements        = EXCLUDED.achievements,
+           favorite_game_ids   = EXCLUDED.favorite_game_ids,
+           updated_at          = now()`,
         [
           a.id,
           a.displayName,
@@ -41,6 +42,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
           a.wallpaper ?? null,
           JSON.stringify(a.titleAchievement),
           JSON.stringify(a.achievements),
+          JSON.stringify(a.favoriteGameIds),
         ],
       ),
     );
@@ -48,7 +50,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   return {
     async init() {
       const { rows } = await pool.query(
-        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements FROM accounts`,
+        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids FROM accounts`,
       );
       for (const r of rows) {
         const acc = mem.upsert(r.display_name as string, r.id as string);
@@ -58,6 +60,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
         if (r.wallpaper) mem.setWallpaper(acc.id, r.wallpaper as string);
         mem.setTitleAchievement(acc.id, (r.title_achievement as TitleAchievementRef | null) ?? null);
         mem.hydrateAchievements(acc.id, (r.achievements as Account['achievements'] | null) ?? []);
+        mem.setFavorites(acc.id, (r.favorite_game_ids as string[] | null) ?? []);
       }
       logger.info('accounts hydrated', { count: rows.length });
     },
@@ -95,6 +98,11 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
     },
     setTitleAchievement(id, ref) {
       const a = mem.setTitleAchievement(id, ref);
+      if (a) persist(a);
+      return a;
+    },
+    setFavorites(id, gameIds) {
+      const a = mem.setFavorites(id, gameIds);
       if (a) persist(a);
       return a;
     },

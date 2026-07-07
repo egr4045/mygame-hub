@@ -17,9 +17,10 @@ profile) is real, working, and Postgres-persisted. The Steam-style *store conten
 (changelog, forum, lobby browser, playtime stats) is now real too — the hub's frontend mocks were
 replaced with a new `services/community` (changelog + discussions), a `game_stats` slice on `auth`
 (playtime, driven by an in-game SDK heartbeat), and a presence-derived lobby query on `social`. A
-runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. What's left is a
-few genuinely unimplemented pieces (voice/video calls, VK linking) and lower-priority UI polish
-(profile status, "Связь с автором" idea box).
+runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. Voice/video calls
+now run on GAMEHUB's own self-hosted LiveKit. What's left is a couple of genuinely unimplemented
+pieces (VK linking, chat reactions) and lower-priority UI polish (profile status, "Связь с автором"
+idea box).
 
 ## Features
 
@@ -42,7 +43,7 @@ few genuinely unimplemented pieces (voice/video calls, VK linking) and lower-pri
 | Friends widget ships with `@mygame/sdk` | ✅ | `FriendsWidget`/`FriendsSidebar` moved from the hub into `packages/sdk/src/components/` and render from `MygameOverlay` too — same treatment as chat. "Invite to current game" lost its (already-mock, hub-only) disabled-state gating in the move — see `ARCHITECTURE.md`. |
 | Group membership management | ✅ | Real: any current member may add others (`ChatWidget`'s "➕" reuses the create-group friend-picker, scoped to friends not already in the group); any member may remove themselves (leave, "🚪" in the group header); only the group's owner (creator, `ownerId`) may remove someone else — enforced server-side in `services/chat/src/server.ts`, not just in the UI. Kicking a *specific* member has no dedicated button yet (the backend/`mygame.chat.removeMember` API supports it) — only leave + add got UI this pass. |
 | Chat reactions / edit / delete / typing indicators | ❌ | Dropped from the real backend for v1 scope. Message context-menu actions (reply/edit/delete) are still `alert(...)`. |
-| Voice / video calls | ❌ | UI only (`ChatWidget.tsx`, marked `CALL VIEW MOCK`). No LiveKit/WebRTC wired. |
+| Voice / video calls | ✅ | Real: GAMEHUB's own self-hosted LiveKit (separate from Leaders' own instance — see `docs/SERVER.md`). Signaling (`chat.callRing/callAccept/callDecline/callHangup`) is ephemeral, live-only (not persisted, mirrors how presence/activity work) — `services/chat/src/server.ts` tracks it in memory only. `POST /chat/call/token` (plain HTTP, bearer JWT) mints a room-scoped LiveKit access token once the caller is confirmed to be a participant of that conversation; the SDK (`chatStore.ts`) connects via `livekit-client`, publishes mic/cam, and `ChatWidget.tsx` attaches real `<video>`/`<audio>` elements from LiveKit's own track events (no more `CALL VIEW MOCK`). Supports audio, video, and group calls (multiple participants in one LiveKit room per conversation). |
 | Achievements | 🟡 | Real API: `POST/GET /auth/achievements` on `services/auth` (idempotent grant, scoped per `gameId`+`achievementId`, persisted via the account store). `mygame.achievements.grant/list` in the SDK; a genuinely new unlock fires a toast automatically. **But** the display catalog (name/description/icon per achievement) is still a hardcoded local array in `ProfileView.tsx` — the platform only knows *that* an id is unlocked, not how to describe it (inherently a per-game concern; see `ARCHITECTURE.md`). |
 | Profile avatar / wallpaper / title | ✅ | Real: `PUT/GET /auth/profile/{avatar,wallpaper,title}` on `services/auth`, persisted on the account row as data URLs (no object storage exists — see `ARCHITECTURE.md` for the size cap and why). Title must reference an achievement the account actually has unlocked (server validates). `mygame.profile.*` in the SDK. Survives reload/restart (Postgres-backed like the rest of the account). |
 | Notifications (toasts) | 🟡 | Toast mechanism is real. `mygame.achievements.grant()` fires one automatically on a genuinely new unlock (real, for any SDK consumer) — but the hub's own achievement/message demo buttons trigger it manually rather than from a real chat/achievement event reaching the hub. |
@@ -133,3 +134,7 @@ few genuinely unimplemented pieces (voice/video calls, VK linking) and lower-pri
 16. ✅ **Starter example game** — done. `apps/example-game` exercises the whole SDK surface
     (handoff login, achievements, activity, chat/friends, playtime, community) as both a smoke test
     and living documentation for third-party game developers.
+17. ✅ **Voice/video calls (LiveKit)** — done. GAMEHUB's own self-hosted LiveKit (`deploy/gamehub`),
+    separate from Leaders' own instance on this shared server. Ring/accept/decline/hangup signaling
+    over the existing chat socket; a plain HTTP route mints the LiveKit room token. Audio, video, and
+    group calls all work through the same signaling path.

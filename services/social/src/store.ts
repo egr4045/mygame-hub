@@ -40,6 +40,15 @@ export interface SocialStore {
   remove(account: string, other: string): void;
   /** Edges visible to `account`, with direction resolved to incoming/outgoing/accepted. */
   friendsOf(account: string): FriendEdge[];
+  /** Blocking does not delete the underlying friend edge — it only hides presence/activity between
+   *  the two (checked via `isBlocked` at render time) and rejects new requests; unblocking silently
+   *  restores visibility with no re-friending step. */
+  block(blocker: string, blocked: string): void;
+  unblock(blocker: string, blocked: string): void;
+  /** True if either has blocked the other. */
+  isBlocked(a: string, b: string): boolean;
+  /** Accounts `account` has blocked (for an unblock list) — not who has blocked `account`. */
+  blockedByMe(account: string): Account[];
 }
 
 /** Undirected edge keyed by the sorted pair; `by` records the requester (for pending direction). */
@@ -51,10 +60,13 @@ interface Edge {
 }
 
 const key = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+/** Directed, unlike the friend edge key above — only the blocker can undo it. */
+const blockKey = (blocker: string, blocked: string): string => `${blocker}>${blocked}`;
 
 export const createMemorySocialStore = (): SocialStore => {
   const accounts = new Map<string, Account>();
   const edges = new Map<string, Edge>();
+  const blocks = new Set<string>();
 
   return {
     upsertAccount(id, displayName) {
@@ -108,6 +120,25 @@ export const createMemorySocialStore = (): SocialStore => {
         const other = edge.lo === account ? edge.hi : edge.lo;
         if (edge.accepted) out.push({ accountId: other, status: 'accepted' });
         else out.push({ accountId: other, status: edge.by === account ? 'outgoing' : 'incoming' });
+      }
+      return out;
+    },
+
+    block(blocker, blocked) {
+      if (blocker === blocked) return;
+      blocks.add(blockKey(blocker, blocked));
+    },
+    unblock(blocker, blocked) {
+      blocks.delete(blockKey(blocker, blocked));
+    },
+    isBlocked: (a, b) => blocks.has(blockKey(a, b)) || blocks.has(blockKey(b, a)),
+    blockedByMe(account) {
+      const out: Account[] = [];
+      for (const k of blocks) {
+        const [blocker, blocked] = k.split('>') as [string, string];
+        if (blocker !== account) continue;
+        const acc = accounts.get(blocked);
+        if (acc) out.push(acc);
       }
       return out;
     },

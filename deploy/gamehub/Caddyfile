@@ -25,6 +25,11 @@
 		reverse_proxy chat:8084
 	}
 
+	# Mint a LiveKit call token (plain HTTP, same chat container — see services/chat/src/server.ts).
+	handle /chat/call/token {
+		reverse_proxy chat:8084
+	}
+
 	# Changelog + discussions (HTTP).
 	handle /community/* {
 		reverse_proxy community:8085
@@ -33,6 +38,16 @@
 	# Orchestrator API: /orchestrator/games, /orchestrator/games/:id/enter (prefix stripped).
 	handle_path /orchestrator/* {
 		reverse_proxy orchestrator:8090
+	}
+
+	# LiveKit signaling (WebSocket) for chat voice/video calls — proxying works here because this is
+	# just the signaling handshake (HTTP upgrade), not the actual RTC media (that's UDP/TCP, can't go
+	# through Caddy — see docker-compose.yml's `livekit` service for those ports). Deliberately NOT
+	# named /livekit/* — Leaders' own Caddy (a different, do-not-touch product on this shared server)
+	# already claims that exact path for its own LiveKit instance; colliding with it would break
+	# Leaders, not just this feature.
+	handle_path /gamehub-livekit/* {
+		reverse_proxy livekit:7880
 	}
 
 	# SDK starter template, path-routed rather than its own port — same origin as the hub, so a

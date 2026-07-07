@@ -5,7 +5,14 @@
  * game, to your seat).
  */
 import { create } from 'zustand';
-import { clearSession, loadSession, login as apiLogin, loginWithTelegram } from '@mygame/sdk';
+import {
+  clearSession,
+  loadSession,
+  login as apiLogin,
+  loginWithTelegram,
+  getProfile,
+  setFavorites as apiSetFavorites,
+} from '@mygame/sdk';
 
 export type PlatformStatus = 'idle' | 'logging-in' | 'ready' | 'error';
 
@@ -23,6 +30,8 @@ interface PlatformState {
   selectedGame: string | null;
   status: PlatformStatus;
   error: string | null;
+  /** Favorited game ids, persisted server-side (`auth`'s account row) — hydrated on login/restore. */
+  favoriteGameIds: string[];
 
   login: (displayName: string) => Promise<void>;
   /** Log in by redeeming a one-time code sent by the Telegram bot (/login). */
@@ -32,13 +41,22 @@ interface PlatformState {
   exitGame: () => void;
   /** Re-claim the stored account on load (so the hub shows you logged in). */
   restore: () => void;
+  toggleFavorite: (gameId: string) => void;
 }
+
+/** Best-effort: populate favorites once we have a session, without blocking the login flow on it. */
+const hydrateFavorites = (set: (partial: Partial<PlatformState>) => void): void => {
+  void getProfile().then((p) => {
+    if (p) set({ favoriteGameIds: p.favoriteGameIds });
+  });
+};
 
 export const usePlatformStore = create<PlatformState>((set, get) => ({
   account: null,
   selectedGame: null,
   status: 'idle',
   error: null,
+  favoriteGameIds: [],
 
   login: async (displayName) => {
     set({ status: 'logging-in', error: null });
@@ -46,6 +64,7 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
       const prev = loadSession();
       const s = await apiLogin(displayName, prev?.accountId);
       set({ account: { accountId: s.accountId, displayName: s.displayName }, status: 'ready' });
+      hydrateFavorites(set);
     } catch (e) {
       set({ status: 'error', error: String(e) });
     }
@@ -59,6 +78,7 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
       return;
     }
     set({ account: { accountId: session.accountId, displayName: session.displayName }, status: 'ready' });
+    hydrateFavorites(set);
   },
 
   logout: () => {
@@ -68,7 +88,7 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
     } catch {
       /* ignore */
     }
-    set({ account: null, selectedGame: null, status: 'idle', error: null });
+    set({ account: null, selectedGame: null, status: 'idle', error: null, favoriteGameIds: [] });
   },
 
   selectGame: (id) => {
@@ -96,6 +116,14 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
         selectedGame: readGame(),
         status: 'ready',
       });
+      hydrateFavorites(set);
     }
+  },
+
+  toggleFavorite: (gameId) => {
+    const current = get().favoriteGameIds;
+    const next = current.includes(gameId) ? current.filter((id) => id !== gameId) : [...current, gameId];
+    set({ favoriteGameIds: next }); // optimistic — matches the rest of this store's style
+    void apiSetFavorites(next);
   },
 }));

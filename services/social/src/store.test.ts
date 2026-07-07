@@ -94,3 +94,45 @@ describe('social store — profile mirroring', () => {
     expect(s.getAccount('a')).toMatchObject({ avatarIcon: null, titleAchievement: null });
   });
 });
+
+describe('social store — blocking', () => {
+  it('isBlocked is true in both directions once one side blocks', () => {
+    const s = createMemorySocialStore();
+    s.block('a', 'b');
+    expect(s.isBlocked('a', 'b')).toBe(true);
+    expect(s.isBlocked('b', 'a')).toBe(true);
+  });
+
+  it('does not touch the underlying friend edge', () => {
+    const s = createMemorySocialStore();
+    s.request('a', 'b');
+    s.accept('b', 'a');
+    s.block('a', 'b');
+    expect(statusOf(s, 'a', 'b')).toBe('accepted'); // edge intact — blocking only hides visibility
+    expect(s.isBlocked('a', 'b')).toBe(true);
+  });
+
+  it('unblock is only callable by the original blocker', () => {
+    const s = createMemorySocialStore();
+    s.block('a', 'b');
+    s.unblock('b', 'a'); // b never blocked a — no-op
+    expect(s.isBlocked('a', 'b')).toBe(true);
+    s.unblock('a', 'b');
+    expect(s.isBlocked('a', 'b')).toBe(false);
+  });
+
+  it('blockedByMe lists only accounts I blocked, with their display name', () => {
+    const s = createMemorySocialStore();
+    s.upsertAccount('b', 'Bob');
+    s.upsertAccount('c', 'Cara');
+    s.block('a', 'b');
+    s.block('c', 'a'); // c blocked a — should not appear in a's own blockedByMe
+    expect(s.blockedByMe('a')).toEqual([{ id: 'b', displayName: 'Bob', avatarIcon: null, titleAchievement: null }]);
+  });
+
+  it('blocking yourself is a no-op', () => {
+    const s = createMemorySocialStore();
+    s.block('a', 'a');
+    expect(s.isBlocked('a', 'a')).toBe(false);
+  });
+});

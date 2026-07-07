@@ -41,6 +41,7 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     -- messages-table redesign which predated any real data.
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wallpaper TEXT;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS title_achievement JSONB;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS favorite_game_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
     CREATE TABLE IF NOT EXISTS friendships (
       lo            TEXT NOT NULL,
@@ -50,6 +51,17 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (lo, hi)
     );
+
+    -- Directed: only the blocker can remove their own block. Does not touch the friendships table --
+    -- blocking hides presence/activity and rejects new requests without deleting the underlying
+    -- friend edge, so unblocking silently restores visibility with no re-friending step.
+    CREATE TABLE IF NOT EXISTS blocks (
+      blocker       TEXT NOT NULL,
+      blocked       TEXT NOT NULL,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (blocker, blocked)
+    );
+    CREATE INDEX IF NOT EXISTS blocks_blocked_idx ON blocks (blocked);
 
     CREATE TABLE IF NOT EXISTS invites (
       code          TEXT PRIMARY KEY,

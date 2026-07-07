@@ -21,6 +21,7 @@ const { httpServer } = createChatServer({
   store: createMemoryChatStore(),
   logger,
   corsOrigin: config.corsOrigin,
+  livekit: { url: config.livekitUrl, apiKey: config.livekitApiKey, apiSecret: config.livekitApiSecret },
 });
 
 httpServer.listen(config.port, () => logger.info('listening (standalone)', { port: config.port }));

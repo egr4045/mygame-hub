@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
+import type { social } from '@mygame/protocol';
 import { usePlatformStore } from '../platform/platformStore.js';
 import { GAMES, getGameOrigin, type GameInfo } from '../platform/games.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView, type GameDetailsTab } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
-import { routeToInvite } from '../platform/inviteRouting.js';
+import { routeToInvite, routeToRoom } from '../platform/inviteRouting.js';
 import { getHandoff, recordGameEnter } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
@@ -57,6 +58,13 @@ export const HubScreen = (): JSX.Element => {
     } else {
       selectGame(g.id);
     }
+  };
+
+  const handleJoinActivity = (f: social.Friend): void => {
+    if (!f.activity?.joinable || !f.activity.room) return;
+    const game = GAMES.find((g) => g.id === f.activity!.game);
+    if (!game) return;
+    void routeToRoom(game, f.activity.room, 'player');
   };
 
   const openDiscussions = (g: GameInfo): void => {
@@ -157,7 +165,7 @@ export const HubScreen = (): JSX.Element => {
 
         {/* Main Nav Row */}
         <div className="mobile-nav" style={{ height: 64, display: 'flex', alignItems: 'center', padding: '0 24px', gap: 32, overflowX: 'auto', whiteSpace: 'nowrap' }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: 2, marginRight: 24 }}>CIVA</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: 2, marginRight: 24 }}>GAMEHUB</div>
           <NavTab label="БИБЛИОТЕКА" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
           <NavTab label="СВЯЗЬ С АВТОРОМ" active={activeTab === 'contact'} onClick={() => setActiveTab('contact')} />
           <NavTab label={me?.displayName?.toUpperCase() || 'ПРОФИЛЬ'} active={activeTab === 'profile'} onClick={() => setActiveTab('profile')} />
@@ -231,7 +239,7 @@ export const HubScreen = (): JSX.Element => {
         </div>
       )}
 
-      <FriendsWidget />
+      <FriendsWidget onJoinActivity={handleJoinActivity} />
       <ChatWidget />
       <ContextMenu />
       <ToastContainer />

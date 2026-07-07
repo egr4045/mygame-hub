@@ -33,6 +33,12 @@ const store: ChatStore = await (async () => {
   return pgStore;
 })();
 
-const { httpServer } = createChatServer({ auth, store, logger, corsOrigin: config.corsOrigin });
+const { httpServer } = createChatServer({
+  auth,
+  store,
+  logger,
+  corsOrigin: config.corsOrigin,
+  livekit: { url: config.livekitUrl, apiKey: config.livekitApiKey, apiSecret: config.livekitApiSecret },
+});
 
 httpServer.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));

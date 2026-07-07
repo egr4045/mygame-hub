@@ -8,6 +8,7 @@ import {
   recordEnterRequest,
   refreshRequest,
   setAvatarRequest,
+  setFavoritesRequest,
   setTitleRequest,
   setWallpaperRequest,
   socialLoginRequest,
@@ -330,7 +331,26 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     return;
   }
 
-  // The caller's full profile customization (avatar/wallpaper/title).
+  // Games favorited in the library — a small, rarely-mutated list, so a full replace (rather than
+  // incremental add/remove) keeps the client/server contract simple.
+  if (method === 'PUT' && url === '/auth/profile/favorites') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = setFavoritesRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid favorites' });
+      return;
+    }
+    const account = deps.accounts.setFavorites(claims.sub, parsed.data.gameIds);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    send(res, 200, { favoriteGameIds: account.favoriteGameIds });
+    return;
+  }
+
+  // The caller's full profile customization (avatar/wallpaper/title/favorites).
   if (method === 'GET' && url === '/auth/profile') {
     const claims = await requireAccount(req, res, deps);
     if (!claims) return;
@@ -339,6 +359,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       avatarIcon: account?.avatarIcon ?? null,
       wallpaper: account?.wallpaper ?? null,
       titleAchievement: account?.titleAchievement ?? null,
+      favoriteGameIds: account?.favoriteGameIds ?? [],
     });
     return;
   }

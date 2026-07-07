@@ -1,0 +1,19 @@
+# GAMEHUB's own self-hosted LiveKit (voice/video calls, services/chat). Completely separate from
+# Leaders' own LiveKit instance on this same server (port 7881) — do not touch that one, and do not
+# reuse its port numbers here. API key/secret come from LIVEKIT_KEYS (env, docker-compose.yml) so the
+# secret never lands in this file.
+#
+# `rtc.tcp_port`/`port_range_*` are the actual media plane — Caddy/L7 can't proxy raw UDP/TCP, so
+# these must be published as real host ports (see docker-compose.yml's `livekit` service) with the
+# SAME number on both sides of the `host:container` mapping — LiveKit advertises `tcp_port`/the port
+# range verbatim to clients for ICE, so remapping would advertise a port that isn't actually reachable.
+#
+# Verified free via `ss -tulpn` on the actual host (186.246.11.239) before this was deployed —
+# Leaders' own LiveKit already occupies the entire 50000-50200 UDP range (its rtc.port_range) plus
+# tcp 7881, which is exactly why these numbers are NOT the LiveKit-convention defaults.
+port: 7880
+rtc:
+  tcp_port: 7883
+  port_range_start: 51000
+  port_range_end: 51100
+  use_external_ip: true

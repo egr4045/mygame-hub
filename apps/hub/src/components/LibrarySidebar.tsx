@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { GAMES, type GameInfo } from '../platform/games.js';
+import { usePlatformStore } from '../platform/platformStore.js';
 import { useMenuStore } from '@mygame/sdk';
 
 export const LibrarySidebar = ({
@@ -14,11 +15,15 @@ export const LibrarySidebar = ({
   onOpenDiscussions: (game: GameInfo) => void;
 }): JSX.Element => {
   const openMenu = useMenuStore((s) => s.openMenu);
+  const favoriteGameIds = usePlatformStore((s) => s.favoriteGameIds);
+  const toggleFavorite = usePlatformStore((s) => s.toggleFavorite);
   const [search, setSearch] = useState('');
 
   const filteredGames = GAMES.filter(g => g.name.toLowerCase().includes(search.toLowerCase()));
-  
+
+  const favoriteCategory = filteredGames.filter(g => favoriteGameIds.includes(g.id));
   const inCategory = filteredGames.filter(g => g.status === 'playable');
+  const maintenanceCategory = filteredGames.filter(g => g.status === 'maintenance');
   const soonCategory = filteredGames.filter(g => g.status === 'soon');
 
   return (
@@ -43,7 +48,27 @@ export const LibrarySidebar = ({
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-        <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+        {favoriteCategory.length > 0 && (
+          <>
+            <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+              ИЗБРАННОЕ ({favoriteCategory.length})
+            </div>
+            {favoriteCategory.map(g => (
+              <GameListItem
+                key={g.id}
+                game={g}
+                selected={selectedGameId === g.id}
+                isFavorite
+                onClick={() => onSelectGame(g.id)}
+                onPlay={onPlay}
+                onOpenDiscussions={onOpenDiscussions}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
+          </>
+        )}
+
+        <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
           ИГРЫ ({inCategory.length})
         </div>
         {inCategory.map(g => (
@@ -51,11 +76,33 @@ export const LibrarySidebar = ({
             key={g.id}
             game={g}
             selected={selectedGameId === g.id}
+            isFavorite={favoriteGameIds.includes(g.id)}
             onClick={() => onSelectGame(g.id)}
             onPlay={onPlay}
             onOpenDiscussions={onOpenDiscussions}
+            onToggleFavorite={toggleFavorite}
           />
         ))}
+
+        {maintenanceCategory.length > 0 && (
+          <>
+            <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+              НА ОБСЛУЖИВАНИИ
+            </div>
+            {maintenanceCategory.map(g => (
+              <GameListItem
+                key={g.id}
+                game={g}
+                selected={selectedGameId === g.id}
+                isFavorite={favoriteGameIds.includes(g.id)}
+                onClick={() => onSelectGame(g.id)}
+                onPlay={onPlay}
+                onOpenDiscussions={onOpenDiscussions}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
+          </>
+        )}
 
         {soonCategory.length > 0 && (
           <>
@@ -67,9 +114,11 @@ export const LibrarySidebar = ({
                 key={g.id}
                 game={g}
                 selected={selectedGameId === g.id}
+                isFavorite={favoriteGameIds.includes(g.id)}
                 onClick={() => onSelectGame(g.id)}
                 onPlay={onPlay}
                 onOpenDiscussions={onOpenDiscussions}
+                onToggleFavorite={toggleFavorite}
               />
             ))}
           </>
@@ -83,20 +132,24 @@ export const LibrarySidebar = ({
 const GameListItem = ({
   game,
   selected,
+  isFavorite,
   onClick,
   onPlay,
   onOpenDiscussions,
+  onToggleFavorite,
 }: {
   game: GameInfo;
   selected: boolean;
+  isFavorite: boolean;
   onClick: () => void;
   onPlay: (game: GameInfo) => void;
   onOpenDiscussions: (game: GameInfo) => void;
+  onToggleFavorite: (gameId: string) => void;
 }) => {
   const playable = game.status === 'playable';
   const openMenu = useMenuStore((s) => s.openMenu);
   return (
-    <div 
+    <div
       onClick={onClick}
       style={{
         padding: '6px 16px',
@@ -114,7 +167,10 @@ const GameListItem = ({
         e.stopPropagation();
         openMenu(e.clientX, e.clientY, [
           ...(playable ? [{ label: '▶️ Играть', action: () => onPlay(game) }] : []),
-          { label: '🌟 В избранное (скоро)', action: () => {}, disabled: true },
+          {
+            label: isFavorite ? '💔 Убрать из избранного' : '🌟 В избранное',
+            action: () => onToggleFavorite(game.id),
+          },
           { label: '💬 Открыть обсуждения', action: () => onOpenDiscussions(game) },
         ]);
       }}
@@ -122,9 +178,10 @@ const GameListItem = ({
       <div style={{ width: 32, height: 32, background: game.accent, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
         {game.emoji}
       </div>
-      <div style={{ fontSize: '13px', fontWeight: selected ? 600 : 400 }}>
+      <div style={{ fontSize: '13px', fontWeight: selected ? 600 : 400, flex: 1 }}>
         {game.name}
       </div>
+      {isFavorite && <span title="В избранном" style={{ fontSize: 12 }}>⭐</span>}
     </div>
   );
 };

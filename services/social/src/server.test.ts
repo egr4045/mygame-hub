@@ -258,3 +258,74 @@ describe('social server — lobbies (find groups)', () => {
     expect(await getLobbies(c1, 'civa')).toEqual([]);
   });
 });
+
+describe('social server — blocking', () => {
+  const block = (c: ClientSocket, accountId: string) =>
+    new Promise<social.BlockAck>((res) => c.emit(social.C2S.block, { accountId }, res));
+  const unblock = (c: ClientSocket, accountId: string) =>
+    new Promise<social.BlockAck>((res) => c.emit(social.C2S.unblock, { accountId }, res));
+  const getBlocked = (c: ClientSocket) =>
+    new Promise<social.GetBlockedAck>((res) => c.emit(social.C2S.getBlocked, {}, res));
+
+  it('blocking a friend hides presence both ways without deleting the friendship', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    c1.emit(social.C2S.request, { code: 'a2' });
+    await waitFriends(c2, (f) => find(f, 'a1')?.status === 'incoming');
+    c2.emit(social.C2S.accept, { accountId: 'a1' });
+    await waitFriends(c1, (f) => find(f, 'a2')?.status === 'accepted');
+
+    // Register both listeners before triggering the block — the refresh pushes both sides in the
+    // same handler call, so a listener registered afterward would miss it and hang forever.
+    const vanished2 = waitFriends(c2, (f) => find(f, 'a1') === undefined);
+    const vanished1 = waitFriends(c1, (f) => find(f, 'a2') === undefined); // a1's own view also drops a2
+    const ack = await block(c1, 'a2');
+    expect(ack.ok).toBe(true);
+    expect(find(await vanished2, 'a1')).toBeUndefined();
+    expect(find(await vanished1, 'a2')).toBeUndefined();
+  });
+
+  it('unblocking restores visibility with no re-friending step', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    c1.emit(social.C2S.request, { code: 'a2' });
+    await waitFriends(c2, (f) => find(f, 'a1')?.status === 'incoming');
+    c2.emit(social.C2S.accept, { accountId: 'a1' });
+    await waitFriends(c1, (f) => find(f, 'a2')?.status === 'accepted');
+    await block(c1, 'a2');
+    await waitFriends(c2, (f) => find(f, 'a1') === undefined);
+
+    const restored = waitFriends(c2, (f) => find(f, 'a1')?.status === 'accepted');
+    await unblock(c1, 'a2');
+    expect(find(await restored, 'a1')?.status).toBe('accepted');
+  });
+
+  it('a friend request from someone who blocked me is silently ignored', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await block(c2, 'a1'); // a2 blocks a1 before any friendship exists
+
+    let sawError = false;
+    let sawIncoming = false;
+    c1.once(social.S2C.error, () => { sawError = true; });
+    c2.on(social.S2C.friends, (p: social.FriendsEvent) => {
+      if (find(p.friends, 'a1')) sawIncoming = true;
+    });
+    c1.emit(social.C2S.request, { code: 'a2' });
+    await new Promise((r) => setTimeout(r, 100)); // give the (non-)event a beat to (not) arrive
+    expect(sawError).toBe(false); // no error revealing the block
+    expect(sawIncoming).toBe(false); // and no pending request either
+  });
+
+  it('getBlocked lists accounts I blocked, not who blocked me', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await block(c1, 'a2');
+    expect((await getBlocked(c1)).blocked).toEqual([{ accountId: 'a2', displayName: 'Wei' }]);
+    expect((await getBlocked(c2)).blocked).toEqual([]);
+  });
+});

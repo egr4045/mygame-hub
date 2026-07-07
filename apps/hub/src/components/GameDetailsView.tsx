@@ -173,20 +173,25 @@ export const GameDetailsView = ({
             ИГРАТЬ
           </button>
         ) : (
-          <button 
-            disabled
-            style={{ 
-              background: '#3d4450', 
-              border: 'none', 
-              borderRadius: 4, 
-              padding: '12px 32px', 
-              color: '#6c7784', 
-              fontSize: '20px', 
-              fontWeight: 600, 
-            }}
-          >
-            СКОРО ВЫЙДЕТ
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button
+              disabled
+              style={{
+                background: '#3d4450',
+                border: 'none',
+                borderRadius: 4,
+                padding: '12px 32px',
+                color: '#6c7784',
+                fontSize: '20px',
+                fontWeight: 600,
+              }}
+            >
+              {game.status === 'maintenance' ? 'НЕДОСТУПНО' : 'СКОРО ВЫЙДЕТ'}
+            </button>
+            {game.note && (
+              <div style={{ fontSize: '12px', color: '#8f98a0', maxWidth: 280 }}>{game.note}</div>
+            )}
+          </div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

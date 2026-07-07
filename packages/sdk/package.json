@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@mygame/protocol": "workspace:*",
+    "livekit-client": "^2.9.10",
     "socket.io-client": "^4.8.1",
     "zustand": "^5.0.2"
   },

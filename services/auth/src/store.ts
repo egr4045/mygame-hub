@@ -24,6 +24,7 @@ export interface Account {
   wallpaper?: string;
   titleAchievement: TitleAchievementRef;
   achievements: AccountAchievement[];
+  favoriteGameIds: string[];
 }
 
 export interface AccountStore {
@@ -45,6 +46,9 @@ export interface AccountStore {
   /** `null` clears the wallpaper. */
   setWallpaper(id: string, dataUrl: string | null): Account | undefined;
   setTitleAchievement(id: string, ref: TitleAchievementRef): Account | undefined;
+  /** Full replace, mirroring setWallpaper/setTitleAchievement — the list is small and rarely mutated,
+   *  so there's no need for an incremental add/remove API. */
+  setFavorites(id: string, gameIds: string[]): Account | undefined;
 }
 
 export interface AccountStoreOptions {
@@ -64,7 +68,13 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
           return existing;
         }
       }
-      const account: Account = { id: id ?? randomUUID(), displayName, titleAchievement: null, achievements: [] };
+      const account: Account = {
+        id: id ?? randomUUID(),
+        displayName,
+        titleAchievement: null,
+        achievements: [],
+        favoriteGameIds: [],
+      };
       accounts.set(account.id, account);
       return account;
     },
@@ -114,6 +124,12 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       const acc = accounts.get(id);
       if (!acc) return undefined;
       acc.titleAchievement = ref;
+      return acc;
+    },
+    setFavorites(id, gameIds) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      acc.favoriteGameIds = gameIds;
       return acc;
     },
   };

@@ -7,9 +7,10 @@
  */
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
+import { Room } from 'livekit-client';
 import { chat, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
-import { loadSession, login } from '../authClient.js';
+import { loadSession, login, freshAccessToken } from '../authClient.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -40,20 +41,36 @@ export interface ChatSession {
   ownerId?: string | null;
 }
 
+/** Purely the *signaling* state — the actual media lives on the `Room` instance (`getCallRoom()`),
+ *  not duplicated into Zustand; `ChatWidget` attaches to the room's own track/participant events. */
+export interface ActiveCall {
+  conversationId: string;
+  type: chat.CallType;
+  /** 'ringing-out' = I started it and I'm waiting; 'ringing-in' = someone is ringing me;
+   *  'connecting' = accepted, joining the LiveKit room; 'connected' = media flowing. */
+  status: 'ringing-out' | 'ringing-in' | 'connecting' | 'connected';
+  /** Who's calling (ringing-in) — for the incoming-call banner. Not meaningful otherwise. */
+  fromName?: string;
+}
+
 interface ChatState {
   status: ChatConnStatus;
   isOpen: boolean;
   activeChatId: string | null;
   sessions: ChatSession[];
   error: string | null;
+  activeCall: ActiveCall | null;
 
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
   disconnect: () => void;
   toggleChat: () => void;
   openChat: (chatId: string) => void;
-  /** Find-or-create a DM with `userId` and open it. */
-  openChatWithUser: (userId: string, userName: string) => void;
+  /** Find-or-create a DM with `userId` and open it. `onReady` (if given) fires once with the
+   *  conversation id, whether the DM already existed or was just created — used by `ringUser`. */
+  openChatWithUser: (userId: string, userName: string, onReady?: (conversationId: string) => void) => void;
+  /** Open (or create) a DM with `accountId` and immediately ring them. */
+  ringUser: (accountId: string, displayName: string, type: chat.CallType) => void;
   /** Create a group with `memberIds` (I'm added automatically) and open it. */
   createGroup: (name: string, memberIds: string[]) => void;
   /** group only; any current member may add others. */
@@ -64,11 +81,44 @@ interface ChatState {
   leaveGroup: (chatId: string) => void;
   /** `_senderId` is accepted for call-site compatibility but ignored — the server derives it from the JWT. */
   sendMessage: (chatId: string, text: string, _senderId?: string) => void;
+
+  /** Start ringing every other participant of `chatId`. */
+  ring: (chatId: string, type: chat.CallType) => void;
+  /** Join the call currently ringing for `chatId` (mints a LiveKit token, connects, publishes tracks). */
+  acceptCall: (chatId: string) => Promise<void>;
+  declineCall: (chatId: string) => void;
+  hangup: () => void;
+  toggleMic: () => Promise<void>;
+  toggleCam: () => Promise<void>;
 }
 
 let socket: Socket | null = null;
 let meId: string | null = null;
 let meName: string | null = null;
+
+/** The live LiveKit room for the current call, if connected — not store state (see `ActiveCall`'s
+ *  doc comment): `ChatWidget` reads this once `activeCall.status === 'connected'` and attaches its
+ *  own listeners for track/participant events, rather than duplicating that model into Zustand. */
+let callRoom: Room | null = null;
+export const getCallRoom = (): Room | null => callRoom;
+
+/** Mint a LiveKit token for `conversationId` from the chat service's HTTP surface (not a socket
+ *  event — the token is a plain string handed straight to `Room.connect`). Null on any failure. */
+const fetchCallToken = async (conversationId: string): Promise<chat.CallTokenResponse | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.chatUrl}/chat/call/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ conversationId }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as chat.CallTokenResponse;
+  } catch {
+    return null;
+  }
+};
 
 const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -134,6 +184,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeChatId: null,
   sessions: [],
   error: null,
+  activeCall: null,
 
   connect: async () => {
     if (socket?.connected) return;
@@ -206,6 +257,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
 
     socket.on(chat.S2C.error, (e: ProtocolError) => set({ error: e.message }));
+
+    // Someone is ringing me — surface it: open the widget on that exact conversation so the
+    // incoming-call view (rendered inline per-conversation, not a separate global banner) is
+    // immediately visible. If I'm already in/ringing a call, this simply overwrites it (juggling
+    // concurrent calls is out of scope for v1).
+    socket.on(chat.S2C.callRing, (p: chat.CallRingEvent) =>
+      set({
+        activeCall: { conversationId: p.conversationId, type: p.callType, status: 'ringing-in', fromName: p.fromName },
+        isOpen: true,
+        activeChatId: p.conversationId,
+      }),
+    );
+
+    // Someone joined the call. If that's *me* (the callee's own acceptCall already handles its own
+    // transition), ignore; if it's someone else and I'm still just ringing-out, they've picked up —
+    // join the LiveKit room myself now.
+    socket.on(chat.S2C.callAccepted, (p: chat.CallParticipantEvent) => {
+      const call = get().activeCall;
+      if (!call || call.conversationId !== p.conversationId || p.accountId === meId) return;
+      if (call.status === 'ringing-out') void get().acceptCall(p.conversationId);
+    });
+
+    // A 1:1 call has no one left to wait for once the other side declines — hang up for real
+    // (emits callHangup so the ephemeral server-side state clears too). A still-ringing group call
+    // (someone else already connected) is untouched.
+    socket.on(chat.S2C.callDeclined, (p: chat.CallParticipantEvent) => {
+      const call = get().activeCall;
+      if (call?.conversationId === p.conversationId && call.status === 'ringing-out') get().hangup();
+    });
+
+    socket.on(chat.S2C.callEnded, (p: chat.CallEndedEvent) => {
+      if (get().activeCall?.conversationId !== p.conversationId) return;
+      callRoom?.disconnect();
+      callRoom = null;
+      set({ activeCall: null });
+    });
   },
 
   disconnect: () => {
@@ -213,7 +300,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket = null;
     meId = null;
     meName = null;
-    set({ status: 'idle', sessions: [] });
+    callRoom?.disconnect();
+    callRoom = null;
+    set({ status: 'idle', sessions: [], activeCall: null });
   },
 
   toggleChat: () => set((s) => ({ isOpen: !s.isOpen })),
@@ -234,12 +323,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket?.emit(chat.C2S.markRead, { conversationId: chatId });
   },
 
-  openChatWithUser: (userId, userName) => {
+  openChatWithUser: (userId, userName, onReady) => {
     const existing = get().sessions.find(
       (s) => s.type === 'dm' && s.participants.some((p) => p.accountId === userId),
     );
     if (existing) {
       get().openChat(existing.id);
+      onReady?.(existing.id);
       return;
     }
     if (!socket?.connected) return;
@@ -265,7 +355,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return { sessions: [...s.sessions, placeholder] };
       });
       get().openChat(conversationId);
+      onReady?.(conversationId);
     });
+  },
+
+  ringUser: (accountId, displayName, type) => {
+    get().openChatWithUser(accountId, displayName, (conversationId) => get().ring(conversationId, type));
   },
 
   createGroup: (name, memberIds) => {
@@ -302,5 +397,64 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket?.emit(chat.C2S.send, { conversationId: chatId, text }, (ack: chat.SendAck) => {
       if (ack?.error) set({ error: ack.error });
     });
+  },
+
+  ring: (chatId, type) => {
+    if (!socket?.connected) return;
+    set({ activeCall: { conversationId: chatId, type, status: 'ringing-out' } });
+    socket.emit(chat.C2S.callRing, { conversationId: chatId, callType: type }, (ack: chat.CallAck) => {
+      if (!ack?.ok) set({ activeCall: null, error: ack?.error ?? 'call failed' });
+    });
+  },
+
+  acceptCall: async (chatId) => {
+    const call = get().activeCall;
+    const type = call?.conversationId === chatId ? call.type : 'audio';
+    set({ activeCall: { conversationId: chatId, type, status: 'connecting' } });
+    const token = await fetchCallToken(chatId);
+    if (!token) {
+      set({ activeCall: null, error: 'failed to join call' });
+      return;
+    }
+    const room = new Room();
+    try {
+      await room.connect(token.url, token.token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+      if (type === 'video') await room.localParticipant.setCameraEnabled(true);
+    } catch (err) {
+      room.disconnect();
+      set({ activeCall: null, error: String(err) });
+      return;
+    }
+    callRoom = room;
+    socket?.emit(chat.C2S.callAccept, { conversationId: chatId }, (ack: chat.CallAck) => {
+      if (!ack?.ok) get().hangup();
+    });
+    set({ activeCall: { conversationId: chatId, type, status: 'connected' } });
+  },
+
+  declineCall: (chatId) => {
+    socket?.emit(chat.C2S.callDecline, { conversationId: chatId });
+    set({ activeCall: null });
+  },
+
+  hangup: () => {
+    const call = get().activeCall;
+    if (call) socket?.emit(chat.C2S.callHangup, { conversationId: call.conversationId });
+    callRoom?.disconnect();
+    callRoom = null;
+    set({ activeCall: null });
+  },
+
+  toggleMic: async () => {
+    if (!callRoom) return;
+    const enabled = callRoom.localParticipant.isMicrophoneEnabled;
+    await callRoom.localParticipant.setMicrophoneEnabled(!enabled);
+  },
+
+  toggleCam: async () => {
+    if (!callRoom) return;
+    const enabled = callRoom.localParticipant.isCameraEnabled;
+    await callRoom.localParticipant.setCameraEnabled(!enabled);
   },
 }));

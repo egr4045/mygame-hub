@@ -78,7 +78,7 @@ export const AuthScreen = (): JSX.Element => {
       >
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <h1 style={{ fontSize: '32px', fontWeight: 900, letterSpacing: 2, margin: 0, color: '#fff' }}>
-            NEXUS
+            GAMEHUB
           </h1>
           <p style={{ color: '#8f98a0', marginTop: 8, fontSize: '14px' }}>
             Пожалуйста, авторизуйтесь

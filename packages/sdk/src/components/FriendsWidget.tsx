@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { social } from '@mygame/protocol';
 import { FriendsSidebar } from './FriendsSidebar.js';
 import { useSocialStore } from '../state/socialStore.js';
 
@@ -7,7 +8,12 @@ import { useSocialStore } from '../state/socialStore.js';
  * expands into the friends list. Shipped as part of `@mygame/sdk` so any game embedding the SDK gets
  * it via `mountOverlay()` — the hub renders the same component directly in its own tree instead.
  */
-export const FriendsWidget = (): JSX.Element => {
+export const FriendsWidget = ({
+  onJoinActivity,
+}: {
+  /** See `FriendsSidebar`'s prop of the same name — only the hub passes one. */
+  onJoinActivity?: ((f: social.Friend) => void) | undefined;
+} = {}): JSX.Element => {
   const [isOpen, setIsOpen] = useState(false);
   const friends = useSocialStore((s) => s.friends);
   const onlineCount = friends.filter(f => f.status === 'accepted' && f.presence === 'online').length;
@@ -33,7 +39,7 @@ export const FriendsWidget = (): JSX.Element => {
           <button style={{ background: 'transparent', border: 'none', color: '#8f98a0', cursor: 'pointer' }}>_</button>
         </div>
         <div style={{ flex: 1, position: 'relative' }}>
-          <FriendsSidebar inOverlay={true} />
+          <FriendsSidebar inOverlay={true} onJoinActivity={onJoinActivity} />
         </div>
       </div>
 

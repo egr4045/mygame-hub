@@ -25,6 +25,7 @@ const startServer = (): Promise<number> => {
     store: createMemoryChatStore(),
     logger: createCapturingLogger(),
     corsOrigin: '*',
+    livekit: { url: 'ws://localhost:7880', apiKey: 'devkey', apiSecret: 'secret' },
   });
   return new Promise((r) =>
     server!.httpServer.listen(0, () => r((server!.httpServer.address() as AddressInfo).port)),
@@ -66,6 +67,12 @@ const addMembers = (c: ClientSocket, conversationId: string, memberIds: string[]
 
 const removeMember = (c: ClientSocket, conversationId: string, accountId: string) =>
   new Promise<chat.RemoveMemberAck>((res) => c.emit(chat.C2S.removeMember, { conversationId, accountId }, res));
+
+const ring = (c: ClientSocket, conversationId: string, callType: chat.CallType) =>
+  new Promise<chat.CallAck>((res) => c.emit(chat.C2S.callRing, { conversationId, callType }, res));
+
+const acceptCall = (c: ClientSocket, conversationId: string) =>
+  new Promise<chat.CallAck>((res) => c.emit(chat.C2S.callAccept, { conversationId }, res));
 
 describe('chat server — DMs', () => {
   it('opens the same DM conversation for both sides and delivers a message', async () => {
@@ -260,5 +267,80 @@ describe('chat server — group membership', () => {
     const err = new Promise<{ code: string }>((res) => c2.once(chat.S2C.error, res));
     c2.emit(chat.C2S.send, { conversationId, text: 'sneaky' });
     expect((await err).code).toBe('forbidden');
+  });
+});
+
+describe('chat server — call signaling', () => {
+  it('ring → the other side gets callRing → accept → both get callAccepted', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+
+    const rang = new Promise<chat.CallRingEvent>((res) => c2.once(chat.S2C.callRing, res));
+    const ringAck = await ring(c1, conversationId!, 'audio');
+    expect(ringAck.ok).toBe(true);
+    expect(await rang).toMatchObject({ conversationId, fromAccountId: 'a1', fromName: 'Mara', callType: 'audio' });
+
+    const accepted1 = new Promise<chat.CallParticipantEvent>((res) => c1.once(chat.S2C.callAccepted, res));
+    const accepted2 = new Promise<chat.CallParticipantEvent>((res) => c2.once(chat.S2C.callAccepted, res));
+    const acceptAck = await acceptCall(c2, conversationId!);
+    expect(acceptAck.ok).toBe(true);
+    expect(await accepted1).toMatchObject({ conversationId, accountId: 'a2' });
+    expect(await accepted2).toMatchObject({ conversationId, accountId: 'a2' });
+  });
+
+  it('declining pushes callDeclined to the ringer without ending the call outright', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'video');
+
+    const declined = new Promise<chat.CallParticipantEvent>((res) => c1.once(chat.S2C.callDeclined, res));
+    c2.emit(chat.C2S.callDecline, { conversationId });
+    expect(await declined).toMatchObject({ conversationId, accountId: 'a2' });
+  });
+
+  it('hangup by the last participant ends the call for everyone', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+
+    const ended1 = new Promise<chat.CallEndedEvent>((res) => c1.once(chat.S2C.callEnded, res));
+    const ended2 = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
+    c2.emit(chat.C2S.callHangup, { conversationId });
+    // a1 (the ringer) is still counted as a participant until it also hangs up.
+    c1.emit(chat.C2S.callHangup, { conversationId });
+    expect(await ended1).toMatchObject({ conversationId });
+    expect(await ended2).toMatchObject({ conversationId });
+  });
+
+  it('refuses to ring a conversation you are not part of', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    const err = new Promise<{ code: string }>((res) => c1.once(chat.S2C.error, res));
+    c1.emit(chat.C2S.callRing, { conversationId: 'not-mine', callType: 'audio' });
+    expect((await err).code).toBe('forbidden');
+  });
+
+  it('disconnecting the last participant ends the call (no ghost caller)', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+    c2.emit(chat.C2S.callHangup, { conversationId }); // only a1 left in the call now
+
+    // c2 stays connected (still a chat participant) so it can observe the broadcast once a1 — the
+    // last remaining call participant — disconnects without an explicit hangup.
+    const ended = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
+    c1.close();
+    expect(await ended).toMatchObject({ conversationId });
   });
 });

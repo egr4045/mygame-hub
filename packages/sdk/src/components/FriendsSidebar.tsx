@@ -42,15 +42,27 @@ const activityText = (f: social.Friend): string => {
   return 'В сети';
 };
 
-export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): JSX.Element => {
+export const FriendsSidebar = ({
+  inOverlay = false,
+  onJoinActivity,
+}: {
+  inOverlay?: boolean;
+  /** Navigate into a friend's joinable activity. Only the hub can do this (it owns the game
+   *  registry/orchestrator) — omitted when this widget renders inside an actual game via the SDK
+   *  overlay, which hides the "Присоединиться" menu item entirely rather than show a dead action. */
+  onJoinActivity?: ((f: social.Friend) => void) | undefined;
+}): JSX.Element => {
   const me = useSocialStore((s) => s.me);
   const openMenu = useMenuStore((s) => s.openMenu);
   const openChatWithUser = useChatStore((s) => s.openChatWithUser);
+  const ringUser = useChatStore((s) => s.ringUser);
   const friends = useSocialStore((s) => s.friends);
   const status = useSocialStore((s) => s.status);
-  const { addByCode, accept, decline, removeFriend } = useSocialStore.getState();
+  const myActivity = useSocialStore((s) => s.myActivity);
+  const { addByCode, accept, decline, removeFriend, inviteFriend, block } = useSocialStore.getState();
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
+  const [viewingProfile, setViewingProfile] = useState<social.Friend | null>(null);
 
   const incoming = friends.filter((f) => f.status === 'incoming');
   const accepted = friends.filter((f) => f.status === 'accepted');
@@ -78,14 +90,29 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
     e.preventDefault();
     e.stopPropagation();
     openMenu(e.clientX, e.clientY, [
-      { label: '👤 Посмотреть профиль', action: () => alert(`Открыт профиль ${f.displayName}`) },
+      { label: '👤 Посмотреть профиль', action: () => setViewingProfile(f) },
       { label: '💬 Написать сообщение', action: () => openChatWithUser(f.accountId, f.displayName) },
       { separator: true, action: () => {} },
-      { label: '🎮 Пригласить в игру', action: () => alert('Приглашение отправлено!') },
-      { label: '🚀 Присоединиться к игре', action: () => alert('Присоединяемся...'), disabled: !f.presence },
-      { label: '🎤 Позвонить', action: () => alert('Звонок...') },
+      // Only meaningful once *I* have a joinable activity (set via mygame.social.setActivity from
+      // inside a game) — the hub itself never has one, so this is naturally inert there.
+      {
+        label: '🎮 Пригласить в игру',
+        action: () =>
+          myActivity?.room &&
+          inviteFriend(f.accountId, { game: myActivity.game, gameName: myActivity.gameName, room: myActivity.room, role: 'player' }),
+        disabled: !myActivity?.room,
+      },
+      // Only the hub can navigate into another game — omit entirely when no handler was threaded in.
+      ...(onJoinActivity
+        ? [{
+            label: '🚀 Присоединиться к игре',
+            action: () => onJoinActivity(f),
+            disabled: !f.activity?.joinable,
+          }]
+        : []),
+      { label: '🎤 Позвонить', action: () => ringUser(f.accountId, f.displayName, 'audio'), disabled: f.presence !== 'online' },
       { separator: true, action: () => {} },
-      { label: '🚫 Заблокировать', action: () => alert('Пользователь заблокирован'), danger: true },
+      { label: '🚫 Заблокировать', action: () => void block(f.accountId), danger: true },
       { label: '🗑️ Удалить из друзей', action: () => removeFriend(f.accountId), danger: true }
     ]);
   };
@@ -178,6 +205,27 @@ export const FriendsSidebar = ({ inOverlay = false }: { inOverlay?: boolean }): 
         <span style={{ color: '#8f98a0' }}>Ваш код: {me?.accountId?.slice(0, 8) ?? '...'}</span>
         <button onClick={copyCode} style={{...smallBtn, padding: '4px 8px'}}>{copied ? 'Скопировано' : 'Копировать'}</button>
       </div>
+
+      {viewingProfile && (
+        <div
+          onClick={() => setViewingProfile(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 24, width: 280, textAlign: 'center' }}>
+            <div style={{ width: 80, height: 80, borderRadius: '50%', margin: '0 auto 12px', overflow: 'hidden', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
+              {viewingProfile.avatarIcon ? (
+                <img src={viewingProfile.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : '👤'}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>{viewingProfile.displayName}</div>
+            <div style={{ fontSize: 12, color: '#8f98a0', marginTop: 4 }}>{activityText(viewingProfile)}</div>
+            {viewingProfile.titleAchievement && (
+              <div style={{ fontSize: 12, color: '#dcdedf', marginTop: 8 }}>🏅 Есть титул</div>
+            )}
+            <button onClick={() => setViewingProfile(null)} style={{ ...smallBtn, marginTop: 16, width: '100%' }}>Закрыть</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -84,9 +84,36 @@ services:
       JWT_ISSUER: civa
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      LIVEKIT_URL: "${LIVEKIT_URL:?set LIVEKIT_URL in deploy/gamehub/.env, e.g. wss://mygame-quiz.ru/gamehub-livekit}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in deploy/gamehub/.env}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in deploy/gamehub/.env}"
       NODE_ENV: production
     depends_on:
       - postgres
+      - livekit
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  # GAMEHUB's own self-hosted LiveKit for chat voice/video — a separate instance from Leaders' own
+  # (port 7881, do not touch), on different ports (see livekit.yaml + the RTC ports below). The
+  # signaling port (7880) is internal-only, reached through `web`'s Caddyfile at /gamehub-livekit/*;
+  # the RTC ports carry actual media and can't go through Caddy, so they're published directly —
+  # verify they're free on the host (`ss -tulpn`) before the first deploy, don't assume the defaults.
+  livekit:
+    image: livekit/livekit-server:latest
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: ['--config', '/etc/livekit.yaml']
+    environment:
+      # Format "apikey: apisecret" (see deploy/gamehub/.env.example) — generate the secret with
+      # `openssl rand -hex 32`; never devkey/secret here (that's the local-dev-only default).
+      LIVEKIT_KEYS: "${LIVEKIT_KEYS:?set LIVEKIT_KEYS in deploy/gamehub/.env}"
+    ports:
+      # Verified free on 186.246.11.239 via `ss -tulpn` before deploying — Leaders' own LiveKit
+      # already occupies tcp 7881 + the entire 50000-50200 udp range on this shared host.
+      - '7883:7883' # rtc tcp — must match livekit.yaml's rtc.tcp_port exactly (LiveKit advertises it verbatim)
+      - '51000-51100:51000-51100/udp' # rtc udp range — must match livekit.yaml's port_range_*
     networks:
       - gamehub-net
     restart: unless-stopped
@@ -154,6 +181,7 @@ services:
       - community
       - orchestrator
       - examplegame
+      - livekit
     restart: unless-stopped
 
   # SDK starter template — path-routed under the hub's own origin (web's Caddyfile strips

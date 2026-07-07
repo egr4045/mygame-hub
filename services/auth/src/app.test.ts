@@ -171,7 +171,7 @@ describe('auth service — profile', () => {
     const { base } = await start();
     const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
     const profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
-    expect(profile).toEqual({ avatarIcon: null, wallpaper: null, titleAchievement: null });
+    expect(profile).toEqual({ avatarIcon: null, wallpaper: null, titleAchievement: null, favoriteGameIds: [] });
   });
 
   it('sets and persists an avatar and a wallpaper', async () => {
@@ -235,6 +235,26 @@ describe('auth service — profile', () => {
     expect((await get(base, '/auth/profile')).status).toBe(401);
     expect((await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' })).status).toBe(401);
     expect((await put(base, '/auth/profile/title', { titleAchievement: null })).status).toBe(401);
+  });
+
+  it('sets and persists the favorite games list (full replace)', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+
+    const res = await put(base, '/auth/profile/favorites', { gameIds: ['civa', 'svoyak'] }, login.accessToken);
+    expect(res.status).toBe(200);
+    let profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile.favoriteGameIds).toEqual(['civa', 'svoyak']);
+
+    // A second call replaces rather than merges.
+    await put(base, '/auth/profile/favorites', { gameIds: ['svoyak'] }, login.accessToken);
+    profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
+    expect(profile.favoriteGameIds).toEqual(['svoyak']);
+  });
+
+  it('rejects unauthenticated favorites writes', async () => {
+    const { base } = await start();
+    expect((await put(base, '/auth/profile/favorites', { gameIds: ['civa'] })).status).toBe(401);
   });
 });
 

@@ -50,6 +50,9 @@ export const C2S = {
   createInvite: 'social.createInvite', // mint a join code for a room (ack returns { code })
   inviteFriend: 'social.inviteFriend', // mint a code and push it to a friend's presence channel
   getLobbies: 'social.getLobbies', // list joinable rooms for a game, derived from live presence (ack)
+  block: 'social.block', // hide presence/activity from `accountId` both ways, reject their requests
+  unblock: 'social.unblock', // restore visibility — does not re-friend, the edge was never touched
+  getBlocked: 'social.getBlocked', // accounts *I* have blocked (ack) — for an unblock list
 } as const;
 
 export const requestPayload = z.object({ code: z.string().min(1).max(64) });
@@ -85,6 +88,10 @@ export const lobby = z.object({
 });
 export const getLobbiesAck = z.object({ lobbies: z.array(lobby) });
 
+export const blockAck = z.object({ ok: z.boolean() });
+export const blockedAccount = z.object({ accountId: z.string(), displayName: z.string() });
+export const getBlockedAck = z.object({ blocked: z.array(blockedAccount) });
+
 export type RequestPayload = z.infer<typeof requestPayload>;
 export type TargetPayload = z.infer<typeof targetPayload>;
 export type SetActivityPayload = z.infer<typeof setActivityPayload>;
@@ -94,6 +101,9 @@ export type CreateInviteAck = z.infer<typeof createInviteAck>;
 export type GetLobbiesPayload = z.infer<typeof getLobbiesPayload>;
 export type Lobby = z.infer<typeof lobby>;
 export type GetLobbiesAck = z.infer<typeof getLobbiesAck>;
+export type BlockAck = z.infer<typeof blockAck>;
+export type BlockedAccount = z.infer<typeof blockedAccount>;
+export type GetBlockedAck = z.infer<typeof getBlockedAck>;
 
 // --- Server -> Client events -------------------------------------------------
 export const S2C = {

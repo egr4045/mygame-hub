@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
 import {
   useMenuStore,
+  useSocialStore,
   createTelegramLinkCode,
   getTelegramStatus,
   getAchievements,
@@ -11,7 +12,7 @@ import {
   setWallpaper as apiSetWallpaper,
   setTitleAchievement as apiSetTitleAchievement,
 } from '@mygame/sdk';
-import type { GameStat } from '@mygame/protocol';
+import type { GameStat, social } from '@mygame/protocol';
 import { ACHIEVEMENTS, CIVA_GAME_ID } from '../platform/achievementsCatalog.js';
 import { GAMES } from '../platform/games.js';
 import { formatLastPlayed, formatPlaytime } from '../platform/statsFormat.js';
@@ -57,6 +58,16 @@ export const ProfileView = (): JSX.Element => {
       setTitleAchievement(p.titleAchievement?.gameId === CIVA_GAME_ID ? p.titleAchievement.achievementId : null);
     });
   }, []);
+
+  // Blocked accounts — the only surface where they're visible again (they're hidden from the
+  // regular friends list once blocked, but the underlying friendship edge isn't touched).
+  const [blocked, setBlocked] = useState<social.BlockedAccount[]>([]);
+  const refreshBlocked = () => void useSocialStore.getState().getBlocked().then(setBlocked);
+  useEffect(refreshBlocked, []);
+  const unblockAccount = async (accountId: string) => {
+    await useSocialStore.getState().unblock(accountId);
+    refreshBlocked();
+  };
 
   // Telegram linking state
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
@@ -301,6 +312,25 @@ export const ProfileView = (): JSX.Element => {
               ))}
             </div>
           </div>
+
+          {blocked.length > 0 && (
+            <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 24 }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>ЗАБЛОКИРОВАННЫЕ</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {blocked.map((b) => (
+                  <div key={b.accountId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ color: '#dcdedf', fontSize: '13px' }}>{b.displayName}</span>
+                    <button
+                      onClick={() => void unblockAccount(b.accountId)}
+                      style={{ background: '#3d4450', color: '#dcdedf', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: '12px', cursor: 'pointer' }}
+                    >
+                      Разблокировать
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Column (Achievements Showcase) */}

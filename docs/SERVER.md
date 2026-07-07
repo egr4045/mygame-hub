@@ -34,7 +34,8 @@ Do not break one while touching another.
   chat (DMs/groups) + community (changelog/discussions), an **orchestrator** that starts a game on
   player entry and **stops it when idle** (to save RAM), and per-game stacks.
 - **Always-on platform stack** (`deploy/gamehub`, project `gamehub`): `postgres` + `auth` (JWT) +
-  `social` + `chat` + `community` + `orchestrator` + `web` (gateway Caddy, host port **8088**).
+  `social` + `chat` + `community` + `orchestrator` + `livekit` (chat voice/video — own instance,
+  separate from Leaders' own LiveKit below) + `web` (gateway Caddy, host port **8088**).
   Reachable directly at **http://186.246.11.239:8088**, and — the real public entry point — at
   **https://mygame-quiz.ru** (the root domain, no subdomain; Leaders' Caddy already forwards it here,
   see Product A above).
@@ -44,8 +45,16 @@ Do not break one while touching another.
   - (more games register in the orchestrator manifest + their own `deploy/<game>` compose).
 - Networking: a shared external Docker network **`gamehub-net`**; the gateway routes one origin:
   `/auth/*`→auth, `/social.io/*`→social (Socket.io, custom path), `/chat.io/*`→chat (Socket.io, custom
-  path), `/community/*`→community, `/orchestrator/*`→orchestrator, `/socket.io/*`→game lobby
-  (Socket.io, default path — doesn't collide since social/chat moved off it), `/`→SPA.
+  path), `/chat/call/token`→chat (HTTP, mints a LiveKit token), `/community/*`→community,
+  `/orchestrator/*`→orchestrator, `/gamehub-livekit/*`→livekit (WebSocket signaling only — deliberately
+  not `/livekit/*`, which Leaders' own Caddy already claims for its own instance), `/socket.io/*`→game
+  lobby (Socket.io, default path — doesn't collide since social/chat moved off it), `/`→SPA.
+- **LiveKit (voice/video calls)**: GAMEHUB's own self-hosted instance (`deploy/gamehub/livekit.yaml` +
+  the `livekit` service), fully separate from Leaders' own (Product A, port 7881) — different API
+  keys, different ports, never shared. Signaling is proxied through the gateway (above); the actual
+  RTC media is UDP/TCP and can't go through Caddy, so it's published directly on the host: tcp 7883 +
+  udp 51000-51100, verified free via `ss -tulpn` on this host before deploying (Leaders' own LiveKit
+  already occupies tcp 7881 and the entire 50000-50200 udp range).
 - Orchestrator controls Docker via the host socket; it `docker compose up/stop`s each game's compose.
   Idle policy: stop after `CIVA_IDLE_MS` (default 10 min) with zero players (polls each game `/metrics`).
 
@@ -64,6 +73,11 @@ Do not break one while touching another.
   - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
     a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
     token; disable any webhook). Keep the token out of git, logs and docs.
+  - `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (on `chat`) + `LIVEKIT_KEYS` (on `livekit`,
+    same key/secret pair, `"apikey: apisecret"` format) — GAMEHUB's own LiveKit, generate the secret
+    with `openssl rand -hex 32`. `LIVEKIT_URL` must be the public address
+    (`wss://mygame-quiz.ru/gamehub-livekit`), not an internal docker-network one — it's handed
+    straight to the browser's `livekit-client`.
 
 ### Deploy / update GAMEHUB
 See **`/root/gamehub/deploy/DEPLOY.md`**. TL;DR:
@@ -88,6 +102,8 @@ Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` the
 | 8088 | GAMEHUB gateway (launcher) | yes (http, direct); also https://mygame-quiz.ru via Leaders' Caddy |
 | 8081 / 8082 / 8090 | GAMEHUB auth / lobby / orchestrator | internal (gamehub-net) |
 | 8083 / 8084 / 8085 | GAMEHUB social / chat / community | internal (gamehub-net) |
+| 7880 | GAMEHUB's own LiveKit (signaling) | internal (gamehub-net) — proxied at /gamehub-livekit/* |
+| 7883 (tcp) / 51000-51100 (udp) | GAMEHUB's own LiveKit (rtc media) | yes — verified free via `ss -tulpn`; Leaders already owns tcp 7881 + the whole 50000-50200 udp range |
 | (projectflow ports) | projectflow app/db | see its own compose — not this repo's concern |
 
 ## Quick orientation for an agent

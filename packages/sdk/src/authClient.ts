@@ -211,6 +211,22 @@ export const setTitleAchievement = async (ref: TitleAchievementRef): Promise<boo
   }
 };
 
+/** Replace the account's full list of favorited game ids. Returns false on failure. */
+export const setFavorites = async (gameIds: string[]): Promise<boolean> => {
+  const token = await freshAccessToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/favorites`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ gameIds }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Mint a short-lived handoff token to carry this session into another game (via its URL `?pt=` or a
  * QR code). The long-lived access/refresh tokens never leave here — the target game exchanges the

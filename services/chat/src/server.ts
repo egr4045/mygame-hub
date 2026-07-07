@@ -5,8 +5,9 @@
  * participant's thread list is refreshed (same "push the full view" model social uses); a new message
  * is also pushed immediately so an open chat window updates without waiting for the next push.
  */
-import { createServer, type Server as HttpServer } from 'node:http';
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { Server as IOServer, type Socket } from 'socket.io';
+import { AccessToken } from 'livekit-server-sdk';
 import { ContractError, chat } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import type { Logger } from '@mygame/shared-types';
@@ -23,7 +24,37 @@ export interface ChatDeps {
   readonly store: ChatStore;
   readonly logger: Logger;
   readonly corsOrigin: string;
+  readonly livekit: { url: string; apiKey: string; apiSecret: string };
 }
+
+/** A call is purely live state — never persisted (see the module doc comment above). */
+interface ActiveCall {
+  type: chat.CallType;
+  participantIds: Set<string>;
+}
+
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, authorization',
+};
+
+const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
+  res.writeHead(status, { 'content-type': 'application/json', ...CORS_HEADERS });
+  res.end(JSON.stringify(body));
+};
+
+const readJsonBody = async (req: IncomingMessage): Promise<unknown> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
+};
+
+const bearer = (req: IncomingMessage): string | null => {
+  const h = req.headers.authorization;
+  return h?.startsWith('Bearer ') ? h.slice('Bearer '.length) : null;
+};
 
 export interface ChatServer {
   httpServer: HttpServer;
@@ -37,15 +68,66 @@ const parse = <T>(schema: ZodType<T>, raw: unknown): T => {
 };
 
 export const createChatServer = (deps: ChatDeps): ChatServer => {
-  const httpServer = createServer((req, res) => {
-    const cors = { 'content-type': 'application/json', 'access-control-allow-origin': '*' };
-    if (req.url === '/health' || req.url === '/ready') {
-      res.writeHead(200, cors);
-      res.end(JSON.stringify({ status: 'ok', service: 'chat' }));
+  // Ephemeral call state (see the ActiveCall doc comment) — declared here so both the HTTP token
+  // route and the socket signaling handlers below can check "is the caller actually in this call".
+  const activeCalls = new Map<string, ActiveCall>(); // conversationId -> call
+
+  const handleHttp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS);
+      res.end();
       return;
     }
-    res.writeHead(404, cors);
-    res.end(JSON.stringify({ error: 'not_found' }));
+    if (req.url === '/health' || req.url === '/ready') {
+      sendJson(res, 200, { status: 'ok', service: 'chat' });
+      return;
+    }
+
+    // Mint a LiveKit room-scoped access token for an ongoing/ringing call. HTTP (not a socket event)
+    // because the client needs it as a plain string to hand to livekit-client's Room.connect.
+    if (req.method === 'POST' && req.url === '/chat/call/token') {
+      const token = bearer(req);
+      if (!token) {
+        sendJson(res, 401, { code: 'unauthorized', message: 'missing access token' });
+        return;
+      }
+      let accountId: string;
+      let displayName: string;
+      try {
+        const claims = await deps.auth.verify(token);
+        if (claims.typ !== 'access') throw new Error('not an access token');
+        accountId = claims.sub;
+        displayName = claims.name;
+      } catch {
+        sendJson(res, 401, { code: 'unauthorized', message: 'invalid access token' });
+        return;
+      }
+      const parsed = chat.callTokenRequest.safeParse(await readJsonBody(req));
+      if (!parsed.success) {
+        sendJson(res, 400, { code: 'validation', message: 'invalid request' });
+        return;
+      }
+      if (!deps.store.isParticipant(parsed.data.conversationId, accountId)) {
+        sendJson(res, 403, { code: 'forbidden', message: 'not a participant of this conversation' });
+        return;
+      }
+      const at = new AccessToken(deps.livekit.apiKey, deps.livekit.apiSecret, { identity: accountId, name: displayName });
+      at.addGrant({ roomJoin: true, room: parsed.data.conversationId, canPublish: true, canSubscribe: true });
+      const jwt = await at.toJwt();
+      const body: chat.CallTokenResponse = { token: jwt, url: deps.livekit.url };
+      sendJson(res, 200, body);
+      return;
+    }
+
+    sendJson(res, 404, { error: 'not_found' });
+  };
+
+  const httpServer = createServer((req, res) => {
+    void handleHttp(req, res).catch((err) => {
+      if (res.headersSent) return;
+      deps.logger.error('http', { err: String(err) });
+      sendJson(res, 500, { code: 'internal', message: 'internal error' });
+    });
   });
 
   // Custom path — see the matching comment in services/social/src/server.ts: on a shared production
@@ -210,10 +292,78 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.getState, () => guard(() => emitThreads(accountId)));
 
+    /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty. */
+    const leaveCall = (conversationId: string): void => {
+      const call = activeCalls.get(conversationId);
+      if (!call?.participantIds.delete(accountId)) return;
+      if (call.participantIds.size === 0) {
+        activeCalls.delete(conversationId);
+        const payload: chat.CallEndedEvent = { conversationId };
+        emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
+      }
+    };
+
+    // Voice/video call signaling — ephemeral (`activeCalls` above), no store/Postgres involvement;
+    // the actual media flows over LiveKit once a client has a token from `POST /chat/call/token`.
+    socket.on(chat.C2S.callRing, (raw, ack?: (res: chat.CallAck) => void) =>
+      guard(() => {
+        const { conversationId, callType } = parse(chat.callRingPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const call = activeCalls.get(conversationId);
+        if (call) call.participantIds.add(accountId);
+        else activeCalls.set(conversationId, { type: callType, participantIds: new Set([accountId]) });
+        const payload: chat.CallRingEvent = { conversationId, fromAccountId: accountId, fromName: displayName, callType };
+        const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+        emitToEveryone(others, chat.S2C.callRing, payload);
+        if (typeof ack === 'function') ack({ ok: true });
+      }),
+    );
+
+    socket.on(chat.C2S.callAccept, (raw, ack?: (res: chat.CallAck) => void) =>
+      guard(() => {
+        const { conversationId } = parse(chat.callActionPayload, raw);
+        const call = activeCalls.get(conversationId);
+        if (!call) throw new ContractError('validation', 'no call in progress');
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        call.participantIds.add(accountId);
+        const payload: chat.CallParticipantEvent = { conversationId, accountId };
+        emitToEveryone([...call.participantIds], chat.S2C.callAccepted, payload);
+        if (typeof ack === 'function') ack({ ok: true });
+      }),
+    );
+
+    // Declining doesn't unilaterally end the call (a group call goes on for whoever's already
+    // joined) — it only informs the ringer(s), who decide client-side whether to hang up (e.g. a 1:1
+    // call has no one left to wait for, so the ringer's own client reacts by hanging up itself).
+    socket.on(chat.C2S.callDecline, (raw) =>
+      guard(() => {
+        const { conversationId } = parse(chat.callActionPayload, raw);
+        const payload: chat.CallParticipantEvent = { conversationId, accountId };
+        const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+        emitToEveryone(others, chat.S2C.callDeclined, payload);
+      }),
+    );
+
+    socket.on(chat.C2S.callHangup, (raw) =>
+      guard(() => {
+        const { conversationId } = parse(chat.callActionPayload, raw);
+        leaveCall(conversationId);
+      }),
+    );
+
     socket.on('disconnect', () => {
       const sockets = socketsOf.get(accountId);
       sockets?.delete(socket.id);
-      if (sockets && sockets.size === 0) socketsOf.delete(accountId);
+      if (sockets && sockets.size === 0) {
+        socketsOf.delete(accountId);
+        // Fully offline (no other tabs/devices) — drop out of any call rather than leave a ghost
+        // participant nobody can ever remove.
+        for (const conversationId of [...activeCalls.keys()]) leaveCall(conversationId);
+      }
     });
   });
 

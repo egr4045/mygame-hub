@@ -76,9 +76,14 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
         mem.request(by, other);
         if (r.accepted) mem.accept(other, by);
       }
+
+      const blocks = await pool.query(`SELECT blocker, blocked FROM blocks`);
+      for (const r of blocks.rows) mem.block(r.blocker as string, r.blocked as string);
+
       logger.info('social graph hydrated', {
         accounts: accounts.rowCount,
         friendships: friendships.rowCount,
+        blocks: blocks.rowCount,
       });
     },
 
@@ -116,5 +121,23 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
       persistEdge(account, other); // now gone -> DELETE
     },
     friendsOf: (account) => mem.friendsOf(account),
+
+    block(blocker, blocked) {
+      mem.block(blocker, blocked);
+      queue.push('block.upsert', () =>
+        pool.query(
+          `INSERT INTO blocks (blocker, blocked) VALUES ($1, $2) ON CONFLICT (blocker, blocked) DO NOTHING`,
+          [blocker, blocked],
+        ),
+      );
+    },
+    unblock(blocker, blocked) {
+      mem.unblock(blocker, blocked);
+      queue.push('block.delete', () =>
+        pool.query(`DELETE FROM blocks WHERE blocker = $1 AND blocked = $2`, [blocker, blocked]),
+      );
+    },
+    isBlocked: (a, b) => mem.isBlocked(a, b),
+    blockedByMe: (account) => mem.blockedByMe(account),
   };
 };

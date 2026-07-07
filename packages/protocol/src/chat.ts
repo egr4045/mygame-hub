@@ -51,6 +51,12 @@ export const C2S = {
   markRead: 'chat.markRead',
   getHistory: 'chat.getHistory',
   getState: 'chat.getState', // re-request the full thread list (reconnect)
+  // Voice/video call signaling — purely live/ephemeral (see server.ts), no persistence. The actual
+  // media flows over LiveKit once a client has a token from `POST /chat/call/token`.
+  callRing: 'chat.callRing', // start ringing every other participant of a conversation
+  callAccept: 'chat.callAccept', // join the call already ringing for this conversation
+  callDecline: 'chat.callDecline', // decline without joining
+  callHangup: 'chat.callHangup', // leave an active/ringing call
 } as const;
 
 export const openDmPayload = z.object({ withAccountId: z.string().min(1) });
@@ -76,6 +82,13 @@ export const getHistoryPayload = z.object({
 });
 export const getStatePayload = z.object({}).strict();
 
+export const callType = z.enum(['audio', 'video']);
+export const callRingPayload = z.object({ conversationId: z.string().min(1), callType });
+/** Shared by accept/decline/hangup — all three only ever need to know which call. */
+export const callActionPayload = z.object({ conversationId: z.string().min(1) });
+export const callTokenRequest = z.object({ conversationId: z.string().min(1) });
+
+export type CallType = z.infer<typeof callType>;
 export type OpenDmPayload = z.infer<typeof openDmPayload>;
 export type CreateGroupPayload = z.infer<typeof createGroupPayload>;
 export type AddMembersPayload = z.infer<typeof addMembersPayload>;
@@ -83,6 +96,9 @@ export type RemoveMemberPayload = z.infer<typeof removeMemberPayload>;
 export type SendPayload = z.infer<typeof sendPayload>;
 export type MarkReadPayload = z.infer<typeof markReadPayload>;
 export type GetHistoryPayload = z.infer<typeof getHistoryPayload>;
+export type CallRingPayload = z.infer<typeof callRingPayload>;
+export type CallActionPayload = z.infer<typeof callActionPayload>;
+export type CallTokenRequest = z.infer<typeof callTokenRequest>;
 
 /** Acks returned to the caller of the corresponding C2S event. */
 export const openDmAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
@@ -91,6 +107,9 @@ export const addMembersAck = z.object({ conversationId: z.string().optional(), e
 export const removeMemberAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 export const sendAck = z.object({ message: chatMessage.optional(), error: z.string().optional() });
 export const historyAck = z.object({ conversationId: z.string(), messages: z.array(chatMessage) });
+export const callAck = z.object({ ok: z.boolean(), error: z.string().optional() });
+/** Response body of `POST /chat/call/token` (plain HTTP, not a socket ack — see server.ts). */
+export const callTokenResponse = z.object({ token: z.string(), url: z.string() });
 
 export type OpenDmAck = z.infer<typeof openDmAck>;
 export type CreateGroupAck = z.infer<typeof createGroupAck>;
@@ -98,6 +117,8 @@ export type AddMembersAck = z.infer<typeof addMembersAck>;
 export type RemoveMemberAck = z.infer<typeof removeMemberAck>;
 export type SendAck = z.infer<typeof sendAck>;
 export type HistoryAck = z.infer<typeof historyAck>;
+export type CallAck = z.infer<typeof callAck>;
+export type CallTokenResponse = z.infer<typeof callTokenResponse>;
 
 // --- Server -> Client events -------------------------------------------------
 export const S2C = {
@@ -105,12 +126,27 @@ export const S2C = {
   message: 'chat.message', // a new message, pushed to every participant of the conversation
   read: 'chat.read', // someone read up to `upTo` in a conversation
   error: 'chat.error',
+  callRing: 'chat.callRing', // pushed to every other participant when someone starts ringing
+  callAccepted: 'chat.callAccepted', // pushed to everyone already in the call when accountId joins
+  callDeclined: 'chat.callDeclined', // pushed to the ringer(s) when accountId declines
+  callEnded: 'chat.callEnded', // pushed to everyone once the call has no participants left
 } as const;
 
 export const threadsEvent = z.object({ threads: z.array(chatThread) });
 export const messageEvent = z.object({ message: chatMessage });
 export const readEvent = z.object({ conversationId: z.string(), byAccountId: z.string(), upTo: z.number() });
+export const callRingEvent = z.object({
+  conversationId: z.string(),
+  fromAccountId: z.string(),
+  fromName: z.string(),
+  callType,
+});
+export const callParticipantEvent = z.object({ conversationId: z.string(), accountId: z.string() });
+export const callEndedEvent = z.object({ conversationId: z.string() });
 
 export type ThreadsEvent = z.infer<typeof threadsEvent>;
 export type MessageEvent = z.infer<typeof messageEvent>;
 export type ReadEvent = z.infer<typeof readEvent>;
+export type CallRingEvent = z.infer<typeof callRingEvent>;
+export type CallParticipantEvent = z.infer<typeof callParticipantEvent>;
+export type CallEndedEvent = z.infer<typeof callEndedEvent>;

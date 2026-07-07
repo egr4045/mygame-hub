@@ -19,11 +19,13 @@ export interface GameInfo {
   id: string;
   name: string;
   tagline: string;
-  status: 'playable' | 'soon';
+  status: 'playable' | 'soon' | 'maintenance';
   accent: string;
   emoji: string;
   path?: string;
   externalPort?: number;
+  /** Shown instead of the Play button when `status === 'maintenance'` — why it's temporarily down. */
+  note?: string;
 }
 
 /**
@@ -46,20 +48,24 @@ export const GAMES: GameInfo[] = [
     id: 'civa',
     name: 'CIVA',
     tagline: 'Real-time 4X · diplomacy · UN elections',
-    status: 'playable',
+    status: 'maintenance',
     accent: '#3da9fc',
     emoji: '🌍',
-    // CIVA is now its own SPA like every other game. Provisional dev origin — finalize in Phase 4.
+    // Still on the legacy externalPort model (its own repo, not migrated to path-based routing yet) —
+    // an https hub would hit the same SSL-upgrade bug example-game had before its fix. Disabled in the
+    // UI rather than shipping a broken Play button; re-enable once it moves to `path`.
     externalPort: 5180,
+    note: 'Временно недоступна в хабе — переезжает на новый роутинг (mygame-quiz.ru/civa).',
   },
   {
     id: 'svoyak',
     name: 'Своя игра',
     tagline: 'Quiz buzzer party · Jeopardy-style',
-    status: 'playable',
+    status: 'maintenance',
     accent: '#49a05a',
     emoji: '🧠',
     externalPort: 8089,
+    note: 'Временно недоступна в хабе — переезжает на новый роутинг.',
   },
   {
     id: 'leaders',

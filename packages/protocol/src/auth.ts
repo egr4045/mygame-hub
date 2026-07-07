@@ -89,10 +89,14 @@ export type SetWallpaperRequest = z.infer<typeof setWallpaperRequest>;
 export const setTitleRequest = z.object({ titleAchievement: titleAchievementRef });
 export type SetTitleRequest = z.infer<typeof setTitleRequest>;
 
+export const setFavoritesRequest = z.object({ gameIds: z.array(z.string().min(1)) });
+export type SetFavoritesRequest = z.infer<typeof setFavoritesRequest>;
+
 export const profileResponse = z.object({
   avatarIcon: z.string().nullable(),
   wallpaper: z.string().nullable(),
   titleAchievement: titleAchievementRef,
+  favoriteGameIds: z.array(z.string()),
 });
 export type ProfileResponse = z.infer<typeof profileResponse>;
 

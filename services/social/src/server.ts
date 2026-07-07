@@ -112,21 +112,26 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       .catch(() => next(new Error('unauthorized')));
   });
 
-  /** The friends list as `account` should see it, with presence + activity resolved. */
+  /** The friends list as `account` should see it, with presence + activity resolved. Blocked accounts
+   *  (either direction) are filtered out entirely — the underlying edge stays intact, so unblocking
+   *  needs no re-friending step. */
   const friendView = (account: string): social.Friend[] =>
-    deps.store.friendsOf(account).map((edge) => {
-      const online = isOnline(edge.accountId);
-      const acc = deps.store.getAccount(edge.accountId);
-      return {
-        accountId: edge.accountId,
-        displayName: acc?.displayName ?? shortCode(edge.accountId),
-        avatarIcon: acc?.avatarIcon ?? null,
-        titleAchievement: acc?.titleAchievement ?? null,
-        status: edge.status,
-        presence: online ? 'online' : 'offline',
-        activity: online ? (activityOf.get(edge.accountId) ?? null) : null,
-      };
-    });
+    deps.store
+      .friendsOf(account)
+      .filter((edge) => !deps.store.isBlocked(account, edge.accountId))
+      .map((edge) => {
+        const online = isOnline(edge.accountId);
+        const acc = deps.store.getAccount(edge.accountId);
+        return {
+          accountId: edge.accountId,
+          displayName: acc?.displayName ?? shortCode(edge.accountId),
+          avatarIcon: acc?.avatarIcon ?? null,
+          titleAchievement: acc?.titleAchievement ?? null,
+          status: edge.status,
+          presence: online ? 'online' : 'offline',
+          activity: online ? (activityOf.get(edge.accountId) ?? null) : null,
+        };
+      });
 
   /** My own identity as pushed on connect/profile-refresh. */
   const meView = (accountId: string): social.MeEvent => {
@@ -212,6 +217,9 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       guard(() => {
         const { code } = parse(social.requestPayload, raw);
         if (code === accountId) throw new ContractError('validation', 'cannot friend yourself');
+        // Target has blocked me: pretend nothing happened rather than reveal the block (avoids a
+        // harassment/probing vector — no error, no pending edge, no refresh).
+        if (deps.store.isBlocked(code, accountId)) return;
         deps.store.request(accountId, code);
         refresh(accountId);
       }),
@@ -274,6 +282,33 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       guard(() => {
         const { game } = parse(social.getLobbiesPayload, raw);
         if (typeof ack === 'function') ack({ lobbies: lobbiesFor(game) });
+      }),
+    );
+
+    // Blocking hides presence/activity between the two accounts both ways and rejects new requests
+    // from the blocked side; it never touches the friend edge itself, so unblocking just restores
+    // visibility. `refresh` reaches the blocked account too (if they were a friend) via their edge.
+    socket.on(social.C2S.block, (raw, ack?: (res: social.BlockAck) => void) =>
+      guard(() => {
+        const other = parse(social.targetPayload, raw).accountId;
+        if (other === accountId) throw new ContractError('validation', 'cannot block yourself');
+        deps.store.block(accountId, other);
+        refresh(accountId);
+        if (typeof ack === 'function') ack({ ok: true });
+      }),
+    );
+    socket.on(social.C2S.unblock, (raw, ack?: (res: social.BlockAck) => void) =>
+      guard(() => {
+        const other = parse(social.targetPayload, raw).accountId;
+        deps.store.unblock(accountId, other);
+        refresh(accountId);
+        if (typeof ack === 'function') ack({ ok: true });
+      }),
+    );
+    socket.on(social.C2S.getBlocked, (_raw, ack?: (res: social.GetBlockedAck) => void) =>
+      guard(() => {
+        const blocked = deps.store.blockedByMe(accountId).map((a) => ({ accountId: a.id, displayName: a.displayName }));
+        if (typeof ack === 'function') ack({ blocked });
       }),
     );
 
