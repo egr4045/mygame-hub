@@ -39,6 +39,9 @@ export const HubScreen = (): JSX.Element => {
       setShowLinkModal(true);
       sessionStorage.setItem('link_prompt_shown', 'true');
     }
+    
+    // Always clear activity when we are in the Hub
+    useSocialStore.getState().setActivity(null);
   }, []);
   
   // Local state for library navigation (doesn't start the game yet)

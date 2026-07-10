@@ -147,9 +147,9 @@ export const FriendsSidebar = ({
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: '15px' }}>{me?.displayName || 'Загрузка...'}</div>
-          <div style={{ fontSize: '12px', color: status === 'connected' ? '#5c7e10' : '#8f98a0', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: status === 'connected' ? '#5c7e10' : '#8f98a0' }} />
-            {status === 'connected' ? 'В сети' : 'Подключение...'}
+          <div style={{ fontSize: '12px', color: status === 'connected' ? (myActivity ? '#a3d928' : '#5c7e10') : '#8f98a0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: status === 'connected' ? (myActivity ? '#a3d928' : '#5c7e10') : '#8f98a0' }} />
+            {status === 'connected' ? (myActivity ? `Играет в ${myActivity.gameName}` : 'В сети') : 'Подключение...'}
           </div>
         </div>
       </div>

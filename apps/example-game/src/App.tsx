@@ -103,6 +103,13 @@ export const App = (): JSX.Element => {
     void mygame.stats.getStats().then(setStats);
     void mygame.community.getChangelog().then(setChangelog);
     void mygame.community.getThreads().then(setThreads);
+
+    mygame.social.setActivity({
+      game: GAME_ID,
+      gameName: 'Example Game',
+      room: null,
+      joinable: false,
+    });
   }, [initialized]);
 
   const handleLogin = async (): Promise<void> => {
@@ -119,9 +126,12 @@ export const App = (): JSX.Element => {
 
   const toggleJoinable = (next: boolean): void => {
     setJoinable(next);
-    mygame.social.setActivity(
-      next ? { game: GAME_ID, gameName: 'Example Game', room: 'demo-room', joinable: true } : null,
-    );
+    mygame.social.setActivity({
+      game: GAME_ID,
+      gameName: 'Example Game',
+      room: next ? 'demo-room' : null,
+      joinable: next,
+    });
   };
 
   const myStat = stats.find((s) => s.gameId === GAME_ID);
