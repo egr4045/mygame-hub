@@ -140,6 +140,7 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       return conv;
     },
 
+    typeOf: (conversationId) => mem.typeOf(conversationId),
     isParticipant: (conversationId, accountId) => mem.isParticipant(conversationId, accountId),
     participantsOf: (conversationId) => mem.participantsOf(conversationId),
     ownerOf: (conversationId) => mem.ownerOf(conversationId),

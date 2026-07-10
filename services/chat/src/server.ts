@@ -292,11 +292,15 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.getState, () => guard(() => emitThreads(accountId)));
 
-    /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty. */
+    /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty or 1 person left in DM. */
     const leaveCall = (conversationId: string): void => {
       const call = activeCalls.get(conversationId);
       if (!call?.participantIds.delete(accountId)) return;
-      if (call.participantIds.size === 0) {
+      
+      const isDm = deps.store.typeOf(conversationId) === 'dm';
+      const threshold = isDm ? 1 : 0;
+      
+      if (call.participantIds.size <= threshold) {
         activeCalls.delete(conversationId);
         const payload: chat.CallEndedEvent = { conversationId };
         emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);

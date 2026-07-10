@@ -64,6 +64,7 @@ export interface ChatStore {
   openDm(a: string, b: string): Conversation;
   /** Create a group; `creator` is added to `memberIds` automatically and becomes its owner. */
   createGroup(creator: string, name: string, memberIds: string[]): Conversation;
+  typeOf(conversationId: string): ConversationType | undefined;
   isParticipant(conversationId: string, accountId: string): boolean;
   participantsOf(conversationId: string): string[];
   /** group only: the creator, who alone may remove other members. Null for dm/not-found. */
@@ -159,6 +160,7 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       return conv;
     },
 
+    typeOf: (conversationId) => conversations.get(conversationId)?.type,
     isParticipant: (conversationId, accountId) =>
       conversations.get(conversationId)?.participantIds.includes(accountId) ?? false,
     participantsOf: (conversationId) => conversations.get(conversationId)?.participantIds ?? [],
