@@ -28,8 +28,21 @@ const ChangelogSection = ({ gameId }: { gameId: string }): JSX.Element => {
   const [draft, setDraft] = useState({ version: '', title: '', body: '' });
   const [busy, setBusy] = useState(false);
 
-  const reload = async (): Promise<void> => setEntries((await listChangelog(gameId)) ?? []);
+  const reload = async (): Promise<void> => {
+    const list = (await listChangelog(gameId)) ?? [];
+    setEntries(list);
+    if (list.length > 0) {
+      const lastVer = list[0].version;
+      const parsed = parseInt(lastVer, 10);
+      const nextVer = isNaN(parsed) ? `${lastVer}+1` : String(parsed + 1);
+      setDraft(d => d.version === '' ? { ...d, version: nextVer } : d);
+    } else {
+      setDraft(d => d.version === '' ? { ...d, version: '1' } : d);
+    }
+  };
+
   useEffect(() => {
+    setDraft({ version: '', title: '', body: '' });
     void reload();
     setEditingId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,7 +266,11 @@ export const GamesScreen = (): JSX.Element => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={row}>
         <span style={{ color: '#8f98a0', fontSize: 13 }}>ID игры:</span>
-        <input style={input} value={gameId} onChange={(e) => setGameId(e.target.value)} />
+        <select style={input} value={gameId} onChange={(e) => setGameId(e.target.value)}>
+          <option value="civa">civa</option>
+          <option value="svoyak">svoyak</option>
+          <option value="example-game">example-game</option>
+        </select>
       </div>
       <ChangelogSection gameId={gameId} />
       <DiscussionsSection gameId={gameId} />

@@ -117,6 +117,7 @@ const HealthSection = (): JSX.Element => {
 const BrandingSection = (): JSX.Element => {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
 
   const reload = async (): Promise<void> => setValues((await getPlatformSettings()) ?? {});
   useEffect(() => {
@@ -128,6 +129,8 @@ const BrandingSection = (): JSX.Element => {
     await setPlatformSetting(key, values[key] ?? '');
     await reload();
     setBusyKey(null);
+    setSavedKey(key);
+    setTimeout(() => setSavedKey(null), 2000);
   };
 
   return (
@@ -143,7 +146,7 @@ const BrandingSection = (): JSX.Element => {
               onChange={(e) => setValues({ ...values, [key]: e.target.value })}
             />
             <button style={btn} disabled={busyKey === key} onClick={() => void save(key)}>
-              Сохранить
+              {savedKey === key ? 'Сохранено!' : 'Сохранить'}
             </button>
           </div>
         ))}
