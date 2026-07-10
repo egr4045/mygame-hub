@@ -1,6 +1,6 @@
 /**
- * Auth client: passwordless dev login + session persistence. The accountId is stored so a reload
- * re-claims the *same* account (durable identity) — that's what lets the lobby restore your seat.
+ * Auth client: login + session persistence. The accountId is stored so a reload
+ * re-hydrates the token without a login screen.
  */
 import type {
   AchievementsResponse,
@@ -35,12 +35,11 @@ export const loadSession = (): Session | null => {
 export const saveSession = (s: Session): void => localStorage.setItem(KEY, JSON.stringify(s));
 export const clearSession = (): void => localStorage.removeItem(KEY);
 
-/** Log in (or re-claim `accountId`) and persist the fresh tokens. */
-export const login = async (displayName: string, accountId?: string): Promise<Session> => {
+export const login = async (displayName: string, password?: string): Promise<Session> => {
   const res = await fetch(`${config.authUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ displayName, accountId }),
+    body: JSON.stringify({ displayName, password }),
   });
   if (!res.ok) throw new Error(`login failed (${res.status})`);
   const session = (await res.json()) as LoginResponse;
@@ -48,9 +47,21 @@ export const login = async (displayName: string, accountId?: string): Promise<Se
   return session;
 };
 
+export const register = async (displayName: string, password?: string): Promise<Session> => {
+  const res = await fetch(`${config.authUrl}/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ displayName, password }),
+  });
+  if (!res.ok) throw new Error(`register failed (${res.status})`);
+  const session = (await res.json()) as LoginResponse;
+  saveSession(session);
+  return session;
+};
+
 /**
- * Get a fresh access token for the stored account. Login is passwordless, so re-claiming the same
- * account id re-mints tokens — this avoids 401s from a stale (15m) access token before authed calls.
+ * Get a fresh access token for the stored account using the refresh token. 
+ * This avoids 401s from a stale (15m) access token before authed calls.
  * Exported for sibling clients (stats, community) that also need an authed call without duplicating
  * the refresh dance.
  */
@@ -58,7 +69,15 @@ export const freshAccessToken = async (): Promise<string | null> => {
   const s = loadSession();
   if (!s) return null;
   try {
-    return (await login(s.displayName, s.accountId)).accessToken;
+    const res = await fetch(`${config.authUrl}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken: s.refreshToken }),
+    });
+    if (!res.ok) return null;
+    const { accessToken } = await res.json() as { accessToken: string };
+    saveSession({ ...s, accessToken });
+    return accessToken;
   } catch {
     return null;
   }
@@ -228,9 +247,31 @@ export const setFavorites = async (gameIds: string[]): Promise<boolean> => {
 };
 
 /**
+ * Redeem a handoff token (from `?pt=` in the URL) for a full session on this origin — the server
+ * verifies the token itself, so this never needs to see/trust a password. Persists the session on
+ * success. Null on failure (expired/invalid token, or the account no longer exists).
+ */
+export const exchangeHandoff = async (handoffToken: string): Promise<Session | null> => {
+  try {
+    const res = await fetch(`${config.authUrl}/auth/exchange`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ handoffToken }),
+    });
+    if (!res.ok) return null;
+    const session = (await res.json()) as LoginResponse;
+    saveSession(session);
+    return session;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Mint a short-lived handoff token to carry this session into another game (via its URL `?pt=` or a
  * QR code). The long-lived access/refresh tokens never leave here — the target game exchanges the
- * handoff token at its own `POST /auth/platform`. Returns null if not logged in / on failure.
+ * handoff token at its own origin via `exchangeHandoff`/`mygame.auth.loginWithToken`. Returns null if
+ * not logged in / on failure.
  */
 export const getHandoff = async (): Promise<string | null> => {
   const s = loadSession();

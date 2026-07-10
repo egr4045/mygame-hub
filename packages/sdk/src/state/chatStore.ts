@@ -10,7 +10,7 @@ import { io, type Socket } from 'socket.io-client';
 import { Room } from 'livekit-client';
 import { chat, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
-import { loadSession, login, freshAccessToken } from '../authClient.js';
+import { loadSession, freshAccessToken } from '../authClient.js';
 import { useToastStore } from './toastStore.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -195,16 +195,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ status: 'error', error: 'not logged in' });
       return;
     }
-    let token: string;
+    let token: string | null;
     try {
-      const session = await login(prev.displayName, prev.accountId);
-      token = session.accessToken;
-      meId = session.accountId;
-      meName = session.displayName;
+      token = await freshAccessToken();
     } catch (err) {
       set({ status: 'error', error: String(err) });
       return;
     }
+    if (!token) {
+      set({ status: 'error', error: 'session expired' });
+      return;
+    }
+    meId = prev.accountId;
+    meName = prev.displayName;
 
     socket?.close();
     // path must match the server's custom path (services/chat/src/server.ts) — see the matching

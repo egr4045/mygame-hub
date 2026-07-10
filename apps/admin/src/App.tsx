@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadSession, login, clearSession, freshAccessToken, config } from '@mygame/sdk';
+import { loadSession, login, register, clearSession, freshAccessToken, config } from '@mygame/sdk';
 import { GamesScreen } from './screens/GamesScreen.js';
 import { UsersScreen } from './screens/UsersScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
@@ -33,6 +33,8 @@ export const App = (): JSX.Element => {
     return s ? { accountId: s.accountId, displayName: s.displayName } : null;
   });
   const [nameInput, setNameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessStatus>('checking');
   const [tab, setTab] = useState<Tab>('games');
 
@@ -57,9 +59,25 @@ export const App = (): JSX.Element => {
   }, [account]);
 
   const handleLogin = async (): Promise<void> => {
-    if (!nameInput.trim()) return;
-    const session = await login(nameInput.trim());
-    setAccount({ accountId: session.accountId, displayName: session.displayName });
+    if (!nameInput.trim() || !passwordInput) return;
+    setAuthError(null);
+    try {
+      const session = await login(nameInput.trim(), passwordInput);
+      setAccount({ accountId: session.accountId, displayName: session.displayName });
+    } catch {
+      setAuthError('Неверный логин или пароль');
+    }
+  };
+
+  const handleRegister = async (): Promise<void> => {
+    if (!nameInput.trim() || !passwordInput) return;
+    setAuthError(null);
+    try {
+      const session = await register(nameInput.trim(), passwordInput);
+      setAccount({ accountId: session.accountId, displayName: session.displayName });
+    } catch {
+      setAuthError('Имя уже занято или ошибка регистрации');
+    }
   };
 
   const handleLogout = (): void => {
@@ -83,7 +101,19 @@ export const App = (): JSX.Element => {
             onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
             style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
           />
-          <button onClick={() => void handleLogin()} style={{ ...button, width: '100%' }}>Войти</button>
+          <input
+            type="password"
+            placeholder="Пароль"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
+            style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
+          />
+          {authError && <p style={{ color: '#e07070', fontSize: 12, marginBottom: 12 }}>{authError}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => void handleLogin()} style={{ ...button, flex: 1 }}>Войти</button>
+            <button onClick={() => void handleRegister()} style={{ ...button, flex: 1, background: '#3d4450' }}>Регистрация</button>
+          </div>
         </div>
       </div>
     );

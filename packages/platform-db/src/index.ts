@@ -42,6 +42,9 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wallpaper TEXT;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS title_achievement JSONB;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS favorite_game_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    UPDATE accounts SET password_hash = '' WHERE password_hash IS NULL;
+    ALTER TABLE accounts ALTER COLUMN password_hash SET NOT NULL;
     -- The platform's one privileged tier (apps/admin). A bare boolean, not a role enum -- exactly one
     -- tier was ever asked for; widen into a real role column later if a second tier is ever needed.
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;

@@ -32,7 +32,7 @@ const ChangelogSection = ({ gameId }: { gameId: string }): JSX.Element => {
     const list = (await listChangelog(gameId)) ?? [];
     setEntries(list);
     if (list.length > 0) {
-      const lastVer = list[0].version;
+      const lastVer = list[0]!.version;
       const parsed = parseInt(lastVer, 10);
       const nextVer = isNaN(parsed) ? `${lastVer}+1` : String(parsed + 1);
       setDraft(d => d.version === '' ? { ...d, version: nextVer } : d);

@@ -1,16 +1,21 @@
 import { z } from 'zod';
 
 /**
- * Auth contract (HTTP). Dev login is passwordless — a player just claims a display name and gets
- * an account + JWTs. The account is the durable identity; sessions bind to it, not to a tab.
+ * Auth contract (HTTP). Players register a display name and password to get an account + JWTs.
+ * The account is the durable identity; sessions bind to it, not to a tab.
  */
 
 export const loginRequest = z.object({
   displayName: z.string().min(1).max(32),
-  /** Optional: re-claim an existing account id (e.g. persisted in localStorage). */
-  accountId: z.string().optional(),
+  password: z.string().min(1),
 });
 export type LoginRequest = z.infer<typeof loginRequest>;
+
+export const registerRequest = z.object({
+  displayName: z.string().min(1).max(32),
+  password: z.string().min(1),
+});
+export type RegisterRequest = z.infer<typeof registerRequest>;
 
 export const loginResponse = z.object({
   accountId: z.string(),
@@ -53,8 +58,9 @@ export type RefreshResponse = z.infer<typeof refreshResponse>;
 
 /**
  * Handoff: mint a short-lived token to carry identity to *another* game (via a URL `?pt=` param or
- * a QR code) without exposing the long-lived access/refresh tokens. The target game exchanges it at
- * its own `POST /auth/platform` for a game-native session. Authorized by the holder's refresh token.
+ * a QR code) without exposing the long-lived access/refresh tokens. The target game exchanges it via
+ * `exchangeRequest` below (auth's own `POST /auth/exchange`) for a session on its own origin.
+ * Authorized by the holder's refresh token.
  */
 export const handoffRequest = z.object({ refreshToken: z.string() });
 export type HandoffRequest = z.infer<typeof handoffRequest>;
@@ -65,6 +71,15 @@ export const handoffResponse = z.object({
   displayName: z.string(),
 });
 export type HandoffResponse = z.infer<typeof handoffResponse>;
+
+/**
+ * Exchange a handoff token (minted by `/auth/handoff`) for a full session on the target game's own
+ * origin — this is how a game embedding the SDK establishes identity via the hub's `?pt=` deep link
+ * without ever seeing a password. The server verifies the token's signature + `typ: 'handoff'` itself
+ * (the client never needs to decode/trust it locally).
+ */
+export const exchangeRequest = z.object({ handoffToken: z.string() });
+export type ExchangeRequest = z.infer<typeof exchangeRequest>;
 
 /**
  * Profile customization: avatar + wallpaper images and a "title" achievement badge shown across

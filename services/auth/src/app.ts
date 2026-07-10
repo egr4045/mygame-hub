@@ -1,10 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Clock, Logger } from '@mygame/shared-types';
 import {
+  exchangeRequest,
   grantAchievementRequest,
   handoffRequest,
   heartbeatRequest,
   loginRequest,
+  registerRequest,
   recordEnterRequest,
   refreshRequest,
   setAdminRoleRequest,
@@ -22,7 +25,7 @@ import type { GameStatsStore } from './statsStore.js';
 import type { TelegramLinking } from './telegramLinking.js';
 
 /**
- * Auth HTTP app: passwordless login, token refresh, SSO handoff, and Telegram linking/login.
+ * Auth HTTP app: login, token refresh, SSO handoff, and Telegram linking/login.
  * Dependencies are injected as ports so the same app runs with real or fake adapters (the isolation
  * contract). `telegram` is optional — when unset (no bot token) the Telegram routes return 501.
  */
@@ -143,13 +146,56 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     return;
   }
 
+  const hashPassword = (password: string): string => {
+    const salt = randomBytes(16).toString('hex');
+    const derivedKey = scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${derivedKey}`;
+  };
+
+  const verifyPassword = (password: string, hash: string): boolean => {
+    const [salt, key] = hash.split(':');
+    if (!salt || !key) return false;
+    const keyBuffer = Buffer.from(key, 'hex');
+    const derivedKey = scryptSync(password, salt, 64);
+    return timingSafeEqual(keyBuffer, derivedKey);
+  };
+
+  if (method === 'POST' && url === '/auth/register') {
+    const parsed = registerRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid register', details: parsed.error.flatten() });
+      return;
+    }
+    const existing = deps.accounts.findByDisplayName(parsed.data.displayName);
+    if (existing) {
+      send(res, 409, { code: 'conflict', message: 'display name already taken' });
+      return;
+    }
+    const account = deps.accounts.createAccount(parsed.data.displayName, hashPassword(parsed.data.password));
+    const [accessToken, refreshToken] = await Promise.all([
+      deps.auth.signAccess(account.id, account.displayName),
+      deps.auth.signRefresh(account.id, account.displayName),
+    ]);
+    deps.logger.info('register', { accountId: account.id });
+    send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+    return;
+  }
+
   if (method === 'POST' && url === '/auth/login') {
     const parsed = loginRequest.safeParse(await readJson(req));
     if (!parsed.success) {
       send(res, 400, { code: 'validation', message: 'invalid login', details: parsed.error.flatten() });
       return;
     }
-    const account = deps.accounts.upsert(parsed.data.displayName, parsed.data.accountId);
+    const account = deps.accounts.findByDisplayName(parsed.data.displayName);
+    if (!account) {
+      send(res, 401, { code: 'unauthorized', message: 'invalid credentials' });
+      return;
+    }
+    if (!verifyPassword(parsed.data.password, account.passwordHash)) {
+      send(res, 401, { code: 'unauthorized', message: 'invalid credentials' });
+      return;
+    }
     const [accessToken, refreshToken] = await Promise.all([
       deps.auth.signAccess(account.id, account.displayName),
       deps.auth.signRefresh(account.id, account.displayName),
@@ -200,6 +246,39 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     } catch (err) {
       const reason = err instanceof TokenError ? err.reason : 'invalid';
       send(res, 401, { code: 'unauthorized', message: `handoff ${reason}` });
+    }
+    return;
+  }
+
+  // Exchange a handoff token (from the hub's `/auth/handoff`) for a full session on the target
+  // game's own origin — this is how a game embedding the SDK completes the `?pt=` SSO deep link
+  // without ever seeing a password (see packages/protocol/src/auth.ts's exchangeRequest doc).
+  if (method === 'POST' && url === '/auth/exchange') {
+    const parsed = exchangeRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid exchange' });
+      return;
+    }
+    try {
+      const claims = await deps.auth.verify(parsed.data.handoffToken);
+      if (claims.typ !== 'handoff') {
+        send(res, 401, { code: 'unauthorized', message: 'not a handoff token' });
+        return;
+      }
+      const account = deps.accounts.get(claims.sub);
+      if (!account) {
+        send(res, 404, { code: 'not_found', message: 'account not found' });
+        return;
+      }
+      const [accessToken, refreshToken] = await Promise.all([
+        deps.auth.signAccess(account.id, account.displayName),
+        deps.auth.signRefresh(account.id, account.displayName),
+      ]);
+      deps.logger.info('exchange', { accountId: account.id });
+      send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+    } catch (err) {
+      const reason = err instanceof TokenError ? err.reason : 'invalid';
+      send(res, 401, { code: 'unauthorized', message: `exchange ${reason}` });
     }
     return;
   }

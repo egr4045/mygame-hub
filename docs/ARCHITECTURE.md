@@ -24,7 +24,7 @@ main data flows. For *what works vs. what's mocked* see `STATUS.md`.
                     │ verifies platform JWT                 ▼
              ┌──────┴──────────────────────┐       per-game stacks
              │ a game on its own origin    │       (CIVA, svoyak, …)
-             │ POST /auth/platform (SSO)   │
+             │ POST /auth/exchange (SSO)   │
              └──────────────────────────────┘
 ```
 
@@ -41,13 +41,17 @@ when `DATABASE_URL` is set, else fall back to in-memory (see `STATUS.md` and "Pe
 
 ### auth (`services/auth`) — port 8081
 
-Passwordless identity provider. Routes (`app.ts`):
+Identity provider. Routes (`app.ts`):
 
-- `POST /auth/login` `{ displayName, accountId? }` → `{ accountId, displayName, accessToken, refreshToken }`.
-  `accountId` lets a returning client **re-claim** the same durable identity.
+- `POST /auth/register` `{ displayName, password }` → `{ accountId, displayName, accessToken, refreshToken }`.
+- `POST /auth/login` `{ displayName, password }` → `{ accountId, displayName, accessToken, refreshToken }`.
 - `POST /auth/refresh` `{ refreshToken }` → `{ accessToken }`.
 - `POST /auth/handoff` `{ refreshToken }` → `{ handoffToken, accountId, displayName }` — a 120s token
   to carry identity into a game (see `SSO-FEDERATION.md`).
+- `POST /auth/exchange` `{ handoffToken }` → `{ accountId, displayName, accessToken, refreshToken }` —
+  redeems a handoff token minted by `/auth/handoff` for a full session on the *target* game's own
+  origin. The server verifies the token's signature and `typ === 'handoff'` itself, and 404s if the
+  account no longer exists — the client never decodes or trusts the token locally.
 - `POST /auth/telegram/link-code` (Bearer access) → `{ code, url }` — one-time code bound to the
   account; the bot consumes it via `/start <code>`.
 - `GET /auth/telegram/status` (Bearer access) → `{ linked, telegramId? }`.
@@ -63,8 +67,16 @@ Passwordless identity provider. Routes (`app.ts`):
 - `PUT /auth/profile/title` (Bearer access) `{ titleAchievement: { gameId, achievementId } | null }` —
   sets (or `null` clears) the cross-game "title" badge. Rejected (400) if the account doesn't actually
   hold that achievement.
-- `GET /auth/profile` (Bearer access) → `{ avatarIcon, wallpaper, titleAchievement }` (all nullable).
+- `PUT /auth/profile/favorites` (Bearer access) `{ gameIds }` → `{ favoriteGameIds }` — full replace
+  of the caller's favorited games (small, rarely-mutated list; no incremental add/remove needed).
+- `GET /auth/profile` (Bearer access) → `{ avatarIcon, wallpaper, titleAchievement, favoriteGameIds }`.
 - `GET /health`, `GET /ready`.
+- **Admin** (Bearer access + `isAdmin`, `403` otherwise — see "Admin panel" below): `GET
+  /auth/admin/admins` (roster), `GET /auth/admin/accounts` (paginated, `?q=` substring search on
+  displayName/id), `GET /auth/admin/accounts/:id` (full detail incl. achievements/stats), `PUT
+  /auth/admin/accounts/:id/role` `{ isAdmin }` (promote/demote — rejected if it would demote the last
+  remaining admin), `POST`/`DELETE /auth/admin/accounts/:id/achievements` (grant/revoke on anyone's
+  behalf), `DELETE /auth/admin/accounts/:id/avatar` / `.../wallpaper` (clear only).
 
 JWTs are HS256 via `@mygame/auth-core` (`signAccess` 15m, `signRefresh` 30d, `signHandoff` 120s,
 `verify`). Accounts live in `AccountStore` (real Postgres or in-memory).
@@ -110,6 +122,17 @@ heartbeat adds `min(now - last_heartbeat_at, ~60s)` to `seconds_played` and adva
 backgrounded tab, or a crash can never over-credit more than one interval's worth. A first heartbeat
 with no prior `enter`/heartbeat credits 0 (the window just opens); a negative delta (clock skew)
 also credits 0.
+
+**Admin.** `isAdmin` is a plain boolean column on the shared `accounts` table — one privileged tier,
+not a role enum (widen later if a second tier is ever actually needed). The *first* admin is
+bootstrapped via `AUTH_BOOTSTRAP_ADMIN_IDS` (comma-separated accountIds), checked once at boot
+(`index.ts`): each id is promoted if the account already exists (log in once first, then set the env
+var and restart), idempotent on every subsequent boot. This replaces an older `COMMUNITY_ADMIN_IDS`
+(a `community`-only allowlist re-checked from env on every request), now fully removed. Every admin
+after the bootstrapped one is promoted/demoted from inside `apps/admin` itself (`PUT
+/auth/admin/accounts/:id/role`) — never by editing env vars again — and the server refuses to demote
+the last remaining admin, so the roster can't accidentally lock everyone out. See "Admin panel" below
+for the full surface this backs.
 
 ### social (`services/social`) — port 8083
 
@@ -199,7 +222,11 @@ Wakes a game when a player enters and reaps it when idle, so empty games burn no
   `ActivityProbe` (real adapter `probe.ts` polls a game's `/metrics` for `{ players }`).
 - **Reaper:** periodic `tick()` stops any non-`alwaysOn` game that has sat at zero players past
   `idleMs` (default 10 min).
-- **Routes (`app.ts`):** `GET /games`, `POST /games/:id/enter`, `GET /health`.
+- **Routes (`app.ts`):** `GET /games`, `POST /games/:id/enter`, `GET /health` (all public, no auth —
+  same as ever) and `POST /games/:id/stop` — admin-only force-stop of a running game, bypassing its
+  idle timer, gated by the shared `is_admin` flag (`apps/admin`'s "live lobby" table calls it); 501s
+  if the orchestrator has no `DATABASE_URL` configured, rather than allowing an unauthenticated
+  force-stop or hard-crashing on the missing admin-check dependency.
 - **Manifest:** games declared in `config.ts` (`defaultGames()`), each with its compose dir/project,
   activity URL, and idle policy. Add a game = one entry + its `deploy/<game>` compose.
 
@@ -221,13 +248,21 @@ template), so there was no reason to compromise the boundary for two features.
     own token authorizes it" posture (same idea as achievements' trust model, inverted: there the
     *player* self-reports; here only an admin may publish).
   - **Discussions** (threads + posts) use the platform's normal posture: any valid access token may
-    create a thread or reply, same as chat DMs or achievement grants — no per-game moderation yet
-    (tracked in `STATUS.md`).
+    create a thread or reply, same as chat DMs or achievement grants. Moderation (below) is admin-only,
+    same posture as changelog writes.
 - **Routes (`app.ts`):** `GET /community/changelog/:gameId` (public); `POST /community/changelog`
-  (admin-gated) `{ gameId, version, title, body }`; `GET /community/threads/:gameId` (public, list,
+  (admin-gated) `{ gameId, version, title, body }`; `PUT`/`DELETE /community/changelog/:id`
+  (admin-gated — edit or remove a published entry); `GET /community/threads/:gameId` (public, list,
   newest-first); `GET /community/threads/:gameId/:threadId` (public, detail — thread + posts,
   oldest-first); `POST /community/threads` `{ gameId, title, body }` (body seeds the first post);
-  `POST /community/posts` `{ threadId, body }`; `GET /health`.
+  `POST /community/posts` `{ threadId, body }`; `DELETE /community/threads/:id` / `.../posts/:id`
+  (admin-gated moderation — see below); `GET /community/admin/settings` (public read) / `PUT
+  /community/admin/settings` (admin-gated) `{ key, value }` — a small fixed set of branding/contact
+  key-value settings (`platformSettingsKeys`: `brand_name`, `support_email`, `tos_url`); `GET /health`.
+- **Moderation is soft-delete, not hard-delete.** `DELETE /community/threads/:id` and `.../posts/:id`
+  stamp a `deleted_at` column rather than removing the row — worth being able to see "removed by
+  admin" during an investigation rather than content silently vanishing. Both are admin-gated
+  (`apps/admin`'s discussion moderation UI), same trust posture as changelog writes.
 - **Store (`store.ts`):** `changelog` (flat list), `discussion_threads` + `discussion_posts` (a thread
   view derives `replyCount`/`lastReplyAt` from its posts at read time, same pattern chat uses for
   unread counts). `author_name` is denormalized onto both tables from the JWT `name` claim at write
@@ -316,24 +351,22 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 
 A minimal Vite+React app — living documentation for a third-party game developer, not a real game.
 Registered in the hub's game library (`example-game`, port 5190) so it's reachable via the normal
-launch flow. It exercises the whole SDK surface end-to-end: reads `?pt=` on boot and logs into its own
-origin as the same platform account (decoding the handoff JWT's `sub`/`name` claims client-side,
-without verifying its signature — safe here only because the very next step re-verifies identity the
-same way `mygame.auth.login` always does on this platform, passwordless re-claim by account id; a real
-game with its own backend should instead verify server-side at its own `POST /auth/platform`, see
-`SSO-FEDERATION.md`), then `mygame.init()`, a "win" button (`achievements.grant`), a joinable-activity
-toggle (`social.setActivity`, populates the hub's "Найти группы"), a chat-open button, and read-only
-panels for playtime/changelog/discussions. `vite.config.ts` aliases `@mygame/sdk` to source, same as
-the hub, for HMR.
+launch flow. It also doubles as the reference implementation of consuming SSO handoff: it exercises
+the whole SDK surface end-to-end: reads `?pt=` on boot and redeems it via `mygame.auth.loginWithToken`
+(`exchangeHandoff` under the hood, `POST /auth/exchange`) to log into its own origin as the same
+platform account — the auth service verifies the token's signature and account existence itself, so
+the client never decodes or trusts the JWT locally — then registers a login/password form for a fresh
+account, `mygame.init()`, a "win" button (`achievements.grant`), a joinable-activity toggle
+(`social.setActivity`, populates the hub's "Найти группы"), a chat-open button, and read-only panels
+for playtime/changelog/discussions. `vite.config.ts` aliases `@mygame/sdk` to source, same as the hub,
+for HMR.
 
-> Two real bugs surfaced (and were fixed) while wiring this: (1) a JWT payload's UTF-8 bytes need
-> re-assembling before `JSON.parse` — a bare `atob()` mangles non-ASCII display names (see
-> `decodeHandoffClaims` in `App.tsx`); (2) seeding React state from `mygame.auth.getAccount()` on
-> mount races the async handoff-login when a *different, stale* session already exists on this origin
-> — the bootstrap effect can fire on the stale account before the handoff corrects it, and the loser
-> of that race can overwrite the correct login with the stale one. Fixed by starting `account` at
-> `null` whenever a `?pt=` is still unconsumed (`hasPendingHandoff()`), so nothing reads the stale
-> session until the handoff has had its say.
+> A real bug surfaced (and was fixed) while wiring this: seeding React state from
+> `mygame.auth.getAccount()` on mount races the async handoff-login when a *different, stale* session
+> already exists on this origin — the bootstrap effect can fire on the stale account before the
+> handoff corrects it, and the loser of that race can overwrite the correct login with the stale one.
+> Fixed by starting `account` at `null` whenever a `?pt=` is still unconsumed (`hasPendingHandoff()`),
+> so nothing reads the stale session until the handoff has had its say.
 
 ## Hub (`apps/hub`)
 

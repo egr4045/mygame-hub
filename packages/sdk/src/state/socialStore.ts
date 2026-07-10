@@ -9,7 +9,7 @@ import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
 import { social, type Invite, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
-import { loadSession, login } from '../authClient.js';
+import { loadSession, freshAccessToken } from '../authClient.js';
 
 export type SocialStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -68,12 +68,15 @@ export const useSocialStore = create<SocialUIState>((set) => ({
       set({ status: 'error', error: 'not logged in' });
       return;
     }
-    let token: string;
+    let token: string | null;
     try {
-      const session = await login(prev.displayName, prev.accountId);
-      token = session.accessToken;
+      token = await freshAccessToken();
     } catch (err) {
       set({ status: 'error', error: String(err) });
+      return;
+    }
+    if (!token) {
+      set({ status: 'error', error: 'session expired' });
       return;
     }
 

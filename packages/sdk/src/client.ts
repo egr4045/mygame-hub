@@ -17,8 +17,10 @@ import { configure, type ConfigureOptions } from './config.js';
 import {
   loadSession,
   login as authLogin,
+  register as authRegister,
   clearSession,
   getHandoff,
+  exchangeHandoff,
   grantAchievement,
   getAchievements,
   getProfile,
@@ -84,8 +86,8 @@ class MygameClient {
       return s ? { accountId: s.accountId, displayName: s.displayName } : null;
     },
     getToken: (): string | null => loadSession()?.accessToken ?? null,
-    login: (displayName: string, accountId?: string): Promise<Session> =>
-      authLogin(displayName, accountId),
+    login: (displayName: string, password: string): Promise<Session> => authLogin(displayName, password),
+    register: (displayName: string, password: string): Promise<Session> => authRegister(displayName, password),
     logout: (): void => {
       clearSession();
       stopPlaytimeHeartbeat();
@@ -93,6 +95,9 @@ class MygameClient {
       useChatStore.getState().disconnect();
     },
     getHandoff: (): Promise<string | null> => getHandoff(),
+    /** Redeem a hub `?pt=` handoff token for a session on this origin — no password needed. Null on
+     *  failure (expired/invalid token). This is how a game embedding the SDK completes hub SSO. */
+    loginWithToken: (handoffToken: string): Promise<Session | null> => exchangeHandoff(handoffToken),
   };
 
   readonly social = {

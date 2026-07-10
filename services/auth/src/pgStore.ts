@@ -21,8 +21,8 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   const persist = (a: Account): void =>
     queue.push('account.upsert', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, now())
+        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, password_hash, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name       = EXCLUDED.display_name,
            telegram_id         = EXCLUDED.telegram_id,
@@ -33,6 +33,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
            achievements        = EXCLUDED.achievements,
            favorite_game_ids   = EXCLUDED.favorite_game_ids,
            is_admin            = EXCLUDED.is_admin,
+           password_hash       = EXCLUDED.password_hash,
            updated_at          = now()`,
         [
           a.id,
@@ -45,6 +46,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
           JSON.stringify(a.achievements),
           JSON.stringify(a.favoriteGameIds),
           a.isAdmin,
+          a.passwordHash,
         ],
       ),
     );
@@ -52,10 +54,10 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   return {
     async init() {
       const { rows } = await pool.query(
-        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin FROM accounts`,
+        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, password_hash FROM accounts`,
       );
       for (const r of rows) {
-        const acc = mem.upsert(r.display_name as string, r.id as string);
+        const acc = mem.createAccount(r.display_name as string, r.password_hash as string, r.id as string);
         if (r.telegram_id) mem.linkSocial(acc.id, 'telegram', r.telegram_id as string);
         if (r.vk_id) mem.linkSocial(acc.id, 'vk', r.vk_id as string);
         if (r.avatar_icon) mem.setAvatar(acc.id, r.avatar_icon as string);
@@ -68,11 +70,12 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       logger.info('accounts hydrated', { count: rows.length });
     },
 
-    upsert(displayName, id) {
-      const a = mem.upsert(displayName, id);
+    createAccount(displayName, passwordHash) {
+      const a = mem.createAccount(displayName, passwordHash);
       persist(a);
       return a;
     },
+    findByDisplayName: (name) => mem.findByDisplayName(name),
     get: (id) => mem.get(id),
     findBySocial: (network, socialId) => mem.findBySocial(network, socialId),
     linkSocial(id, network, socialId) {

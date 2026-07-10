@@ -24,7 +24,7 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   friends overlay, chat/messenger UI, toasts, context menus. Most content is still on mock data
   (`STATUS.md`).
 - **Phase 2 — Platform realtime + SDK.**
-  - `auth` service: passwordless login, JWT access/refresh, SSO handoff tokens.
+  - `auth` service: login, JWT access/refresh, SSO handoff tokens.
   - `social` service: Socket.io friends + presence + invites.
   - `orchestrator` service: Docker wake/reap per game.
   - `@mygame/sdk`: framework-agnostic client, runtime config, self-mounting Shadow-DOM overlay,
@@ -105,6 +105,19 @@ For the audited current state, see `docs/STATUS.md`. For how the pieces fit, see
   never populated (flagged in an earlier pass) — replaced outright by the real `avatarIcon`, and
   `HubScreen.tsx`'s topbar (which already had working `<img>` JSX waiting on that exact field) now
   shows a real avatar.
+- **Phase 12 — Admin panel.** `apps/admin`: a real, already-deployed standalone app, path-routed at
+  `mygame-quiz.ru/admin/` (same pattern as `apps/example-game`'s `/example-game/` — see
+  `deploy/gamehub/docker-compose.yml` + `Caddyfile`). Login is the same password register/login flow
+  every player uses; access is gated **server-side** by a plain `is_admin` boolean on the shared
+  `accounts` table (`services/auth`'s `requireAdmin` → 403 if logged in but not an admin), not a
+  client-side check. The first admin(s) are bootstrapped via `AUTH_BOOTSTRAP_ADMIN_IDS`
+  (comma-separated accountIds, checked once at boot, idempotent) — replaces the old single-purpose
+  `COMMUNITY_ADMIN_IDS`, now fully removed; every admin after that is promoted/demoted from inside the
+  app itself (`PUT /auth/admin/accounts/:id/role`, server-guarded against demoting the last remaining
+  admin). Ships: game management (changelog CRUD, discussion moderation, achievement grant/revoke,
+  orchestrator force-stop of a running game — also gated on the same `is_admin` flag), user management
+  (search/list/detail, clear avatar/wallpaper, grant/revoke achievements), and general settings (admin
+  roster promote/demote, a live per-service health dashboard, branding/contact key-value settings).
 
 ## Next (mock → real)
 
@@ -116,8 +129,14 @@ Ordered by leverage. Each item is built in isolation, then integrated. Testing i
    directly), and the actual game (CIVA, outside this repo) to call them from its lobby/room UI.
    **On hold** — out of scope while work stays to hub+SDK only; the game itself is off-limits for now.
 2. **VK account linking.** Mirror the Telegram flow (deferred by request).
-3. **Auth hardening.** Decide passwordless vs. password/OTP; real registration; rate limiting; rotate
-   `JWT_SECRET` handling.
+3. **Auth hardening.** Password-based login and registration are implemented (scrypt-hashed + salted,
+   timing-safe verify — `services/auth/src/app.ts`); still open: OTP / real email verification, rate
+   limiting, and rotating `JWT_SECRET` handling. **Known gap:** `platform-db`'s migration adds
+   `password_hash` to the existing `accounts` table and backfills pre-existing rows to `''` before
+   making the column `NOT NULL` — an empty hash can never verify, so any account that existed before
+   this migration lands is permanently locked out of its old displayName/identity once this deploys,
+   with no recovery path implemented. Needs a decision before this ships to a server with existing
+   accounts.
 4. ✅ **Deploy reconciliation, renamed to GAMEHUB.** `deploy/civa` → `deploy/gamehub`: fixed the
    stale `@civa/*` package filter names, added `social`/`chat`/`community`/Postgres containers, and
    gave `social`/`chat` distinct Socket.io paths (`/social.io/`, `/chat.io/`) so neither collides with

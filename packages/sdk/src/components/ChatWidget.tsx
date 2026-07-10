@@ -5,7 +5,7 @@ import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import type { social } from '@mygame/protocol';
 
-const activityText = (f?: social.Friend): string => {
+const activityText = (f?: Omit<social.Friend, 'status'>): string => {
   if (!f) return 'Неизвестно';
   if (f.presence === 'offline') return 'Не в сети';
   if (f.activity) return `Играет в ${f.activity.gameName}`;
@@ -44,7 +44,9 @@ export const ChatWidget = (): JSX.Element => {
   const acceptedFriends = friends.filter((f) => f.status === 'accepted');
   const openChatWithUser = useChatStore((s) => s.openChatWithUser);
   const { addByCode } = useSocialStore.getState();
-  const [viewingProfile, setViewingProfile] = useState<social.Friend | null>(null);
+  // Omits `status` — a participant being viewed here may not be a friend at all (no accepted/
+  // incoming/outgoing relationship to reflect), everything else `activityText`/the popover reads is required.
+  const [viewingProfile, setViewingProfile] = useState<Omit<social.Friend, 'status'> | null>(null);
 
   const [inputText, setInputText] = useState('');
 
@@ -434,7 +436,7 @@ export const ChatWidget = (): JSX.Element => {
                         { label: '💬 Написать сообщение', action: () => openChatWithUser(p.accountId, p.displayName) },
                         { label: '👤 Посмотреть профиль', action: () => {
                            if (f) setViewingProfile(f);
-                           else setViewingProfile({ accountId: p.accountId, displayName: p.displayName, status: 'none', presence: 'offline' });
+                           else setViewingProfile({ accountId: p.accountId, displayName: p.displayName, avatarIcon: null, titleAchievement: null, presence: 'offline', activity: null });
                         } },
                         { separator: true, action: () => {} },
                         ...(f ? [] : [{ label: '➕ Добавить в друзья', action: () => addByCode(p.accountId) }]),

@@ -9,6 +9,7 @@ import {
   clearSession,
   loadSession,
   login as apiLogin,
+  register as apiRegister,
   loginWithTelegram,
   getProfile,
   setFavorites as apiSetFavorites,
@@ -33,7 +34,8 @@ interface PlatformState {
   /** Favorited game ids, persisted server-side (`auth`'s account row) — hydrated on login/restore. */
   favoriteGameIds: string[];
 
-  login: (displayName: string) => Promise<void>;
+  login: (displayName: string, password?: string) => Promise<void>;
+  register: (displayName: string, password?: string) => Promise<void>;
   /** Log in by redeeming a one-time code sent by the Telegram bot (/login). */
   loginWithTelegramCode: (code: string) => Promise<void>;
   logout: () => void;
@@ -58,15 +60,25 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
   error: null,
   favoriteGameIds: [],
 
-  login: async (displayName) => {
+  login: async (displayName, password) => {
     set({ status: 'logging-in', error: null });
     try {
-      const prev = loadSession();
-      const s = await apiLogin(displayName, prev?.accountId);
+      const s = await apiLogin(displayName, password);
       set({ account: { accountId: s.accountId, displayName: s.displayName }, status: 'ready' });
       hydrateFavorites(set);
     } catch (e) {
-      set({ status: 'error', error: String(e) });
+      set({ status: 'error', error: 'Неверный логин или пароль' });
+    }
+  },
+
+  register: async (displayName, password) => {
+    set({ status: 'logging-in', error: null });
+    try {
+      const s = await apiRegister(displayName, password);
+      set({ account: { accountId: s.accountId, displayName: s.displayName }, status: 'ready' });
+      hydrateFavorites(set);
+    } catch (e) {
+      set({ status: 'error', error: 'Имя уже занято или ошибка регистрации' });
     }
   },
 

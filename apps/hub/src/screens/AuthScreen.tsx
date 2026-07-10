@@ -51,6 +51,7 @@ const secondaryBtn: CSSProperties = {
 
 export const AuthScreen = (): JSX.Element => {
   const login = usePlatformStore((s) => s.login);
+  const register = usePlatformStore((s) => s.register);
   const loginWithTelegramCode = usePlatformStore((s) => s.loginWithTelegramCode);
   const status = usePlatformStore((s) => s.status);
   const error = usePlatformStore((s) => s.error);
@@ -60,7 +61,8 @@ export const AuthScreen = (): JSX.Element => {
   const [showTg, setShowTg] = useState(false);
   const [tgCode, setTgCode] = useState('');
 
-  const goLogin = () => name.trim() && password && void login(name.trim());
+  const goLogin = () => name.trim() && password && void login(name.trim(), password);
+  const goRegister = () => name.trim() && password && void register(name.trim(), password);
   const goTgLogin = () => tgCode.trim() && void loginWithTelegramCode(tgCode.trim());
 
   return (
@@ -120,7 +122,7 @@ export const AuthScreen = (): JSX.Element => {
 
             <button
               disabled={!name.trim() || !password || status === 'logging-in'}
-              onClick={goLogin} // Mock same behavior for registration
+              onClick={goRegister}
               style={{ ...secondaryBtn, opacity: (!name.trim() || !password) ? 0.5 : 1 }}
               onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
               onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}

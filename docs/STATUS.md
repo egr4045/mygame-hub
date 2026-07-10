@@ -1,6 +1,6 @@
 # Platform status — what actually works
 
-> Audited 2026-07-06 against the code on branch `refactor/hub-split`. This is the source of truth for
+> Audited 2026-07-11 against the code on branch `refactor/hub-split`. This is the source of truth for
 > "is this real or a mock". Update it whenever a mock becomes real.
 
 ## Legend
@@ -17,7 +17,9 @@ profile) is real, working, and Postgres-persisted. The Steam-style *store conten
 (changelog, forum, lobby browser, playtime stats) is now real too — the hub's frontend mocks were
 replaced with a new `services/community` (changelog + discussions), a `game_stats` slice on `auth`
 (playtime, driven by an in-game SDK heartbeat), and a presence-derived lobby query on `social`. A
-runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. Voice/video calls
+runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. A standalone
+`apps/admin` panel (path-routed at `/admin/`, gated server-side by an `is_admin` account flag) now
+covers game/user/settings management. Voice/video calls
 now run on GAMEHUB's own self-hosted LiveKit. What's left is a couple of genuinely unimplemented
 pieces (VK linking, chat reactions) and lower-priority UI polish (profile status, "Связь с автором"
 idea box).
@@ -26,9 +28,10 @@ idea box).
 
 | Feature | Status | Reality |
 |---|---|---|
-| Account login | 🟡 | Real backend (`services/auth`, real HS256 JWT access/refresh). But login is **passwordless**: the password field on the auth screen is **ignored** (`AuthScreen.tsx` passes only the name). "Регистрация" is the same call as login. |
+| Account login | 🟢 | Real backend (`services/auth`, real HS256 JWT access/refresh). Login requires a password. "Регистрация" and "Авторизация" are fully implemented. |
 | Account persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/auth/src/pgStore.ts`): accounts survive restart, ids stay stable (durable SSO identity). Falls back to in-memory with a loud warning when unset (and in `standalone`). |
-| SSO handoff into a game | ✅ | `POST /auth/handoff` mints a short-lived (120s) token; the hub passes it via `?pt=` (`HubScreen.tsx`). Games exchange it at their own `POST /auth/platform`. See `SSO-FEDERATION.md`. |
+| Admin panel (`apps/admin`) | ✅ | Real, already-deployed standalone app, path-routed at `/admin/` on the same origin (same pattern as `example-game`'s `/example-game/` — see `deploy/gamehub/docker-compose.yml` + `Caddyfile`). Login is the same password register/login flow every player uses; access is gated **server-side** by the account's `is_admin` boolean (`services/auth`'s `requireAdmin` → 403 if logged in but not an admin), not a client-side check. The first admin(s) are bootstrapped via `AUTH_BOOTSTRAP_ADMIN_IDS` (comma-separated accountIds, checked once at boot, idempotent — replaces the old single-purpose `COMMUNITY_ADMIN_IDS`, fully removed); every admin after that is promoted/demoted from inside the app itself (`PUT /auth/admin/accounts/:id/role`, with a server-side guard against demoting the last remaining admin). Ships: game management (changelog CRUD, discussion moderation, achievement grant/revoke, orchestrator force-stop of a running game), user management (search/list/detail, clear avatar/wallpaper, grant/revoke achievements), and general settings (admin roster promote/demote, a live per-service health dashboard, branding/contact key-value settings). |
+| SSO handoff into a game | ✅ | `POST /auth/handoff` mints a short-lived (120s) token; the hub passes it via `?pt=` (`HubScreen.tsx`). The game's own origin redeems it via auth's own `POST /auth/exchange` (there is no separate `/auth/platform` route — every game exchanges against the same auth service) for a full session; the server verifies the token signature, `typ === "handoff"`, and that the account still exists (404 if not) — the client never decodes/trusts the JWT itself. SDK surface: `authClient.exchangeHandoff` / `mygame.auth.loginWithToken` (see `apps/example-game/src/App.tsx`'s `pt=` handling for the reference implementation). See `SSO-FEDERATION.md`. |
 | Telegram account linking | ✅ | Real bot (`services/auth/src/telegram.ts` long-poll + `telegramLinking.ts`), gated on `TELEGRAM_BOT_TOKEN`. Hub profile → `POST /auth/telegram/link-code` → open bot `/start <code>` → binds `accounts.telegram_id` (persisted). Status via `GET /auth/telegram/status`. |
 | Login from another device (Telegram) | ✅ | Send `/login` to the bot → one-time code → enter it on the auth screen (`POST /auth/social/login`) → full session for the linked account. |
 | VK account linking | ❌ | Deferred by request. Button shows "(скоро)". |
@@ -70,6 +73,14 @@ idea box).
   to turn it on. Redis is still unused. Note: write-behind logs (not throws) on a failed DB write.
 - **Branding is inconsistent.** The UI says **CIVA** (nav bar) and **NEXUS** (login screen, bot
   copy). Pick one platform name.
+- **Password migration for pre-existing accounts is an open gap, not solved.** `packages/platform-db`'s
+  migration adds `password_hash TEXT`, backfills existing rows to an empty string, then sets it
+  `NOT NULL`. An account with an empty hash can never pass `verifyPassword` again (it always fails
+  against an empty hash) — so any account that existed before this migration lands is permanently
+  locked out of its old displayName/identity the moment this deploys, with no recovery path
+  implemented. This needs an explicit decision (e.g. a one-time forced password reset, or a
+  Telegram-linked-account bypass) before shipping to a server that already has real accounts on it
+  — GAMEHUB is already live on `mygame-quiz.ru` (see `docs/SERVER.md`), so this is not hypothetical.
 - **`@mygame/shared-types` carries CIVA game-domain types** (resources, biomes, buildings, units,
   tech, diplomacy) the platform doesn't use. They're forward-looking/leftover from the game design.
 - **Chat and friends now ship as SDK widgets; achievements/profile don't have one yet** (achievements

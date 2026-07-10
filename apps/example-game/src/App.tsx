@@ -17,30 +17,6 @@ const HUB_ORIGIN =
       ? window.location.origin
       : '');
 
-/**
- * Reads the `sub`/`name` claims out of a handoff JWT without verifying its signature. That's fine
- * here only because the very next step re-verifies identity the same way `mygame.auth.login` always
- * does on this platform: passwordless re-claim by account id (see docs/STATUS.md — a deliberate
- * simplification, not something this example invented). A real game with its own backend should
- * instead verify the token server-side and mint its own session — see docs/SSO-FEDERATION.md.
- */
-const decodeHandoffClaims = (token: string): { sub: string; name: string } | null => {
-  try {
-    const payload = token.split('.')[1];
-    if (!payload) return null;
-    // atob() yields a binary string (one UTF-8 byte per char) — re-encode each byte as %XX and run
-    // decodeURIComponent to correctly reassemble multi-byte UTF-8 (e.g. Cyrillic display names).
-    const binary = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    const json = decodeURIComponent(
-      [...binary].map((c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join(''),
-    );
-    const claims = JSON.parse(json) as { sub?: string; name?: string };
-    return claims.sub && claims.name ? { sub: claims.sub, name: claims.name } : null;
-  } catch {
-    return null;
-  }
-};
-
 const card: React.CSSProperties = {
   background: 'rgba(255,255,255,0.03)',
   border: '1px solid #2a3f5a',
@@ -68,6 +44,8 @@ export const App = (): JSX.Element => {
   // below fire on that stale session before the handoff below has a chance to correct it.
   const [account, setAccount] = useState<MygameAccount | null>(() => (hasPendingHandoff() ? null : mygame.auth.getAccount()));
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [joinable, setJoinable] = useState(false);
   const [stats, setStats] = useState<GameStat[]>([]);
@@ -75,17 +53,18 @@ export const App = (): JSX.Element => {
   const [threads, setThreads] = useState<DiscussionThread[]>([]);
   const [wonMessage, setWonMessage] = useState<string | null>(null);
 
-  // Handoff from the hub (`?pt=<token>`): log into this origin as the same platform account, then
-  // strip the token from the URL so it never lingers in history.
+  // Handoff from the hub (`?pt=<token>`): redeem it for a session on this origin as the same
+  // platform account (the auth service verifies the token itself — see `mygame.auth.loginWithToken`),
+  // then strip the token from the URL so it never lingers in history.
   useEffect(() => {
     const url = new URL(window.location.href);
     const pt = url.searchParams.get('pt');
     if (!pt) return;
     url.searchParams.delete('pt');
     window.history.replaceState({}, '', url.toString());
-    const claims = decodeHandoffClaims(pt);
-    if (!claims) return;
-    void mygame.auth.login(claims.name, claims.sub).then(() => setAccount(mygame.auth.getAccount()));
+    void mygame.auth.loginWithToken(pt).then((session) => {
+      if (session) setAccount(mygame.auth.getAccount());
+    });
   }, []);
 
   // Bootstrap the SDK once we have an account. In dev this needs no options — the SDK's own
@@ -113,9 +92,25 @@ export const App = (): JSX.Element => {
   }, [initialized]);
 
   const handleLogin = async (): Promise<void> => {
-    if (!displayNameInput.trim()) return;
-    await mygame.auth.login(displayNameInput.trim());
-    setAccount(mygame.auth.getAccount());
+    if (!displayNameInput.trim() || !passwordInput) return;
+    setAuthError(null);
+    try {
+      await mygame.auth.login(displayNameInput.trim(), passwordInput);
+      setAccount(mygame.auth.getAccount());
+    } catch {
+      setAuthError('Неверный логин или пароль');
+    }
+  };
+
+  const handleRegister = async (): Promise<void> => {
+    if (!displayNameInput.trim() || !passwordInput) return;
+    setAuthError(null);
+    try {
+      await mygame.auth.register(displayNameInput.trim(), passwordInput);
+      setAccount(mygame.auth.getAccount());
+    } catch {
+      setAuthError('Имя уже занято или ошибка регистрации');
+    }
   };
 
   const handleWin = async (): Promise<void> => {
@@ -149,7 +144,19 @@ export const App = (): JSX.Element => {
             onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
             style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
           />
-          <button onClick={() => void handleLogin()} style={{ ...button, width: '100%' }}>Войти</button>
+          <input
+            type="password"
+            placeholder="Пароль"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
+            style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
+          />
+          {authError && <p style={{ color: '#e07070', fontSize: 12, marginBottom: 12 }}>{authError}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => void handleLogin()} style={{ ...button, flex: 1 }}>Войти</button>
+            <button onClick={() => void handleRegister()} style={{ ...button, flex: 1, background: '#3d4450' }}>Регистрация</button>
+          </div>
         </div>
       </div>
     );

@@ -22,6 +22,7 @@ export interface Account {
   avatarIcon?: string;
   /** Profile wallpaper image, as a data URL. */
   wallpaper?: string;
+  passwordHash: string;
   titleAchievement: TitleAchievementRef;
   achievements: AccountAchievement[];
   favoriteGameIds: string[];
@@ -30,8 +31,8 @@ export interface Account {
 }
 
 export interface AccountStore {
-  /** Re-claim an existing account (updating its name) or create a new one. */
-  upsert(displayName: string, id?: string): Account;
+  createAccount(displayName: string, passwordHash: string, id?: string): Account;
+  findByDisplayName(name: string): Account | undefined;
   get(id: string): Account | undefined;
   findBySocial(network: 'telegram' | 'vk', socialId: string): Account | undefined;
   linkSocial(id: string, network: 'telegram' | 'vk', socialId: string): Account | undefined;
@@ -71,17 +72,11 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
   const now = opts.now ?? (() => Date.now());
   const accounts = new Map<string, Account>();
   return {
-    upsert(displayName, id) {
-      if (id) {
-        const existing = accounts.get(id);
-        if (existing) {
-          existing.displayName = displayName;
-          return existing;
-        }
-      }
+    createAccount(displayName, passwordHash, id) {
       const account: Account = {
         id: id ?? randomUUID(),
         displayName,
+        passwordHash,
         titleAchievement: null,
         achievements: [],
         favoriteGameIds: [],
@@ -89,6 +84,13 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       };
       accounts.set(account.id, account);
       return account;
+    },
+    findByDisplayName(name) {
+      const needle = name.toLowerCase();
+      for (const a of accounts.values()) {
+        if (a.displayName.toLowerCase() === needle) return a;
+      }
+      return undefined;
     },
     get: (id) => accounts.get(id),
     findBySocial: (network, socialId) => {

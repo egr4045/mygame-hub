@@ -71,9 +71,9 @@ const del = (base: string, path: string, body?: unknown, token?: string) =>
   });
 
 describe('auth service', () => {
-  it('issues an account + tokens on login', async () => {
+  it('registers a new account and returns tokens', async () => {
     const { base, auth } = await start();
-    const res = await post(base, '/auth/login', { displayName: 'Mara' });
+    const res = await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' });
     expect(res.status).toBe(200);
     const body = await json<LoginResponse>(res);
     expect(body).toMatchObject({ displayName: 'Mara' });
@@ -82,19 +82,52 @@ describe('auth service', () => {
     expect(claims).toMatchObject({ sub: body.accountId, name: 'Mara', typ: 'access' });
   });
 
-  it('re-claims the same account id (durable identity for reconnect)', async () => {
+  it('409s registering a display name that is already taken', async () => {
     const { base } = await start();
-    const first = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Wei' }));
-    const again = await json<LoginResponse>(
-      await post(base, '/auth/login', { displayName: 'Wei Updated', accountId: first.accountId }),
+    await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' });
+    const res = await post(base, '/auth/register', { displayName: 'Mara', password: 'other' });
+    expect(res.status).toBe(409);
+  });
+
+  it('400s an invalid register body (empty name / missing password)', async () => {
+    const { base } = await start();
+    expect((await post(base, '/auth/register', { displayName: '', password: 'pw' })).status).toBe(400);
+    expect((await post(base, '/auth/register', { displayName: 'Nia' })).status).toBe(400);
+  });
+
+  it('logs in with the correct password, returning the same durable account id', async () => {
+    const { base } = await start();
+    const registered = await json<LoginResponse>(
+      await post(base, '/auth/register', { displayName: 'Wei', password: 'secret' }),
     );
-    expect(again.accountId).toBe(first.accountId);
-    expect(again.displayName).toBe('Wei Updated');
+    const loggedIn = await json<LoginResponse>(
+      await post(base, '/auth/login', { displayName: 'Wei', password: 'secret' }),
+    );
+    expect(loggedIn.accountId).toBe(registered.accountId);
+    expect(loggedIn.displayName).toBe('Wei');
+  });
+
+  it('401s a login with the wrong password', async () => {
+    const { base } = await start();
+    await post(base, '/auth/register', { displayName: 'Zed', password: 'right' });
+    const res = await post(base, '/auth/login', { displayName: 'Zed', password: 'wrong' });
+    expect(res.status).toBe(401);
+  });
+
+  it('401s a login for a display name that was never registered', async () => {
+    const { base } = await start();
+    const res = await post(base, '/auth/login', { displayName: 'Ghost', password: 'pw' });
+    expect(res.status).toBe(401);
+  });
+
+  it('400s an invalid login body', async () => {
+    const { base } = await start();
+    expect((await post(base, '/auth/login', { displayName: '', password: 'pw' })).status).toBe(400);
   });
 
   it('refreshes an access token from a refresh token', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'X' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'X', password: 'pw' }));
     const res = await post(base, '/auth/refresh', { refreshToken: login.refreshToken });
     expect(res.status).toBe(200);
     expect((await json<RefreshResponse>(res)).accessToken).toBeTruthy();
@@ -102,14 +135,14 @@ describe('auth service', () => {
 
   it('rejects refresh when given an access token', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'X' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'X', password: 'pw' }));
     const res = await post(base, '/auth/refresh', { refreshToken: login.accessToken });
     expect(res.status).toBe(401);
   });
 
   it('mints a handoff token (typ=handoff) from a refresh token', async () => {
     const { base, auth } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Lia' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Lia', password: 'pw' }));
     const res = await post(base, '/auth/handoff', { refreshToken: login.refreshToken });
     expect(res.status).toBe(200);
     const body = await json<HandoffResponse>(res);
@@ -120,21 +153,50 @@ describe('auth service', () => {
 
   it('rejects handoff when given an access token', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'X' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'X', password: 'pw' }));
     const res = await post(base, '/auth/handoff', { refreshToken: login.accessToken });
     expect(res.status).toBe(401);
   });
+});
 
-  it('400s an invalid login body', async () => {
+describe('auth service — SSO exchange (a game redeeming a hub ?pt= handoff token)', () => {
+  it('exchanges a valid handoff token for a full session', async () => {
+    const { base, auth } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Lia', password: 'pw' }));
+    const handoff = await json<HandoffResponse>(await post(base, '/auth/handoff', { refreshToken: login.refreshToken }));
+
+    const res = await post(base, '/auth/exchange', { handoffToken: handoff.handoffToken });
+    expect(res.status).toBe(200);
+    const session = await json<LoginResponse>(res);
+    expect(session).toMatchObject({ accountId: login.accountId, displayName: 'Lia' });
+    const claims = await auth.verify(session.accessToken);
+    expect(claims).toMatchObject({ sub: login.accountId, typ: 'access' });
+  });
+
+  it('401s exchanging an access token (not a handoff token)', async () => {
     const { base } = await start();
-    expect((await post(base, '/auth/login', { displayName: '' })).status).toBe(400);
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'X', password: 'pw' }));
+    const res = await post(base, '/auth/exchange', { handoffToken: login.accessToken });
+    expect(res.status).toBe(401);
+  });
+
+  it("404s exchanging a handoff token for an account that no longer exists", async () => {
+    const { base, auth } = await start();
+    const ghostToken = await auth.signHandoff('no-such-id', 'Ghost');
+    const res = await post(base, '/auth/exchange', { handoffToken: ghostToken });
+    expect(res.status).toBe(404);
+  });
+
+  it('400s an invalid exchange body', async () => {
+    const { base } = await start();
+    expect((await post(base, '/auth/exchange', {})).status).toBe(400);
   });
 });
 
 describe('auth service — achievements', () => {
   it('grants an achievement and lists it back', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
 
     const grantRes = await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
     expect(grantRes.status).toBe(200);
@@ -148,7 +210,7 @@ describe('auth service — achievements', () => {
 
   it('re-granting the same achievement is idempotent', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
 
     const again = await json<GrantAchievementResponse>(
@@ -162,7 +224,7 @@ describe('auth service — achievements', () => {
 
   it('scopes achievements per game — the same id in two games is two achievements', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
     await post(base, '/auth/achievements', { gameId: 'svoyak', achievementId: 'first_blood' }, login.accessToken);
 
@@ -180,14 +242,14 @@ describe('auth service — achievements', () => {
 describe('auth service — profile', () => {
   it('defaults to an empty profile', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     const profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
     expect(profile).toEqual({ avatarIcon: null, wallpaper: null, titleAchievement: null, favoriteGameIds: [] });
   });
 
   it('sets and persists an avatar and a wallpaper', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
 
     const avatarRes = await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' }, login.accessToken);
     expect(avatarRes.status).toBe(200);
@@ -203,7 +265,7 @@ describe('auth service — profile', () => {
 
   it('rejects an oversized avatar payload', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     const huge = 'A'.repeat(5_000_000); // over the 4MB raw-body cap for this route
     const res = await put(base, '/auth/profile/avatar', { dataUrl: huge }, login.accessToken);
     expect(res.status).toBe(413);
@@ -211,7 +273,7 @@ describe('auth service — profile', () => {
 
   it('rejects a title referencing an achievement the account has not unlocked', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     const res = await put(
       base,
       '/auth/profile/title',
@@ -223,7 +285,7 @@ describe('auth service — profile', () => {
 
   it('accepts a title once the achievement is unlocked, and clears it with null', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, login.accessToken);
 
     const setRes = await put(
@@ -250,7 +312,7 @@ describe('auth service — profile', () => {
 
   it('sets and persists the favorite games list (full replace)', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
 
     const res = await put(base, '/auth/profile/favorites', { gameIds: ['civa', 'svoyak'] }, login.accessToken);
     expect(res.status).toBe(200);
@@ -272,7 +334,7 @@ describe('auth service — profile', () => {
 describe('auth service — playtime stats', () => {
   it('records a launch (last_played) and lists per-game stats', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
 
     const enterRes = await post(base, '/auth/stats/enter', { gameId: 'civa' }, login.accessToken);
     expect(enterRes.status).toBe(200);
@@ -285,7 +347,7 @@ describe('auth service — playtime stats', () => {
 
   it('credits ~0 seconds for a heartbeat right after enter (no elapsed time)', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     await post(base, '/auth/stats/enter', { gameId: 'civa' }, login.accessToken);
 
     const beat = await json<HeartbeatResponse>(
@@ -303,7 +365,7 @@ describe('auth service — playtime stats', () => {
 
   it('400s an invalid stats body', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     expect((await post(base, '/auth/stats/enter', { gameId: '' }, login.accessToken)).status).toBe(400);
   });
 });
@@ -311,7 +373,7 @@ describe('auth service — playtime stats', () => {
 describe('auth service — admin', () => {
   it('rejects every admin route for a non-admin account', async () => {
     const { base } = await start();
-    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     expect((await get(base, '/auth/admin/admins', login.accessToken)).status).toBe(403);
     expect((await get(base, '/auth/admin/accounts', login.accessToken)).status).toBe(403);
     expect((await get(base, `/auth/admin/accounts/${login.accountId}`, login.accessToken)).status).toBe(403);
@@ -327,9 +389,9 @@ describe('auth service — admin', () => {
 
   it('an admin can list accounts, search, and paginate', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    await post(base, '/auth/login', { displayName: 'Zed' });
-    await post(base, '/auth/login', { displayName: 'Wei' });
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' });
+    await post(base, '/auth/register', { displayName: 'Wei', password: 'pw' });
     accounts.setAdmin(mara.accountId, true);
 
     const all = await json<{ accounts: unknown[]; total: number }>(
@@ -352,8 +414,8 @@ describe('auth service — admin', () => {
 
   it("an admin can view another account's detail", async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
     await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, zed.accessToken);
 
@@ -366,15 +428,15 @@ describe('auth service — admin', () => {
 
   it('404s a detail lookup for an unknown account', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
     expect((await get(base, '/auth/admin/accounts/no-such-id', mara.accessToken)).status).toBe(404);
   });
 
   it('an admin can promote another account, which then passes requireAdmin itself', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     const promoteRes = await put(base, `/auth/admin/accounts/${zed.accountId}/role`, { isAdmin: true }, mara.accessToken);
@@ -386,7 +448,7 @@ describe('auth service — admin', () => {
 
   it('refuses to demote the last remaining admin', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     const res = await put(base, `/auth/admin/accounts/${mara.accountId}/role`, { isAdmin: false }, mara.accessToken);
@@ -396,8 +458,8 @@ describe('auth service — admin', () => {
 
   it('allows demoting one of several admins', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
     accounts.setAdmin(zed.accountId, true);
 
@@ -408,8 +470,8 @@ describe('auth service — admin', () => {
 
   it('an admin can grant an achievement to another account (support-ticket case)', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     const res = await post(
@@ -429,8 +491,8 @@ describe('auth service — admin', () => {
 
   it('403s a non-admin granting an achievement, 404s an unknown target account', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     expect(
@@ -447,8 +509,8 @@ describe('auth service — admin', () => {
 
   it('an admin can revoke a previously granted achievement', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
     await post(base, `/auth/admin/accounts/${zed.accountId}/achievements`, { gameId: 'civa', achievementId: 'first_blood' }, mara.accessToken);
 
@@ -461,8 +523,8 @@ describe('auth service — admin', () => {
 
   it('404s revoking an achievement the account never had, 403s a non-admin revoke', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     expect(
@@ -475,8 +537,8 @@ describe('auth service — admin', () => {
 
   it('an admin can clear another account\'s avatar and wallpaper', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
     await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' }, zed.accessToken);
     await put(base, '/auth/profile/wallpaper', { dataUrl: 'data:image/png;base64,BBB' }, zed.accessToken);
@@ -493,8 +555,8 @@ describe('auth service — admin', () => {
 
   it('404s clearing avatar/wallpaper for an unknown account, 403s a non-admin clear', async () => {
     const { base, accounts } = await start();
-    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
-    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    const mara = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Zed', password: 'pw' }));
     accounts.setAdmin(mara.accountId, true);
 
     expect((await del(base, `/auth/admin/accounts/no-such-id/avatar`, undefined, mara.accessToken)).status).toBe(404);
