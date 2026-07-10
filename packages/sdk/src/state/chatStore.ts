@@ -11,6 +11,7 @@ import { Room } from 'livekit-client';
 import { chat, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
 import { loadSession, login, freshAccessToken } from '../authClient.js';
+import { useToastStore } from './toastStore.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -262,13 +263,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // incoming-call view (rendered inline per-conversation, not a separate global banner) is
     // immediately visible. If I'm already in/ringing a call, this simply overwrites it (juggling
     // concurrent calls is out of scope for v1).
-    socket.on(chat.S2C.callRing, (p: chat.CallRingEvent) =>
+    socket.on(chat.S2C.callRing, (p: chat.CallRingEvent) => {
       set({
         activeCall: { conversationId: p.conversationId, type: p.callType, status: 'ringing-in', fromName: p.fromName },
         isOpen: true,
         activeChatId: p.conversationId,
-      }),
-    );
+      });
+      useToastStore.getState().addToast({
+        type: 'system',
+        title: 'Входящий звонок',
+        content: `Звонит ${p.fromName ?? 'пользователь'}...`,
+        icon: '📞',
+      });
+    });
 
     // Someone joined the call. If that's *me* (the callee's own acceptCall already handles its own
     // transition), ignore; if it's someone else and I'm still just ringing-out, they've picked up —

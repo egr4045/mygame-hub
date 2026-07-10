@@ -31,6 +31,7 @@ export interface ChatDeps {
 interface ActiveCall {
   type: chat.CallType;
   participantIds: Set<string>;
+  ringingIds: Set<string>;
 }
 
 const CORS_HEADERS = {
@@ -186,6 +187,23 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     emitThreads(accountId);
 
+    // Resend active call rings if this user was ringing
+    for (const [conversationId, call] of activeCalls.entries()) {
+      if (call.ringingIds.has(accountId)) {
+        // Find the caller (first participant) to show who is calling
+        const fromAccountId = [...call.participantIds][0];
+        if (fromAccountId) {
+          const fromName = deps.store.getAccount(fromAccountId)?.displayName;
+          socket.emit(chat.S2C.callRing, {
+            conversationId,
+            fromAccountId,
+            fromName,
+            callType: call.type,
+          });
+        }
+      }
+    }
+
     const guard = (fn: () => void): void => {
       try {
         fn();
@@ -300,6 +318,8 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       const isDm = deps.store.typeOf(conversationId) === 'dm';
       const threshold = isDm ? 1 : 0;
       
+      call.ringingIds.delete(accountId);
+
       if (call.participantIds.size <= threshold) {
         activeCalls.delete(conversationId);
         const payload: chat.CallEndedEvent = { conversationId };
@@ -316,10 +336,14 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
           throw new ContractError('forbidden', 'not a participant of this conversation');
         }
         const call = activeCalls.get(conversationId);
-        if (call) call.participantIds.add(accountId);
-        else activeCalls.set(conversationId, { type: callType, participantIds: new Set([accountId]) });
-        const payload: chat.CallRingEvent = { conversationId, fromAccountId: accountId, fromName: displayName, callType };
         const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+        if (call) {
+          call.participantIds.add(accountId);
+          for (const p of others) call.ringingIds.add(p);
+        } else {
+          activeCalls.set(conversationId, { type: callType, participantIds: new Set([accountId]), ringingIds: new Set(others) });
+        }
+        const payload: chat.CallRingEvent = { conversationId, fromAccountId: accountId, fromName: displayName, callType };
         emitToEveryone(others, chat.S2C.callRing, payload);
         if (typeof ack === 'function') ack({ ok: true });
       }),
@@ -334,6 +358,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
           throw new ContractError('forbidden', 'not a participant of this conversation');
         }
         call.participantIds.add(accountId);
+        call.ringingIds.delete(accountId);
         const payload: chat.CallParticipantEvent = { conversationId, accountId };
         emitToEveryone([...call.participantIds], chat.S2C.callAccepted, payload);
         if (typeof ack === 'function') ack({ ok: true });
@@ -346,6 +371,9 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     socket.on(chat.C2S.callDecline, (raw) =>
       guard(() => {
         const { conversationId } = parse(chat.callActionPayload, raw);
+        const call = activeCalls.get(conversationId);
+        if (call) call.ringingIds.delete(accountId);
+        
         const payload: chat.CallParticipantEvent = { conversationId, accountId };
         const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
         emitToEveryone(others, chat.S2C.callDeclined, payload);

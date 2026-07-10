@@ -3,6 +3,14 @@ import { RoomEvent, type RemoteTrack, type RemoteParticipant } from 'livekit-cli
 import { useChatStore, getCallRoom } from '../state/chatStore.js';
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
+import type { social } from '@mygame/protocol';
+
+const activityText = (f?: social.Friend): string => {
+  if (!f) return 'Неизвестно';
+  if (f.presence === 'offline') return 'Не в сети';
+  if (f.activity) return `Играет в ${f.activity.gameName}`;
+  return 'В сети';
+};
 
 /**
  * The platform chat widget: DMs and groups, shipped as part of `@mygame/sdk` so any game embedding
@@ -34,6 +42,9 @@ export const ChatWidget = (): JSX.Element => {
   const me = useSocialStore((s) => s.me);
   const friends = useSocialStore((s) => s.friends);
   const acceptedFriends = friends.filter((f) => f.status === 'accepted');
+  const openChatWithUser = useChatStore((s) => s.openChatWithUser);
+  const { addByCode } = useSocialStore.getState();
+  const [viewingProfile, setViewingProfile] = useState<social.Friend | null>(null);
 
   const [inputText, setInputText] = useState('');
 
@@ -309,12 +320,29 @@ export const ChatWidget = (): JSX.Element => {
               {acceptedFriends.length === 0 && (
                 <div style={{ color: '#6c7784', fontSize: 12 }}>Нет друзей, кого можно добавить.</div>
               )}
-              {acceptedFriends.map((f) => (
-                <label key={f.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13 }}>
-                  <input type="checkbox" checked={selectedMemberIds.includes(f.accountId)} onChange={() => toggleMember(f.accountId)} />
-                  {f.displayName}
-                </label>
-              ))}
+              {acceptedFriends.map((f) => {
+                const isOnline = f.presence === 'online';
+                const isInGame = isOnline && !!f.activity;
+                return (
+                  <label key={f.accountId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13, borderRadius: 4 }}
+                    onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <input type="checkbox" checked={selectedMemberIds.includes(f.accountId)} onChange={() => toggleMember(f.accountId)} />
+                    <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
+                      {f.avatarIcon ? (
+                        <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>{f.displayName}</span>
+                      <span style={{ fontSize: 11, color: isInGame ? '#a3d928' : '#8f98a0' }}>{activityText(f)}</span>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => setIsCreatingGroup(false)} style={{ flex: 1, background: '#3d4450', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>
@@ -342,12 +370,29 @@ export const ChatWidget = (): JSX.Element => {
                   {addable.length === 0 && (
                     <div style={{ color: '#6c7784', fontSize: 12 }}>Все друзья уже в группе.</div>
                   )}
-                  {addable.map((f) => (
-                    <label key={f.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13 }}>
-                      <input type="checkbox" checked={addMemberIds.includes(f.accountId)} onChange={() => toggleAddMember(f.accountId)} />
-                      {f.displayName}
-                    </label>
-                  ))}
+                  {addable.map((f) => {
+                    const isOnline = f.presence === 'online';
+                    const isInGame = isOnline && !!f.activity;
+                    return (
+                      <label key={f.accountId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13, borderRadius: 4 }}
+                        onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <input type="checkbox" checked={addMemberIds.includes(f.accountId)} onChange={() => toggleAddMember(f.accountId)} />
+                        <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
+                          {f.avatarIcon ? (
+                            <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>{f.displayName}</span>
+                          <span style={{ fontSize: 11, color: isInGame ? '#a3d928' : '#8f98a0' }}>{activityText(f)}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
               );
             })()}
@@ -375,15 +420,38 @@ export const ChatWidget = (): JSX.Element => {
               {activeSession.participants.map((p) => {
                 const isOwner = p.accountId === activeSession.ownerId;
                 const canKick = me?.accountId === activeSession.ownerId && !isOwner && p.accountId !== me?.accountId;
+                const f = friends.find(fr => fr.accountId === p.accountId);
+                
                 return (
-                  <div key={p.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', color: '#dcdedf', fontSize: 13 }}>
+                  <div 
+                    key={p.accountId} 
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', color: '#dcdedf', fontSize: 13, borderRadius: 4, cursor: 'pointer' }}
+                    onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      openMenu(e.clientX, e.clientY, [
+                        { label: '💬 Написать сообщение', action: () => openChatWithUser(p.accountId, p.displayName) },
+                        { label: '👤 Посмотреть профиль', action: () => {
+                           if (f) setViewingProfile(f);
+                           else setViewingProfile({ accountId: p.accountId, displayName: p.displayName, status: 'none', presence: 'offline' });
+                        } },
+                        { separator: true, action: () => {} },
+                        ...(f ? [] : [{ label: '➕ Добавить в друзья', action: () => addByCode(p.accountId) }]),
+                        { label: '🔗 Скопировать ID', action: () => navigator.clipboard.writeText(p.accountId) },
+                      ]);
+                    }}
+                  >
+                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {f?.avatarIcon ? <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '👤'}
+                    </div>
                     <span style={{ flex: 1 }}>
                       {p.displayName}
                       {isOwner && <span style={{ color: '#8f98a0', fontSize: 11 }}> (владелец)</span>}
                     </span>
                     {canKick && (
                       <button
-                        onClick={() => removeMember(activeSession.id, p.accountId)}
+                        onClick={(e) => { e.stopPropagation(); removeMember(activeSession.id, p.accountId); }}
                         title="Исключить из группы"
                         style={{ background: '#3d4450', border: 'none', borderRadius: 4, color: '#ff5c5c', cursor: 'pointer', padding: '2px 8px', fontSize: 13 }}
                       >
@@ -496,14 +564,12 @@ export const ChatWidget = (): JSX.Element => {
                         >
                           {micMuted ? '🔇' : '🎤'}
                         </button>
-                        {callForThisChat.type === 'video' && (
-                          <button
-                            onClick={() => { setCamMuted(!camMuted); void toggleCam(); }}
-                            style={{ background: camMuted ? '#ff5c5c' : '#3d4450', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}
-                          >
-                            {camMuted ? '🚫' : '📹'}
-                          </button>
-                        )}
+                        <button
+                          onClick={() => { setCamMuted(!camMuted); void toggleCam(); }}
+                          style={{ background: camMuted ? '#ff5c5c' : '#3d4450', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}
+                        >
+                          {camMuted ? '🚫' : '📹'}
+                        </button>
                         <button onClick={() => hangup()} style={{ background: '#ff5c5c', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}>
                           📞
                         </button>
@@ -592,6 +658,27 @@ export const ChatWidget = (): JSX.Element => {
           </div>
         )}
       </div>
+
+      {viewingProfile && (
+        <div
+          onClick={() => setViewingProfile(null)}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 24, width: 280, textAlign: 'center' }}>
+            <div style={{ width: 80, height: 80, borderRadius: '50%', margin: '0 auto 12px', overflow: 'hidden', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
+              {viewingProfile.avatarIcon ? (
+                <img src={viewingProfile.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : '👤'}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>{viewingProfile.displayName}</div>
+            <div style={{ fontSize: 12, color: '#8f98a0', marginTop: 4 }}>{activityText(viewingProfile)}</div>
+            {viewingProfile.titleAchievement && (
+              <div style={{ fontSize: 12, color: '#dcdedf', marginTop: 8 }}>🏅 Есть титул</div>
+            )}
+            <button onClick={() => setViewingProfile(null)} style={{ padding: '6px 10px', borderRadius: 2, background: '#3d4450', color: '#dcdedf', fontWeight: 600, fontSize: '13px', border: 'none', cursor: 'pointer', marginTop: 16, width: '100%' }}>Закрыть</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
