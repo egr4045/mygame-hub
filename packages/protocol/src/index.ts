@@ -17,6 +17,7 @@ export * from './stats.js';
 export * as social from './social.js';
 export * as chat from './chat.js';
 export * from './community.js';
+export * from './admin.js';
 
 /**
  * A single typed message: a `type` discriminator string plus a zod schema for its payload.

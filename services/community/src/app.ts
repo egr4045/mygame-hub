@@ -1,6 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Clock, Logger } from '@mygame/shared-types';
-import { createChangelogRequest, createPostRequest, createThreadRequest } from '@mygame/protocol';
+import {
+  createChangelogRequest,
+  createPostRequest,
+  createThreadRequest,
+  setPlatformSettingRequest,
+  updateChangelogRequest,
+} from '@mygame/protocol';
 import type { AuthClaims } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import type { CommunityStore } from './store.js';
@@ -14,19 +20,29 @@ export interface AppDeps {
   readonly logger: Logger;
   readonly auth: AuthCore;
   readonly store: CommunityStore;
-  /** Account ids allowed to publish a changelog entry. */
-  readonly adminIds: readonly string[];
+  /** Checks the caller's `is_admin` flag on the shared `accounts` table community doesn't own (see
+   *  `adminCheck.ts`'s `createAdminCheck` for the real Postgres-backed implementation). A plain port,
+   *  same shape as `auth`/`store`, so tests can fake it without a real database. */
+  readonly isAdmin: (accountId: string) => Promise<boolean>;
 }
 
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization',
 };
 
 const send = (res: ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { 'content-type': 'application/json', ...CORS });
   res.end(JSON.stringify(body));
+};
+
+/** Strips the internal `deletedAt` moderation field before a thread/post row goes over the wire —
+ *  it's not part of the public `discussionThread`/`discussionPost` protocol schema (every read path
+ *  already filters soft-deleted rows out, so this is a contract cleanup, not a real data leak). */
+const omitDeletedAt = <T extends { deletedAt: number | null }>(row: T): Omit<T, 'deletedAt'> => {
+  const { deletedAt: _deletedAt, ...rest } = row;
+  return rest;
 };
 
 /** Thrown by `readJson` when the body exceeds `maxBytes` — mapped to 413 by the top-level handler. */
@@ -74,6 +90,21 @@ const requireAccount = async (
   }
 };
 
+/** `requireAccount` plus `deps.isAdmin` — see `AppDeps.isAdmin`'s doc comment. */
+const requireAdmin = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: AppDeps,
+): Promise<AuthClaims | null> => {
+  const claims = await requireAccount(req, res, deps);
+  if (!claims) return null;
+  if (!(await deps.isAdmin(claims.sub))) {
+    send(res, 403, { code: 'forbidden', message: 'admin access required' });
+    return null;
+  }
+  return claims;
+};
+
 export const createApp = (deps: AppDeps): Server =>
   createServer((req, res) => {
     void handle(req, res, deps).catch((err) => {
@@ -110,12 +141,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
   }
 
   if (method === 'POST' && url === '/community/changelog') {
-    const claims = await requireAccount(req, res, deps);
+    const claims = await requireAdmin(req, res, deps);
     if (!claims) return;
-    if (!deps.adminIds.includes(claims.sub)) {
-      send(res, 403, { code: 'forbidden', message: 'not authorized to publish changelog entries' });
-      return;
-    }
     const parsed = createChangelogRequest.safeParse(await readJson(req));
     if (!parsed.success) {
       send(res, 400, { code: 'validation', message: 'invalid changelog entry' });
@@ -124,6 +151,38 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     const entry = deps.store.addChangelog(parsed.data);
     deps.logger.info('changelog published', { gameId: entry.gameId, version: entry.version });
     send(res, 201, entry);
+    return;
+  }
+
+  const changelogIdMatch = url?.match(/^\/community\/changelog\/([^/?]+)$/);
+  if (changelogIdMatch && (method === 'PUT' || method === 'DELETE')) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const id = decodeURIComponent(changelogIdMatch[1]!);
+
+    if (method === 'DELETE') {
+      const deleted = deps.store.deleteChangelog(id);
+      if (!deleted) {
+        send(res, 404, { code: 'not_found', message: 'changelog entry not found' });
+        return;
+      }
+      deps.logger.info('changelog deleted', { id });
+      send(res, 200, { deleted: true });
+      return;
+    }
+
+    const parsed = updateChangelogRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid changelog patch' });
+      return;
+    }
+    const updated = deps.store.updateChangelog(id, parsed.data);
+    if (!updated) {
+      send(res, 404, { code: 'not_found', message: 'changelog entry not found' });
+      return;
+    }
+    deps.logger.info('changelog updated', { id });
+    send(res, 200, updated);
     return;
   }
 
@@ -137,14 +196,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       send(res, 404, { code: 'not_found', message: 'thread not found' });
       return;
     }
-    send(res, 200, { thread, posts: deps.store.postsOf(threadId) });
+    send(res, 200, { thread: omitDeletedAt(thread), posts: deps.store.postsOf(threadId).map(omitDeletedAt) });
     return;
   }
 
   const threadListMatch = method === 'GET' && url?.match(/^\/community\/threads\/([^/?]+)\/?$/);
   if (threadListMatch) {
     const gameId = decodeURIComponent(threadListMatch[1]!);
-    send(res, 200, { threads: deps.store.listThreads(gameId) });
+    send(res, 200, { threads: deps.store.listThreads(gameId).map(omitDeletedAt) });
     return;
   }
 
@@ -159,7 +218,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     const { gameId, title, body } = parsed.data;
     const { thread } = deps.store.createThread(gameId, claims.sub, claims.name, title, body);
     deps.logger.info('thread created', { gameId, threadId: thread.id });
-    send(res, 201, deps.store.getThread(thread.id));
+    send(res, 201, omitDeletedAt(deps.store.getThread(thread.id)!));
     return;
   }
 
@@ -176,7 +235,58 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       send(res, 404, { code: 'not_found', message: 'thread not found' });
       return;
     }
-    send(res, 201, post);
+    send(res, 201, omitDeletedAt(post));
+    return;
+  }
+
+  // --- Discussion moderation: admin-only soft-delete ---------------------------------------------
+  const threadDeleteMatch = method === 'DELETE' && url?.match(/^\/community\/threads\/([^/?]+)$/);
+  if (threadDeleteMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const threadId = decodeURIComponent(threadDeleteMatch[1]!);
+    const deleted = deps.store.deleteThread(threadId);
+    if (!deleted) {
+      send(res, 404, { code: 'not_found', message: 'thread not found' });
+      return;
+    }
+    deps.logger.info('thread removed', { threadId });
+    send(res, 200, { deleted: true });
+    return;
+  }
+
+  const postDeleteMatch = method === 'DELETE' && url?.match(/^\/community\/posts\/([^/?]+)$/);
+  if (postDeleteMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const postId = decodeURIComponent(postDeleteMatch[1]!);
+    const deleted = deps.store.deletePost(postId);
+    if (!deleted) {
+      send(res, 404, { code: 'not_found', message: 'post not found' });
+      return;
+    }
+    deps.logger.info('post removed', { postId });
+    send(res, 200, { deleted: true });
+    return;
+  }
+
+  // --- Platform settings: public read, admin-only write ------------------------------------------
+  if (method === 'GET' && url === '/community/admin/settings') {
+    send(res, 200, { settings: deps.store.getSettings() });
+    return;
+  }
+
+  if (method === 'PUT' && url === '/community/admin/settings') {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const parsed = setPlatformSettingRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid setting' });
+      return;
+    }
+    deps.store.setSetting(parsed.data.key, parsed.data.value);
+    deps.logger.info('platform setting updated', { key: parsed.data.key, by: claims.sub });
+    send(res, 200, { settings: deps.store.getSettings() });
     return;
   }
 

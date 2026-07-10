@@ -44,6 +44,20 @@ FROM caddy:2-alpine AS exampleweb
 COPY --from=examplegamebuild /app/apps/example-game/dist /srv/www
 COPY deploy/gamehub/example-game.Caddyfile /etc/caddy/Caddyfile
 
+# --- Build the admin SPA. Same path-based-deploy pattern as example-game
+#     (mygame-quiz.ru/admin/) — never shipped in the player-facing hub bundle. ---
+FROM base AS adminbuild
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
+RUN pnpm --filter @mygame/admin build
+
+# --- Static file server for the admin SPA. No reverse proxy needed on its own port: reached via the
+#     gateway's path-route (deploy/gamehub/Caddyfile strips the /admin/ prefix before proxying here);
+#     its JS talks to auth/community/orchestrator same-origin. ---
+FROM caddy:2-alpine AS adminweb
+COPY --from=adminbuild /app/apps/admin/dist /srv/www
+COPY deploy/gamehub/admin.Caddyfile /etc/caddy/Caddyfile
+
 # --- Service runtime: auth/social/chat/community/orchestrator's base (command set per-service in compose) ---
 FROM base AS service
 ENV NODE_ENV=production

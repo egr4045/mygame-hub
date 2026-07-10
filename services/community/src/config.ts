@@ -7,10 +7,9 @@ export interface ServiceConfig {
   readonly jwtIssuer: string;
   /** Allowed CORS origin (the hub calls this cross-origin in dev). */
   readonly corsOrigin: string;
-  /** Postgres connection string. When unset, changelog/discussions are in-memory (not durable). */
+  /** Postgres connection string. When unset, changelog/discussions are in-memory (not durable), and
+   *  admin-gated routes are unreachable (see `adminCheck.ts` — no Postgres, no admin state to read). */
   readonly databaseUrl: string | undefined;
-  /** Account ids authorized to publish changelog entries. Empty = no one can (reads still work). */
-  readonly adminIds: readonly string[];
 }
 
 export const loadConfig = (): ServiceConfig => ({
@@ -21,8 +20,4 @@ export const loadConfig = (): ServiceConfig => ({
   jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
   databaseUrl: process.env.DATABASE_URL,
-  adminIds: (process.env.COMMUNITY_ADMIN_IDS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
 });

@@ -36,6 +36,40 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.21)
 
+  apps/admin:
+    dependencies:
+      '@mygame/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@mygame/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.18
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.5
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.4
+        version: 4.7.0(vite@6.4.3(@types/node@22.19.21)(tsx@4.22.4))
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.7
+        version: 6.4.3(@types/node@22.19.21)(tsx@4.22.4)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.21)
+
   apps/example-game:
     dependencies:
       '@mygame/protocol':
@@ -336,6 +370,15 @@ importers:
 
   services/orchestrator:
     dependencies:
+      '@mygame/auth-core':
+        specifier: workspace:*
+        version: link:../../packages/auth-core
+      '@mygame/platform-db':
+        specifier: workspace:*
+        version: link:../../packages/platform-db
+      '@mygame/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

@@ -69,7 +69,10 @@ Do not break one while touching another.
     the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat`/`community` alike.
   - `DATABASE_URL` — e.g. `postgres://civa:civa@postgres:5432/civa`; set identically on
     `auth`/`social`/`chat`/`community` for durable state.
-  - `COMMUNITY_ADMIN_IDS` — comma-separated platform accountIds allowed to publish a changelog entry.
+  - `AUTH_BOOTSTRAP_ADMIN_IDS` (on `auth`) — comma-separated accountIds to grant the platform's
+    `is_admin` flag on boot (one-time; the account must already exist — log in once first). Gates
+    everything in `apps/admin`, including changelog publishing. Every admin after this one is managed
+    via `apps/admin` itself, not by editing this and restarting.
   - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
     a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
     token; disable any webhook). Keep the token out of git, logs and docs.

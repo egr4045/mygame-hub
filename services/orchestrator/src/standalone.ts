@@ -1,4 +1,5 @@
 /** Standalone entry: in-memory fake Docker (no real containers) so the API can be exercised alone. */
+import { createAuthCore } from '@mygame/auth-core';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
@@ -29,7 +30,14 @@ const orch = new Orchestrator(config.games, {
   clock: { now: () => Date.now() },
   logger,
 });
+const auth = createAuthCore({
+  secret: config.jwtSecret,
+  issuer: config.jwtIssuer,
+  accessTtl: '15m',
+  refreshTtl: '30d',
+});
 
-createApp(orch, logger).listen(config.port, () =>
+// No Postgres in standalone mode — the admin force-stop route 501s, same as prod with no DATABASE_URL.
+createApp({ orch, logger, auth, isAdmin: undefined }).listen(config.port, () =>
   logger.info('listening (standalone, fake docker)', { port: config.port }),
 );

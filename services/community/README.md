@@ -13,6 +13,7 @@ corepack pnpm --filter @mygame/community dev              # run with real adapte
 Env:
 - `COMMUNITY_PORT` (default 8085)
 - `JWT_SECRET` / `JWT_ISSUER` — must match `auth`'s, so tokens it issues verify here too
-- `COMMUNITY_ADMIN_IDS` — comma-separated account ids allowed to publish changelog entries. Empty =
-  reads still work, nobody can publish. Discussions need no allowlist.
-- `DATABASE_URL` — Postgres-backed when set; in-memory (lost on restart) otherwise
+- `DATABASE_URL` — Postgres-backed when set; in-memory (lost on restart) otherwise. Also gates
+  changelog publishing: without it, this service can't check the caller's `is_admin` flag (see
+  `adminCheck.ts`), so publishing 403s for everyone regardless of role. The flag itself is set on
+  `auth` via `AUTH_BOOTSTRAP_ADMIN_IDS`/`apps/admin` — not configured here.

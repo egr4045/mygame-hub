@@ -48,16 +48,23 @@ docker compose ps
 
 `auth`/`social`/`chat`/`community` are Postgres-backed from the start (a dedicated `postgres`
 container in this stack, isolated from Leaders' own Postgres) — data survives a restart. Set
-`COMMUNITY_ADMIN_IDS` in `.env` once you know your own accountId (log in once, read it from the
-`/auth/login` response, or the hub's "Скопировать мой ID"), then `docker compose up -d community` to
-pick it up — until then, changelog reads work but nobody can publish.
+`AUTH_BOOTSTRAP_ADMIN_IDS` in `.env` once you know your own accountId (log in once, read it from the
+`/auth/login` response, or the hub's "Скопировать мой ID"), then `docker compose up -d auth` to pick
+it up — this grants `apps/admin` access (including changelog publishing); every admin after this one
+is promoted from within `apps/admin` itself, not by editing `.env` again.
 
-`examplegame` (the SDK starter template, `apps/example-game`) is unlike every other service here: it
-runs on **its own origin** (host port **5190**), same model as an on-demand game, so its bundle needs
-`GAMEHUB_PUBLIC_URL` (set in `.env`, default `https://mygame-quiz.ru`) baked in **at build time** —
-Vite can't read env vars at container runtime, only when `vite build` runs. `build-images.sh` reads
-that value from `.env` and passes it as a Docker build arg. If `GAMEHUB_PUBLIC_URL` ever changes,
-rebuild+recreate just that image: `bash build-images.sh && docker compose up -d --build examplegame`.
+`examplegame` (the SDK starter template, `apps/example-game`) is path-routed under the hub's own
+origin (`mygame-quiz.ru/example-game/`), not its own port — same model as `admin` below. No host port
+is published; Caddy's `handle_path /example-game/*` strips the prefix and proxies to `examplegame:5190`
+internally. Vite can't read env vars at container runtime, so the `/example-game/` prefix is baked
+into the bundle **at build time** via the `VITE_BASE_PATH` build arg (`build-images.sh` passes it,
+must match the Caddyfile's path exactly). If that prefix ever changes, rebuild+recreate just that
+image: `bash build-images.sh && docker compose up -d --build examplegame`.
+
+`admin` (`apps/admin`, the ops panel) is path-routed under the same origin (`mygame-quiz.ru/admin/`,
+no published port) — same model as `/example-game/`'s Caddy `handle_path`. It reuses the normal
+passwordless login; access is gated server-side by `is_admin` (see `AUTH_BOOTSTRAP_ADMIN_IDS` above),
+not by anything client-side.
 
 The orchestrator brings the lobby up on the first `enter`. To check on-demand + idle:
 

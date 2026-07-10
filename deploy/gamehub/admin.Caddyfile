@@ -1,0 +1,14 @@
+# Static file server for apps/admin. No reverse proxy here — its bundle talks to auth/community/
+# orchestrator same-origin (VITE_BASE_PATH bakes in the /admin/ asset prefix at build time, see the
+# Dockerfile's adminbuild stage), so this container only needs to serve the built SPA.
+{
+	admin off
+	auto_https off
+}
+
+:5200 {
+	encode gzip
+	root * /srv/www
+	try_files {path} /index.html
+	file_server
+}

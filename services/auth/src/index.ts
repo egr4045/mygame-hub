@@ -40,6 +40,21 @@ const { accounts, stats } = await (async (): Promise<{ accounts: AccountStore; s
   return { accounts: accountStore, stats: statsStore };
 })();
 
+// One-time admin bootstrap: promotes each configured accountId if the account already exists (log in
+// once first, then restart with the id set — same flow COMMUNITY_ADMIN_IDS used to require). Idempotent
+// across every subsequent boot. Every admin after this one is managed via apps/admin itself.
+for (const id of config.bootstrapAdminIds) {
+  const acc = accounts.get(id);
+  if (!acc) {
+    logger.warn('AUTH_BOOTSTRAP_ADMIN_IDS: account not found — log in once first, then restart', { accountId: id });
+    continue;
+  }
+  if (!acc.isAdmin) {
+    accounts.setAdmin(id, true);
+    logger.info('bootstrapped admin', { accountId: id });
+  }
+}
+
 let telegram: TelegramLinking | undefined;
 if (config.telegramBotToken) {
   const client = createTelegramClient(config.telegramBotToken, logger);

@@ -5,8 +5,8 @@
 # stack on this host without touching it.
 #
 #   docker network create gamehub-net      # once
-#   cd deploy/gamehub && cp .env.example .env && set JWT_SECRET (+ COMMUNITY_ADMIN_IDS once you know
-#   your own accountId)
+#   cd deploy/gamehub && cp .env.example .env && set JWT_SECRET (+ AUTH_BOOTSTRAP_ADMIN_IDS once you
+#   know your own accountId — log in once first, see .env.example)
 #   bash build-images.sh && docker compose up -d
 name: gamehub
 
@@ -44,6 +44,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
       JWT_ISSUER: civa
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      # One-time admin bootstrap — see deploy/gamehub/.env.example. Empty is fine (no admins yet).
+      AUTH_BOOTSTRAP_ADMIN_IDS: ${AUTH_BOOTSTRAP_ADMIN_IDS:-}
       NODE_ENV: production
     depends_on:
       - postgres
@@ -131,9 +133,6 @@ services:
       JWT_ISSUER: civa
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
-      # Comma-separated account ids allowed to publish changelog entries. Empty = reads still work,
-      # nobody can publish yet — log in once, grab your accountId, and set it here.
-      COMMUNITY_ADMIN_IDS: ${COMMUNITY_ADMIN_IDS:-}
       NODE_ENV: production
     depends_on:
       - postgres
@@ -154,12 +153,20 @@ services:
       CIVA_ACTIVITY_URL: http://lobby:8082/metrics
       CIVA_IDLE_MS: '600000' # stop the game after 10 min with zero players
       REAPER_MS: '30000'
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
+      JWT_ISSUER: civa
+      # Read-only: checks the shared accounts.is_admin flag for apps/admin's force-stop route (the
+      # orchestrator's first-ever Postgres touch). Unset would 501 that one route; every other route
+      # (GET /games, POST /:id/enter) stays exactly as public as before either way.
+      DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       NODE_ENV: production
     volumes:
       # Control the host Docker (start/stop the game compose). Mount the repo at the SAME path so
       # the compose file path is valid for the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/gamehub:/root/gamehub
+    depends_on:
+      - postgres
     networks:
       - gamehub-net
     restart: unless-stopped
@@ -181,6 +188,7 @@ services:
       - community
       - orchestrator
       - examplegame
+      - admin
       - livekit
     restart: unless-stopped
 
@@ -198,6 +206,22 @@ services:
       target: exampleweb
       args:
         VITE_BASE_PATH: /example-game/
+    networks:
+      - gamehub-net
+    restart: unless-stopped
+
+  # Minimal admin panel — path-routed under the hub's own origin (web's Caddyfile strips /admin/
+  # before proxying here), same reasoning as examplegame above. Never shipped in the player-facing
+  # hub bundle. Auth is the same passwordless login every player uses; access is a server-side
+  # isAdmin check on every admin route (see AUTH_BOOTSTRAP_ADMIN_IDS on the auth service above).
+  admin:
+    image: gamehub-admin:latest
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: adminweb
+      args:
+        VITE_BASE_PATH: /admin/
     networks:
       - gamehub-net
     restart: unless-stopped

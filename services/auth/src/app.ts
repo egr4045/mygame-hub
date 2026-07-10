@@ -7,13 +7,14 @@ import {
   loginRequest,
   recordEnterRequest,
   refreshRequest,
+  setAdminRoleRequest,
   setAvatarRequest,
   setFavoritesRequest,
   setTitleRequest,
   setWallpaperRequest,
   socialLoginRequest,
 } from '@mygame/protocol';
-import type { AuthClaims } from '@mygame/protocol';
+import type { AdminAccountSummary, AuthClaims } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import { TokenError } from '@mygame/auth-core';
 import type { AccountStore } from './store.js';
@@ -36,7 +37,7 @@ export interface AppDeps {
 
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization',
 };
 
@@ -89,6 +90,31 @@ const requireAccount = async (
     return null;
   }
 };
+
+/** `requireAccount` plus an `isAdmin` check — 401 if not logged in, 403 if logged in but not an
+ *  admin. Auth owns `accounts` directly, so this reads the flag straight off the store (no mirroring
+ *  needed here, unlike community/orchestrator which don't own the accounts table). */
+const requireAdmin = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: AppDeps,
+): Promise<AuthClaims | null> => {
+  const claims = await requireAccount(req, res, deps);
+  if (!claims) return null;
+  if (!deps.accounts.get(claims.sub)?.isAdmin) {
+    send(res, 403, { code: 'forbidden', message: 'admin access required' });
+    return null;
+  }
+  return claims;
+};
+
+const toAdminSummary = (a: NonNullable<ReturnType<AccountStore['get']>>): AdminAccountSummary => ({
+  id: a.id,
+  displayName: a.displayName,
+  isAdmin: a.isAdmin,
+  telegramLinked: !!a.telegramId,
+  achievementCount: a.achievements.length,
+});
 
 export const createApp = (deps: AppDeps): Server =>
   createServer((req, res) => {
@@ -401,6 +427,157 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       .statsFor(claims.sub)
       .map((r) => ({ gameId: r.gameId, secondsPlayed: r.secondsPlayed, lastPlayedAt: r.lastPlayedAt }));
     send(res, 200, { stats });
+    return;
+  }
+
+  // --- Admin: account roster + moderation (apps/admin) ---------------------------------------
+  if (method === 'GET' && url === '/auth/admin/admins') {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    send(res, 200, { admins: deps.accounts.listAdmins().map(toAdminSummary) });
+    return;
+  }
+
+  if (method === 'GET' && (url === '/auth/admin/accounts' || url?.startsWith('/auth/admin/accounts?'))) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const parsedUrl = new URL(url, 'http://localhost');
+    const q = parsedUrl.searchParams.get('q') ?? undefined;
+    const limit = Math.min(Math.max(Number(parsedUrl.searchParams.get('limit')) || 50, 1), 100);
+    const offset = Math.max(Number(parsedUrl.searchParams.get('offset')) || 0, 0);
+    const { accounts, total } = deps.accounts.listAccounts({ q, limit, offset });
+    send(res, 200, { accounts: accounts.map(toAdminSummary), total });
+    return;
+  }
+
+  const acctDetailMatch = method === 'GET' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/?$/);
+  if (acctDetailMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const account = deps.accounts.get(acctDetailMatch[1]!);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    const stats = deps.stats
+      .statsFor(account.id)
+      .map((r) => ({ gameId: r.gameId, secondsPlayed: r.secondsPlayed, lastPlayedAt: r.lastPlayedAt }));
+    send(res, 200, {
+      id: account.id,
+      displayName: account.displayName,
+      isAdmin: account.isAdmin,
+      telegramLinked: !!account.telegramId,
+      avatarIcon: account.avatarIcon ?? null,
+      wallpaper: account.wallpaper ?? null,
+      titleAchievement: account.titleAchievement,
+      achievements: account.achievements,
+      favoriteGameIds: account.favoriteGameIds,
+      stats,
+    });
+    return;
+  }
+
+  const acctRoleMatch = method === 'PUT' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/role\/?$/);
+  if (acctRoleMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const targetId = acctRoleMatch[1]!;
+    const parsed = setAdminRoleRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid role' });
+      return;
+    }
+    // Never let the last admin demote themselves (or be demoted) into a state nobody can undo.
+    if (!parsed.data.isAdmin) {
+      const admins = deps.accounts.listAdmins();
+      if (admins.length === 1 && admins[0]!.id === targetId) {
+        send(res, 400, { code: 'validation', message: 'cannot demote the last remaining admin' });
+        return;
+      }
+    }
+    const account = deps.accounts.setAdmin(targetId, parsed.data.isAdmin);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    deps.logger.info('admin role changed', { accountId: targetId, isAdmin: parsed.data.isAdmin, by: claims.sub });
+    send(res, 200, toAdminSummary(account));
+    return;
+  }
+
+  // Manual grant on an arbitrary account (support-ticket case: "I should have this achievement") —
+  // same validation/store call as the self-service `/auth/achievements` above, just targeting
+  // `:id` instead of trusting `claims.sub`.
+  const acctAchievementsMatch = method === 'POST' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/achievements\/?$/);
+  if (acctAchievementsMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const targetId = acctAchievementsMatch[1]!;
+    const parsed = grantAchievementRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid achievement grant' });
+      return;
+    }
+    const result = deps.accounts.grantAchievement(targetId, parsed.data.gameId, parsed.data.achievementId);
+    if (!result) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    if (result.granted) {
+      deps.logger.info('achievement granted (admin)', { accountId: targetId, by: claims.sub, ...parsed.data });
+    }
+    send(res, 200, result);
+    return;
+  }
+
+  // Undo an accidental/mistaken grant. Same body shape as the grant route above.
+  const acctAchievementRevokeMatch = method === 'DELETE' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/achievements\/?$/);
+  if (acctAchievementRevokeMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const targetId = acctAchievementRevokeMatch[1]!;
+    const parsed = grantAchievementRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid achievement reference' });
+      return;
+    }
+    const revoked = deps.accounts.revokeAchievement(targetId, parsed.data.gameId, parsed.data.achievementId);
+    if (!revoked) {
+      send(res, 404, { code: 'not_found', message: 'account or achievement not found' });
+      return;
+    }
+    deps.logger.info('achievement revoked (admin)', { accountId: targetId, by: claims.sub, ...parsed.data });
+    send(res, 200, { revoked: true });
+    return;
+  }
+
+  // Moderation: clear (never set) an arbitrary account's avatar/wallpaper — the self-service
+  // `PUT /auth/profile/avatar|wallpaper` routes only ever act on `claims.sub`.
+  const acctAvatarClearMatch = method === 'DELETE' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/avatar\/?$/);
+  if (acctAvatarClearMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const account = deps.accounts.setAvatar(acctAvatarClearMatch[1]!, null);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    deps.logger.info('avatar cleared (admin)', { accountId: account.id, by: claims.sub });
+    send(res, 200, { avatarIcon: null });
+    return;
+  }
+
+  const acctWallpaperClearMatch = method === 'DELETE' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/wallpaper\/?$/);
+  if (acctWallpaperClearMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const account = deps.accounts.setWallpaper(acctWallpaperClearMatch[1]!, null);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    deps.logger.info('wallpaper cleared (admin)', { accountId: account.id, by: claims.sub });
+    send(res, 200, { wallpaper: null });
     return;
   }
 

@@ -12,6 +12,11 @@ export interface ServiceConfig {
   readonly databaseUrl: string | undefined;
   /** Telegram bot token (secret). When unset, Telegram linking is disabled. */
   readonly telegramBotToken: string | undefined;
+  /** Comma-separated accountIds granted is_admin on boot (idempotent — a no-op once already set).
+   *  One-time bootstrap only: subsequent admins are managed via apps/admin itself (promote/demote),
+   *  not by editing this and restarting. Mirrors how COMMUNITY_ADMIN_IDS used to gate changelog
+   *  publishing, but persisted to the account row instead of re-checked from env on every request. */
+  readonly bootstrapAdminIds: readonly string[];
 }
 
 export const loadConfig = (): ServiceConfig => ({
@@ -25,4 +30,8 @@ export const loadConfig = (): ServiceConfig => ({
   handoffTtl: process.env.HANDOFF_TTL ?? '120s',
   databaseUrl: process.env.DATABASE_URL,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+  bootstrapAdminIds: (process.env.AUTH_BOOTSTRAP_ADMIN_IDS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 });

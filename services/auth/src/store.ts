@@ -25,6 +25,8 @@ export interface Account {
   titleAchievement: TitleAchievementRef;
   achievements: AccountAchievement[];
   favoriteGameIds: string[];
+  /** The platform's one privileged tier (apps/admin) — see docs/ARCHITECTURE.md. */
+  isAdmin: boolean;
 }
 
 export interface AccountStore {
@@ -41,6 +43,9 @@ export interface AccountStore {
   ): { achievement: AccountAchievement; granted: boolean } | undefined;
   /** Bulk-load previously persisted achievements verbatim (timestamps preserved). Hydration only. */
   hydrateAchievements(id: string, achievements: AccountAchievement[]): void;
+  /** Admin moderation (apps/admin) — undoes an accidental/mistaken grant. `false` if the account or
+   *  that specific achievement isn't found. */
+  revokeAchievement(id: string, gameId: string, achievementId: string): boolean;
   /** `null` clears the avatar. */
   setAvatar(id: string, dataUrl: string | null): Account | undefined;
   /** `null` clears the wallpaper. */
@@ -49,6 +54,12 @@ export interface AccountStore {
   /** Full replace, mirroring setWallpaper/setTitleAchievement — the list is small and rarely mutated,
    *  so there's no need for an incremental add/remove API. */
   setFavorites(id: string, gameIds: string[]): Account | undefined;
+  setAdmin(id: string, isAdmin: boolean): Account | undefined;
+  /** Paginated, optionally filtered by a case-insensitive substring match on `displayName`/`id`
+   *  (apps/admin's account list). `total` is the filtered count, for the caller to compute page count. */
+  listAccounts(opts: { q?: string | undefined; limit: number; offset: number }): { accounts: Account[]; total: number };
+  /** Every account with `isAdmin` set (apps/admin's roster screen). */
+  listAdmins(): Account[];
 }
 
 export interface AccountStoreOptions {
@@ -74,6 +85,7 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
         titleAchievement: null,
         achievements: [],
         favoriteGameIds: [],
+        isAdmin: false,
       };
       accounts.set(account.id, account);
       return account;
@@ -106,6 +118,14 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       const acc = accounts.get(id);
       if (acc) acc.achievements = achievements;
     },
+    revokeAchievement(id, gameId, achievementId) {
+      const acc = accounts.get(id);
+      if (!acc) return false;
+      const idx = acc.achievements.findIndex((a) => a.gameId === gameId && a.achievementId === achievementId);
+      if (idx === -1) return false;
+      acc.achievements.splice(idx, 1);
+      return true;
+    },
     setAvatar(id, dataUrl) {
       const acc = accounts.get(id);
       if (!acc) return undefined;
@@ -132,5 +152,21 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       acc.favoriteGameIds = gameIds;
       return acc;
     },
+    setAdmin(id, isAdmin) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      acc.isAdmin = isAdmin;
+      return acc;
+    },
+    listAccounts({ q, limit, offset }) {
+      const needle = q?.trim().toLowerCase();
+      const filtered = needle
+        ? [...accounts.values()].filter(
+            (a) => a.displayName.toLowerCase().includes(needle) || a.id.toLowerCase().includes(needle),
+          )
+        : [...accounts.values()];
+      return { accounts: filtered.slice(offset, offset + limit), total: filtered.length };
+    },
+    listAdmins: () => [...accounts.values()].filter((a) => a.isAdmin),
   };
 };

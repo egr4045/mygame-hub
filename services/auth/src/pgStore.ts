@@ -21,8 +21,8 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   const persist = (a: Account): void =>
     queue.push('account.upsert', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, now())
+        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name       = EXCLUDED.display_name,
            telegram_id         = EXCLUDED.telegram_id,
@@ -32,6 +32,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
            title_achievement   = EXCLUDED.title_achievement,
            achievements        = EXCLUDED.achievements,
            favorite_game_ids   = EXCLUDED.favorite_game_ids,
+           is_admin            = EXCLUDED.is_admin,
            updated_at          = now()`,
         [
           a.id,
@@ -43,6 +44,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
           JSON.stringify(a.titleAchievement),
           JSON.stringify(a.achievements),
           JSON.stringify(a.favoriteGameIds),
+          a.isAdmin,
         ],
       ),
     );
@@ -50,7 +52,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   return {
     async init() {
       const { rows } = await pool.query(
-        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids FROM accounts`,
+        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin FROM accounts`,
       );
       for (const r of rows) {
         const acc = mem.upsert(r.display_name as string, r.id as string);
@@ -61,6 +63,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
         mem.setTitleAchievement(acc.id, (r.title_achievement as TitleAchievementRef | null) ?? null);
         mem.hydrateAchievements(acc.id, (r.achievements as Account['achievements'] | null) ?? []);
         mem.setFavorites(acc.id, (r.favorite_game_ids as string[] | null) ?? []);
+        mem.setAdmin(acc.id, r.is_admin === true);
       }
       logger.info('accounts hydrated', { count: rows.length });
     },
@@ -86,6 +89,14 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       return result;
     },
     hydrateAchievements: (id, achievements) => mem.hydrateAchievements(id, achievements),
+    revokeAchievement(id, gameId, achievementId) {
+      const revoked = mem.revokeAchievement(id, gameId, achievementId);
+      if (revoked) {
+        const a = mem.get(id);
+        if (a) persist(a);
+      }
+      return revoked;
+    },
     setAvatar(id, dataUrl) {
       const a = mem.setAvatar(id, dataUrl);
       if (a) persist(a);
@@ -106,5 +117,12 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       if (a) persist(a);
       return a;
     },
+    setAdmin(id, isAdmin) {
+      const a = mem.setAdmin(id, isAdmin);
+      if (a) persist(a);
+      return a;
+    },
+    listAccounts: (opts) => mem.listAccounts(opts),
+    listAdmins: () => mem.listAdmins(),
   };
 };

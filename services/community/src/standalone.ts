@@ -21,7 +21,7 @@ const app = createApp({
   logger,
   auth,
   store: createMemoryCommunityStore(),
-  adminIds: config.adminIds,
+  isAdmin: async () => false,
 });
 
 app.listen(config.port, () => logger.info('listening (standalone)', { port: config.port }));

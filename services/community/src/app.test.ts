@@ -20,7 +20,9 @@ const start = async (adminIds: string[] = [ADMIN]) => {
     logger: createCapturingLogger(),
     auth,
     store: createMemoryCommunityStore(),
-    adminIds,
+    // Fakes the real Postgres-backed is_admin check (createAdminCheck) — no database needed to test
+    // the route logic itself.
+    isAdmin: async (accountId) => adminIds.includes(accountId),
   });
   const port = await new Promise<number>((r) =>
     server!.listen(0, () => r((server!.address() as AddressInfo).port)),
@@ -36,6 +38,16 @@ const post = (base: string, path: string, body: unknown, token?: string) =>
   });
 
 const get = (base: string, path: string) => fetch(base + path);
+
+const put = (base: string, path: string, body: unknown, token?: string) =>
+  fetch(base + path, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+
+const del = (base: string, path: string, token?: string) =>
+  fetch(base + path, { method: 'DELETE', headers: token ? { authorization: `Bearer ${token}` } : {} });
 
 describe('community app — changelog', () => {
   it('lists changelog entries newest-first', async () => {
@@ -87,6 +99,53 @@ describe('community app — changelog', () => {
     const civa = await json<{ entries: ChangelogEntry[] }>(await get(base, '/community/changelog/civa'));
     expect(civa.entries).toHaveLength(1);
     expect(civa.entries[0]!.title).toBe('Civa patch');
+  });
+});
+
+describe('community app — changelog moderation (admin)', () => {
+  it('lets an admin edit a published entry', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const entry = await json<ChangelogEntry>(
+      await post(base, '/community/changelog', { gameId: 'civa', version: '1.0.0', title: 'First', body: 'a' }, adminToken),
+    );
+
+    const res = await put(base, `/community/changelog/${entry.id}`, { title: 'Fixed title' }, adminToken);
+    expect(res.status).toBe(200);
+    expect((await json<ChangelogEntry>(res)).title).toBe('Fixed title');
+
+    const list = await json<{ entries: ChangelogEntry[] }>(await get(base, '/community/changelog/civa'));
+    expect(list.entries[0]!.title).toBe('Fixed title');
+  });
+
+  it('404s editing an unknown entry, 403s a non-admin edit', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const playerToken = await auth.signAccess('random-player', 'Random');
+    expect((await put(base, '/community/changelog/nope', { title: 'X' }, adminToken)).status).toBe(404);
+    expect((await put(base, '/community/changelog/nope', { title: 'X' }, playerToken)).status).toBe(403);
+  });
+
+  it('lets an admin delete an entry, removing it from the public list', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const entry = await json<ChangelogEntry>(
+      await post(base, '/community/changelog', { gameId: 'civa', version: '1.0.0', title: 'First', body: 'a' }, adminToken),
+    );
+
+    const res = await del(base, `/community/changelog/${entry.id}`, adminToken);
+    expect(res.status).toBe(200);
+
+    const list = await json<{ entries: ChangelogEntry[] }>(await get(base, '/community/changelog/civa'));
+    expect(list.entries).toHaveLength(0);
+  });
+
+  it('404s deleting an unknown entry, 403s a non-admin delete', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const playerToken = await auth.signAccess('random-player', 'Random');
+    expect((await del(base, '/community/changelog/nope', adminToken)).status).toBe(404);
+    expect((await del(base, '/community/changelog/nope', playerToken)).status).toBe(403);
   });
 });
 
@@ -162,5 +221,92 @@ describe('community app — discussions', () => {
     const token = await auth.signAccess('player-1', 'Mara');
     expect((await post(base, '/community/threads', { gameId: '', title: 'X', body: 'x' }, token)).status).toBe(400);
     expect((await post(base, '/community/posts', { threadId: '', body: 'x' }, token)).status).toBe(400);
+  });
+});
+
+describe('community app — discussion moderation (admin)', () => {
+  it('lets an admin soft-delete a thread, removing it from the public list and detail view', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const token = await auth.signAccess('player-1', 'Mara');
+    const thread = await json<DiscussionThread>(
+      await post(base, '/community/threads', { gameId: 'civa', title: 'Help', body: 'First' }, token),
+    );
+
+    const res = await del(base, `/community/threads/${thread.id}`, adminToken);
+    expect(res.status).toBe(200);
+
+    expect((await json<{ threads: DiscussionThread[] }>(await get(base, '/community/threads/civa'))).threads).toHaveLength(0);
+    expect((await get(base, `/community/threads/civa/${thread.id}`)).status).toBe(404);
+  });
+
+  it('404s deleting an unknown/already-deleted thread, 403s a non-admin delete', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const token = await auth.signAccess('player-1', 'Mara');
+    const thread = await json<DiscussionThread>(
+      await post(base, '/community/threads', { gameId: 'civa', title: 'Help', body: 'First' }, token),
+    );
+    expect((await del(base, `/community/threads/${thread.id}`, token)).status).toBe(403);
+    expect((await del(base, `/community/threads/${thread.id}`, adminToken)).status).toBe(200);
+    expect((await del(base, `/community/threads/${thread.id}`, adminToken)).status).toBe(404);
+    expect((await del(base, '/community/threads/nope', adminToken)).status).toBe(404);
+  });
+
+  it('lets an admin soft-delete a reply post, decrementing replyCount and removing it from thread detail', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const author = await auth.signAccess('player-1', 'Mara');
+    const replier = await auth.signAccess('player-2', 'S1mple');
+    const thread = await json<DiscussionThread>(
+      await post(base, '/community/threads', { gameId: 'civa', title: 'Help', body: 'First post' }, author),
+    );
+    const reply = await json<{ id: string }>(await post(base, '/community/posts', { threadId: thread.id, body: 'Try this' }, replier));
+
+    const res = await del(base, `/community/posts/${reply.id}`, adminToken);
+    expect(res.status).toBe(200);
+
+    const detail = await json<{ thread: DiscussionThread; posts: DiscussionPost[] }>(
+      await get(base, `/community/threads/civa/${thread.id}`),
+    );
+    expect(detail.thread.replyCount).toBe(0);
+    expect(detail.posts.map((p) => p.body)).toEqual(['First post']);
+  });
+
+  it('404s deleting an unknown post, 403s a non-admin delete', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const token = await auth.signAccess('player-1', 'Mara');
+    expect((await del(base, '/community/posts/nope', token)).status).toBe(403);
+    expect((await del(base, '/community/posts/nope', adminToken)).status).toBe(404);
+  });
+});
+
+describe('community app — platform settings', () => {
+  it('reads an empty settings map with no auth', async () => {
+    const { base } = await start();
+    const res = await get(base, '/community/admin/settings');
+    expect(res.status).toBe(200);
+    expect((await json<{ settings: Record<string, string> }>(res)).settings).toEqual({});
+  });
+
+  it('lets an admin set a known key, publicly readable afterwards', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+
+    const res = await put(base, '/community/admin/settings', { key: 'brand_name', value: 'GAMEHUB' }, adminToken);
+    expect(res.status).toBe(200);
+
+    const settings = (await json<{ settings: Record<string, string> }>(await get(base, '/community/admin/settings'))).settings;
+    expect(settings.brand_name).toBe('GAMEHUB');
+  });
+
+  it('403s a non-admin write, 401s with no token, 400s an unknown key', async () => {
+    const { base, auth } = await start();
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+    const token = await auth.signAccess('player-1', 'Mara');
+    expect((await put(base, '/community/admin/settings', { key: 'brand_name', value: 'X' }, token)).status).toBe(403);
+    expect((await put(base, '/community/admin/settings', { key: 'brand_name', value: 'X' })).status).toBe(401);
+    expect((await put(base, '/community/admin/settings', { key: 'not_a_real_key', value: 'X' }, adminToken)).status).toBe(400);
   });
 });

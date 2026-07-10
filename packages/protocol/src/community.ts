@@ -5,8 +5,9 @@ import { z } from 'zod';
  * separate service from auth/social/chat — unbounded user-generated content with its own
  * moderation/growth profile, kept out of the security-critical identity process.
  *
- * Trust model: changelog reads are public, writes require an access token AND membership in the
- * service's admin allowlist (`COMMUNITY_ADMIN_IDS`) — patch notes are curated, not user content.
+ * Trust model: changelog reads are public, writes require an access token AND the platform's
+ * `is_admin` flag (an account-level flag shared across every service, not a community-specific
+ * allowlist — see `services/community/src/adminCheck.ts`) — patch notes are curated, not user content.
  * Discussion reads are public; creating a thread/post requires only a valid access token (the same
  * posture as chat/achievements — no per-game moderation yet, see docs/STATUS.md).
  */
@@ -31,6 +32,14 @@ export type CreateChangelogRequest = z.infer<typeof createChangelogRequest>;
 
 export const changelogListResponse = z.object({ entries: z.array(changelogEntry) });
 export type ChangelogListResponse = z.infer<typeof changelogListResponse>;
+
+/** Admin edit of an already-published entry (apps/admin) — every field optional, patch-style. */
+export const updateChangelogRequest = z.object({
+  version: z.string().min(1).max(32).optional(),
+  title: z.string().min(1).max(200).optional(),
+  body: z.string().min(1).max(20_000).optional(),
+});
+export type UpdateChangelogRequest = z.infer<typeof updateChangelogRequest>;
 
 // --- Discussions --------------------------------------------------------------------------------
 

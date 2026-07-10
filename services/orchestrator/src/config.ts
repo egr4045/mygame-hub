@@ -5,6 +5,12 @@ export interface ServiceConfig {
   readonly port: number;
   readonly reaperMs: number;
   readonly games: GameManifest[];
+  readonly jwtSecret: string;
+  readonly jwtIssuer: string;
+  /** Postgres connection string — the orchestrator's first-ever Postgres touch, read-only (checks
+   *  the shared accounts.is_admin flag for the force-stop route). Unset means that one route 501s;
+   *  `GET /games`/`POST /:id/enter` stay exactly as public as they've always been. */
+  readonly databaseUrl: string | undefined;
 }
 
 /** Game registry from env. Add a game = one entry here (+ its compose). */
@@ -32,4 +38,7 @@ export const loadConfig = (): ServiceConfig => ({
   port: Number(process.env.ORCHESTRATOR_PORT ?? 8090),
   reaperMs: Number(process.env.REAPER_MS ?? 30_000),
   games: defaultGames(),
+  jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
+  jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
+  databaseUrl: process.env.DATABASE_URL,
 });

@@ -23,17 +23,18 @@ afterEach(() => server?.close());
 
 const start = async () => {
   const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+  const accounts = createMemoryAccountStore();
   server = createApp({
     clock: createFakeClock(0),
     logger: createCapturingLogger(),
     auth,
-    accounts: createMemoryAccountStore(),
+    accounts,
     stats: createMemoryGameStatsStore(),
   });
   const port = await new Promise<number>((r) =>
     server!.listen(0, () => r((server!.address() as AddressInfo).port)),
   );
-  return { base: `http://127.0.0.1:${port}`, auth };
+  return { base: `http://127.0.0.1:${port}`, auth, accounts };
 };
 
 const post = (base: string, path: string, body: unknown, token?: string) =>
@@ -57,6 +58,16 @@ const put = (base: string, path: string, body: unknown, token?: string) =>
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+  });
+
+const del = (base: string, path: string, body?: unknown, token?: string) =>
+  fetch(base + path, {
+    method: 'DELETE',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 
 describe('auth service', () => {
@@ -294,5 +305,199 @@ describe('auth service — playtime stats', () => {
     const { base } = await start();
     const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
     expect((await post(base, '/auth/stats/enter', { gameId: '' }, login.accessToken)).status).toBe(400);
+  });
+});
+
+describe('auth service — admin', () => {
+  it('rejects every admin route for a non-admin account', async () => {
+    const { base } = await start();
+    const login = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    expect((await get(base, '/auth/admin/admins', login.accessToken)).status).toBe(403);
+    expect((await get(base, '/auth/admin/accounts', login.accessToken)).status).toBe(403);
+    expect((await get(base, `/auth/admin/accounts/${login.accountId}`, login.accessToken)).status).toBe(403);
+    expect(
+      (await put(base, `/auth/admin/accounts/${login.accountId}/role`, { isAdmin: true }, login.accessToken)).status,
+    ).toBe(403);
+  });
+
+  it('rejects admin routes with no token at all (401, not 403)', async () => {
+    const { base } = await start();
+    expect((await get(base, '/auth/admin/admins')).status).toBe(401);
+  });
+
+  it('an admin can list accounts, search, and paginate', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    await post(base, '/auth/login', { displayName: 'Zed' });
+    await post(base, '/auth/login', { displayName: 'Wei' });
+    accounts.setAdmin(mara.accountId, true);
+
+    const all = await json<{ accounts: unknown[]; total: number }>(
+      await get(base, '/auth/admin/accounts', mara.accessToken),
+    );
+    expect(all.total).toBe(3);
+
+    const searched = await json<{ accounts: { displayName: string }[]; total: number }>(
+      await get(base, '/auth/admin/accounts?q=ze', mara.accessToken),
+    );
+    expect(searched.total).toBe(1);
+    expect(searched.accounts[0]!.displayName).toBe('Zed');
+
+    const paged = await json<{ accounts: unknown[]; total: number }>(
+      await get(base, '/auth/admin/accounts?limit=1&offset=1', mara.accessToken),
+    );
+    expect(paged.accounts).toHaveLength(1);
+    expect(paged.total).toBe(3);
+  });
+
+  it("an admin can view another account's detail", async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+    await post(base, '/auth/achievements', { gameId: 'civa', achievementId: 'first_blood' }, zed.accessToken);
+
+    const detail = await json<{ id: string; achievements: unknown[] }>(
+      await get(base, `/auth/admin/accounts/${zed.accountId}`, mara.accessToken),
+    );
+    expect(detail.id).toBe(zed.accountId);
+    expect(detail.achievements).toHaveLength(1);
+  });
+
+  it('404s a detail lookup for an unknown account', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    accounts.setAdmin(mara.accountId, true);
+    expect((await get(base, '/auth/admin/accounts/no-such-id', mara.accessToken)).status).toBe(404);
+  });
+
+  it('an admin can promote another account, which then passes requireAdmin itself', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    const promoteRes = await put(base, `/auth/admin/accounts/${zed.accountId}/role`, { isAdmin: true }, mara.accessToken);
+    expect(promoteRes.status).toBe(200);
+
+    const roster = await json<{ admins: { id: string }[] }>(await get(base, '/auth/admin/admins', zed.accessToken));
+    expect(roster.admins.map((a) => a.id).sort()).toEqual([mara.accountId, zed.accountId].sort());
+  });
+
+  it('refuses to demote the last remaining admin', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    const res = await put(base, `/auth/admin/accounts/${mara.accountId}/role`, { isAdmin: false }, mara.accessToken);
+    expect(res.status).toBe(400);
+    expect(accounts.get(mara.accountId)?.isAdmin).toBe(true);
+  });
+
+  it('allows demoting one of several admins', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+    accounts.setAdmin(zed.accountId, true);
+
+    const res = await put(base, `/auth/admin/accounts/${zed.accountId}/role`, { isAdmin: false }, mara.accessToken);
+    expect(res.status).toBe(200);
+    expect(accounts.get(zed.accountId)?.isAdmin).toBe(false);
+  });
+
+  it('an admin can grant an achievement to another account (support-ticket case)', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    const res = await post(
+      base,
+      `/auth/admin/accounts/${zed.accountId}/achievements`,
+      { gameId: 'civa', achievementId: 'first_blood' },
+      mara.accessToken,
+    );
+    expect(res.status).toBe(200);
+    expect((await json<{ granted: boolean }>(res)).granted).toBe(true);
+
+    const detail = await json<{ achievements: unknown[] }>(
+      await get(base, `/auth/admin/accounts/${zed.accountId}`, mara.accessToken),
+    );
+    expect(detail.achievements).toHaveLength(1);
+  });
+
+  it('403s a non-admin granting an achievement, 404s an unknown target account', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    expect(
+      (
+        await post(base, `/auth/admin/accounts/${mara.accountId}/achievements`, { gameId: 'civa', achievementId: 'x' }, zed.accessToken)
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await post(base, `/auth/admin/accounts/no-such-id/achievements`, { gameId: 'civa', achievementId: 'x' }, mara.accessToken)
+      ).status,
+    ).toBe(404);
+  });
+
+  it('an admin can revoke a previously granted achievement', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+    await post(base, `/auth/admin/accounts/${zed.accountId}/achievements`, { gameId: 'civa', achievementId: 'first_blood' }, mara.accessToken);
+
+    const res = await del(base, `/auth/admin/accounts/${zed.accountId}/achievements`, { gameId: 'civa', achievementId: 'first_blood' }, mara.accessToken);
+    expect(res.status).toBe(200);
+
+    const detail = await json<{ achievements: unknown[] }>(await get(base, `/auth/admin/accounts/${zed.accountId}`, mara.accessToken));
+    expect(detail.achievements).toHaveLength(0);
+  });
+
+  it('404s revoking an achievement the account never had, 403s a non-admin revoke', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    expect(
+      (await del(base, `/auth/admin/accounts/${zed.accountId}/achievements`, { gameId: 'civa', achievementId: 'x' }, mara.accessToken)).status,
+    ).toBe(404);
+    expect(
+      (await del(base, `/auth/admin/accounts/${mara.accountId}/achievements`, { gameId: 'civa', achievementId: 'x' }, zed.accessToken)).status,
+    ).toBe(403);
+  });
+
+  it('an admin can clear another account\'s avatar and wallpaper', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+    await put(base, '/auth/profile/avatar', { dataUrl: 'data:image/png;base64,AAA' }, zed.accessToken);
+    await put(base, '/auth/profile/wallpaper', { dataUrl: 'data:image/png;base64,BBB' }, zed.accessToken);
+
+    expect((await del(base, `/auth/admin/accounts/${zed.accountId}/avatar`, undefined, mara.accessToken)).status).toBe(200);
+    expect((await del(base, `/auth/admin/accounts/${zed.accountId}/wallpaper`, undefined, mara.accessToken)).status).toBe(200);
+
+    const detail = await json<{ avatarIcon: string | null; wallpaper: string | null }>(
+      await get(base, `/auth/admin/accounts/${zed.accountId}`, mara.accessToken),
+    );
+    expect(detail.avatarIcon).toBeNull();
+    expect(detail.wallpaper).toBeNull();
+  });
+
+  it('404s clearing avatar/wallpaper for an unknown account, 403s a non-admin clear', async () => {
+    const { base, accounts } = await start();
+    const mara = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Mara' }));
+    const zed = await json<LoginResponse>(await post(base, '/auth/login', { displayName: 'Zed' }));
+    accounts.setAdmin(mara.accountId, true);
+
+    expect((await del(base, `/auth/admin/accounts/no-such-id/avatar`, undefined, mara.accessToken)).status).toBe(404);
+    expect((await del(base, `/auth/admin/accounts/${mara.accountId}/avatar`, undefined, zed.accessToken)).status).toBe(403);
   });
 });

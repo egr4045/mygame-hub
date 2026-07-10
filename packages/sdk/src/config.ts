@@ -19,6 +19,7 @@ export interface PlatformConfig {
   socialUrl: string;
   chatUrl: string;
   communityUrl: string;
+  orchestratorUrl: string;
 }
 
 export const config: PlatformConfig = {
@@ -26,15 +27,17 @@ export const config: PlatformConfig = {
   socialUrl: env.VITE_SOCIAL_URL ?? (env.DEV ? 'http://localhost:8083' : sameOrigin),
   chatUrl: env.VITE_CHAT_URL ?? (env.DEV ? 'http://localhost:8084' : sameOrigin),
   communityUrl: env.VITE_COMMUNITY_URL ?? (env.DEV ? 'http://localhost:8085' : sameOrigin),
+  orchestratorUrl: env.VITE_ORCHESTRATOR_URL ?? (env.DEV ? 'http://localhost:8090' : sameOrigin),
 };
 
 export interface ConfigureOptions {
-  /** Base URL of the hub; sets auth, social, chat and community unless one is overridden below. */
+  /** Base URL of the hub; sets auth, social, chat, community and orchestrator unless overridden below. */
   hubUrl?: string;
   authUrl?: string;
   socialUrl?: string;
   chatUrl?: string;
   communityUrl?: string;
+  orchestratorUrl?: string;
 }
 
 /** Point the SDK at a hub. Called by `mygame.init`; safe to call again to re-point. */
@@ -44,11 +47,13 @@ export const configure = (opts: ConfigureOptions): void => {
     config.socialUrl = opts.hubUrl;
     config.chatUrl = opts.hubUrl;
     config.communityUrl = opts.hubUrl;
+    config.orchestratorUrl = opts.hubUrl;
   }
   if (opts.authUrl !== undefined) config.authUrl = opts.authUrl;
   if (opts.socialUrl !== undefined) config.socialUrl = opts.socialUrl;
   if (opts.chatUrl !== undefined) config.chatUrl = opts.chatUrl;
   if (opts.communityUrl !== undefined) config.communityUrl = opts.communityUrl;
+  if (opts.orchestratorUrl !== undefined) config.orchestratorUrl = opts.orchestratorUrl;
 };
 
 /** @deprecated read `config.authUrl` — kept for same-origin hub call sites that snapshot at import. */

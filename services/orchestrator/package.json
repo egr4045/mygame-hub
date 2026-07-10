@@ -13,6 +13,9 @@
     "clean": "rimraf .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@mygame/auth-core": "workspace:*",
+    "@mygame/platform-db": "workspace:*",
+    "@mygame/protocol": "workspace:*",
     "@mygame/shared-types": "workspace:*"
   },
   "devDependencies": {

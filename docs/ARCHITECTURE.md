@@ -214,11 +214,12 @@ scaffold cost of a new service is near-zero (`scripts/gen-service.mjs` + the `au
 template), so there was no reason to compromise the boundary for two features.
 
 - **Trust model — two different postures in the same service:**
-  - **Changelog** reads are public; **writes** require the caller's access token *and* membership in
-    the `COMMUNITY_ADMIN_IDS` allowlist (`config.ts`, comma-separated account ids) — patch notes are
-    curated content, not user content, so this is stricter than the rest of the platform's "your own
-    token authorizes it" posture (same idea as achievements' trust model, inverted: there the *player*
-    self-reports; here only a curator may publish).
+  - **Changelog** reads are public; **writes** require the caller's access token *and* the platform's
+    `is_admin` flag (`services/community/src/adminCheck.ts` reads it off the shared `accounts` table —
+    the same flag every `apps/admin` route gates on, not a community-specific allowlist) — patch notes
+    are curated content, not user content, so this is stricter than the rest of the platform's "your
+    own token authorizes it" posture (same idea as achievements' trust model, inverted: there the
+    *player* self-reports; here only an admin may publish).
   - **Discussions** (threads + posts) use the platform's normal posture: any valid access token may
     create a thread or reply, same as chat DMs or achievement grants — no per-game moderation yet
     (tracked in `STATUS.md`).

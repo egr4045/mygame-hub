@@ -113,6 +113,16 @@ export class Orchestrator {
     return this.tracked.has(id);
   }
 
+  /** Admin force-stop: bypasses the idle timer entirely (unlike `tick`'s reaper, which only ever
+   *  stops a game once it's been idle past `idleMs`). No-op if already stopped or starting. */
+  async forceDown(id: string): Promise<void> {
+    const t = this.must(id);
+    if (t.starting) return;
+    if ((await this.deps.runtime.status(t.game)) !== 'running') return;
+    this.deps.logger.info('force-stopping game (admin)', { game: t.game.id });
+    await this.deps.runtime.down(t.game);
+  }
+
   private must(id: string): Tracked {
     const t = this.tracked.get(id);
     if (!t) throw new Error(`unknown game ${id}`);

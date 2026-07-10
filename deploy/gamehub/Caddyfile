@@ -58,6 +58,12 @@
 		reverse_proxy examplegame:5190
 	}
 
+	# Minimal admin panel, same path-routing reasoning as /example-game/* above. Its own login gate +
+	# server-side isAdmin check (not this route) is what actually protects it.
+	handle_path /admin/* {
+		reverse_proxy admin:5200
+	}
+
 	# Game lobby (Socket.io, default path). Started on demand — 502s until the orchestrator brings
 	# it up. Does not collide with /social.io/ or /chat.io/ above.
 	handle /socket.io/* {

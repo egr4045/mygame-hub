@@ -12,6 +12,8 @@ docker build --network=host --target orchestrator -t gamehub-orchestrator:latest
 # examplegame is path-routed under the hub's own origin (mygame-quiz.ru/example-game/), not its own
 # port — VITE_BASE_PATH must match the Caddy handle_path prefix in deploy/gamehub/Caddyfile.
 docker build --network=host --target exampleweb --build-arg VITE_BASE_PATH=/example-game/ -t gamehub-examplegame:latest .
+# admin is path-routed the same way (mygame-quiz.ru/admin/) — same VITE_BASE_PATH/Caddy pairing.
+docker build --network=host --target adminweb --build-arg VITE_BASE_PATH=/admin/ -t gamehub-admin:latest .
 # On-demand games (their own images):
 docker build --network=host -t svoyak:latest deploy/svoyak
-echo "Built gamehub-service / gamehub-web / gamehub-orchestrator / gamehub-examplegame / svoyak (latest)"
+echo "Built gamehub-service / gamehub-web / gamehub-orchestrator / gamehub-examplegame / gamehub-admin / svoyak (latest)"

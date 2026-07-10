@@ -51,7 +51,7 @@ idea box).
 | Game library | ✅ | Real static registry (`apps/hub/src/platform/games.ts`), mirrors the orchestrator manifest. |
 | Game launch / orchestrator | ✅ | `services/orchestrator` really runs `docker compose up/stop`, wakes a game on entry, reaps it on idle (reaper polls each game's `/metrics`). Hub calls `POST /orchestrator/games/:id/enter`. |
 | SDK starter template | ✅ | `apps/example-game` — a minimal Vite+React app exercising the full SDK surface (handoff login, achievements, activity/lobbies, chat/friends overlay, playtime, changelog/discussions). Doubles as living documentation and registered in the hub's game library (`example-game`, port 5190). |
-| Game page: changelog | ✅ | Real: `services/community` (`GET/POST /community/changelog/:gameId`), Postgres-backed when `DATABASE_URL` is set. Reads are public; publishing requires the caller's account to be in the `COMMUNITY_ADMIN_IDS` allowlist (curated patch notes, not user content — see `ARCHITECTURE.md`). `mygame.community.getChangelog`. |
+| Game page: changelog | ✅ | Real: `services/community` (`GET/POST /community/changelog/:gameId`), Postgres-backed when `DATABASE_URL` is set. Reads are public; publishing requires the caller's account to have the platform's `is_admin` flag (curated patch notes, not user content — see `ARCHITECTURE.md`; the flag is the same one `apps/admin` gates on, not a community-specific allowlist). `mygame.community.getChangelog`. |
 | Game page: find groups / lobbies | ✅ | Real, derived live from presence: `social.getLobbies` (socket ack) groups online accounts whose `activity.joinable` is set, by room, for the requested game — no persistence. Honestly sparse until a game actually calls `setActivity({ joinable: true })` (the example game does). "+ Создать лобби" sets your own activity and enters the room. |
 | Game page: discussions / forum | ✅ | Real forum on `services/community` (`discussion_threads`/`discussion_posts`, Postgres-backed). Reads are public; creating a thread/reply needs only a valid session (same trust model as chat/achievements — no moderation yet). `mygame.community.getThreads/getThread/createThread/createPost`. |
 | Playtime / "last played" stats | ✅ | Real: `game_stats` on `services/auth`. `last_played_at` is stamped on launch (`recordGameEnter`); `seconds_played` accrues from an **in-game** SDK heartbeat (`mygame.stats` — started automatically by `mygame.init()`) since the hub can't time a session once it navigates to the game's own origin. The server clamps each heartbeat's credited delta so a missed beat/closed tab never over-credits — see `ARCHITECTURE.md`. |
@@ -126,8 +126,9 @@ idea box).
     session once it navigates away to the game's own origin).
 14. ✅ **Changelog + discussions (new `services/community`)** — done. Own service (port 8085, `COMMUNITY_PORT`)
     rather than folded into `auth`, to keep unbounded user-generated content out of the
-    security-critical identity process. Changelog writes are gated to a `COMMUNITY_ADMIN_IDS`
-    allowlist; discussion threads/posts use the same open trust model as chat/achievements.
+    security-critical identity process. Changelog writes are gated to the platform's `is_admin` flag
+    (an account-level flag, not a community-specific allowlist — see `ARCHITECTURE.md`); discussion
+    threads/posts use the same open trust model as chat/achievements.
 15. ✅ **Find groups / lobbies** — done. `social.getLobbies` (socket ack) derives joinable rooms from
     existing presence (`activityOf`/`socketsOf`) — no new persistence. Sparse until a game reports
     joinable activity.

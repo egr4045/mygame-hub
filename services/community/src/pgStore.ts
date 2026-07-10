@@ -49,12 +49,13 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
 
   return {
     async init() {
-      const [changelogRes, threadsRes, postsRes] = await Promise.all([
+      const [changelogRes, threadsRes, postsRes, settingsRes] = await Promise.all([
         pool.query(`SELECT id, game_id, version, title, body, published_at FROM changelog`),
-        pool.query(`SELECT id, game_id, author_id, author_name, title, created_at FROM discussion_threads`),
+        pool.query(`SELECT id, game_id, author_id, author_name, title, created_at, deleted_at FROM discussion_threads`),
         pool.query(
-          `SELECT id, thread_id, author_id, author_name, body, created_at FROM discussion_posts ORDER BY created_at ASC`,
+          `SELECT id, thread_id, author_id, author_name, body, created_at, deleted_at FROM discussion_posts ORDER BY created_at ASC`,
         ),
+        pool.query(`SELECT key, value FROM platform_settings`),
       ]);
       mem.hydrate({
         changelog: changelogRes.rows.map((r) => ({
@@ -72,6 +73,7 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
           authorName: r.author_name as string,
           title: r.title as string,
           createdAt: Number(r.created_at),
+          deletedAt: r.deleted_at ? new Date(r.deleted_at as string | Date).getTime() : null,
         })),
         posts: postsRes.rows.map((r) => ({
           id: r.id as string,
@@ -80,12 +82,15 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
           authorName: r.author_name as string,
           body: r.body as string,
           createdAt: Number(r.created_at),
+          deletedAt: r.deleted_at ? new Date(r.deleted_at as string | Date).getTime() : null,
         })),
+        settings: Object.fromEntries(settingsRes.rows.map((r) => [r.key as string, r.value as string])),
       });
       logger.info('community hydrated', {
         changelog: changelogRes.rows.length,
         threads: threadsRes.rows.length,
         posts: postsRes.rows.length,
+        settings: settingsRes.rows.length,
       });
     },
 
@@ -94,6 +99,26 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
       const full = mem.addChangelog(entry);
       persistChangelog(full);
       return full;
+    },
+
+    updateChangelog(id, patch) {
+      const updated = mem.updateChangelog(id, patch);
+      if (!updated) return undefined;
+      queue.push('changelog.update', () =>
+        pool.query(`UPDATE changelog SET version = $2, title = $3, body = $4 WHERE id = $1`, [
+          updated.id,
+          updated.version,
+          updated.title,
+          updated.body,
+        ]),
+      );
+      return updated;
+    },
+
+    deleteChangelog(id) {
+      const deleted = mem.deleteChangelog(id);
+      if (deleted) queue.push('changelog.delete', () => pool.query(`DELETE FROM changelog WHERE id = $1`, [id]));
+      return deleted;
     },
 
     listThreads: (gameId) => mem.listThreads(gameId),
@@ -113,6 +138,38 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
       return post;
     },
 
+    deleteThread(threadId) {
+      const deleted = mem.deleteThread(threadId);
+      if (deleted) {
+        queue.push('discussion_threads.delete', () =>
+          pool.query(`UPDATE discussion_threads SET deleted_at = now() WHERE id = $1`, [threadId]),
+        );
+      }
+      return deleted;
+    },
+
+    deletePost(postId) {
+      const deleted = mem.deletePost(postId);
+      if (deleted) {
+        queue.push('discussion_posts.delete', () =>
+          pool.query(`UPDATE discussion_posts SET deleted_at = now() WHERE id = $1`, [postId]),
+        );
+      }
+      return deleted;
+    },
+
     hydrate: (data) => mem.hydrate(data),
+
+    getSettings: () => mem.getSettings(),
+    setSetting(key, value) {
+      mem.setSetting(key, value);
+      queue.push('platform_settings.upsert', () =>
+        pool.query(
+          `INSERT INTO platform_settings (key, value, updated_at) VALUES ($1, $2, now())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+          [key, value],
+        ),
+      );
+    },
   };
 };

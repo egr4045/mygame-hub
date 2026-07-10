@@ -42,6 +42,9 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wallpaper TEXT;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS title_achievement JSONB;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS favorite_game_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+    -- The platform's one privileged tier (apps/admin). A bare boolean, not a role enum -- exactly one
+    -- tier was ever asked for; widen into a real role column later if a second tier is ever needed.
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS friendships (
       lo            TEXT NOT NULL,
@@ -140,6 +143,9 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at    BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS discussion_threads_game_idx ON discussion_threads (game_id, created_at DESC);
+    -- Admin moderation (apps/admin) soft-deletes rather than hard-deletes UGC — worth being able to
+    -- see "removed by admin" during an investigation rather than content silently vanishing.
+    ALTER TABLE discussion_threads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS discussion_posts (
       id            TEXT PRIMARY KEY,
@@ -150,6 +156,15 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at    BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS discussion_posts_thread_idx ON discussion_posts (thread_id, created_at ASC);
+    ALTER TABLE discussion_posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+    -- Small fixed set of admin-editable platform settings (apps/admin) — a key-value table so adding a
+    -- new known key never needs a schema migration.
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key           TEXT PRIMARY KEY,
+      value         TEXT NOT NULL,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 };
 
