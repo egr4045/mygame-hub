@@ -3,6 +3,7 @@ import type { social } from '@mygame/protocol';
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useChatStore } from '../state/chatStore.js';
+import { useToastStore } from '../state/toastStore.js';
 
 const inputStyle: CSSProperties = {
   flex: 1,
@@ -63,8 +64,10 @@ export const FriendsSidebar = ({
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [viewingProfile, setViewingProfile] = useState<social.Friend | null>(null);
+  const addToast = useToastStore((s) => s.addToast);
 
   const incoming = friends.filter((f) => f.status === 'incoming');
+  const outgoing = friends.filter((f) => f.status === 'outgoing');
   const accepted = friends.filter((f) => f.status === 'accepted');
 
   const inGame = accepted.filter(f => f.presence === 'online' && f.activity);
@@ -74,6 +77,12 @@ export const FriendsSidebar = ({
   const add = () => {
     if (code.trim()) {
       addByCode(code);
+      addToast({
+        type: 'system',
+        title: 'Заявка отправлена',
+        content: `Запрос в друзья отправлен: ${code.trim()}`,
+        icon: '✉️'
+      });
       setCode('');
     }
   };
@@ -194,6 +203,18 @@ export const FriendsSidebar = ({
                 <span style={{flex: 1, fontSize: '13px'}}>{f.displayName}</span>
                 <button onClick={() => accept(f.accountId)} style={{...smallBtn, background: '#5c7e10', padding: '2px 8px'}}>✓</button>
                 <button onClick={() => decline(f.accountId)} style={{...smallBtn, padding: '2px 8px'}}>✕</button>
+              </div>
+            ))}
+          </>
+        )}
+
+        {outgoing.length > 0 && (
+          <>
+            <div style={sectionLabel}>ОТПРАВЛЕННЫЕ</div>
+            {outgoing.map(f => (
+              <div key={f.accountId} style={{ padding: '4px 8px', display: 'flex', gap: 8 }}>
+                <span style={{flex: 1, fontSize: '13px', color: '#8f98a0'}}>{f.displayName}</span>
+                <button onClick={() => decline(f.accountId)} style={{...smallBtn, padding: '2px 8px'}}>Отменить</button>
               </div>
             ))}
           </>
