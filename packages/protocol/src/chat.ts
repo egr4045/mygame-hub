@@ -106,10 +106,11 @@ export const pinMessagePayload = z.object({
   conversationId: z.string().min(1),
   messageId: z.string().nullable(), // null to unpin
 });
-export const sendPayload = z.object({ 
-  conversationId: z.string().min(1), 
+export const sendPayload = z.object({
+  conversationId: z.string().min(1),
   text: z.string().max(2000), // Can be empty if there are attachments
   replyToId: z.string().optional(),
+  mentions: z.array(z.string()).optional(),
   attachments: z.array(z.object({
     id: z.string(),
     url: z.string(),

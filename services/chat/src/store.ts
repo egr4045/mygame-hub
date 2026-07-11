@@ -92,7 +92,12 @@ export interface ChatStore {
   /** group only. Admins/owner can pin a message. */
   pinMessage(conversationId: string, messageId: string | null): Conversation | MembershipChangeError;
   /** Null if `senderId` isn't a participant of `conversationId`. */
-  send(conversationId: string, senderId: string, text: string, opts?: { replyToId?: string, mentions?: string[], attachments?: ChatMessage['attachments'] }): ChatMessage | null;
+  send(
+    conversationId: string,
+    senderId: string,
+    text: string,
+    opts?: { replyToId?: string | undefined; mentions?: string[] | undefined; attachments?: ChatMessage['attachments'] | undefined },
+  ): ChatMessage | null;
   /** Mark everything up to now as read for `accountId`. Null if there was nothing unread. */
   markRead(conversationId: string, accountId: string): { upTo: number } | null;
   /** Most recent `limit` messages of a conversation, oldest first. */
@@ -256,9 +261,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         senderName: displayNameOf(senderId),
         text,
         createdAt: now(),
-        replyToId: opts?.replyToId,
-        mentions: opts?.mentions,
-        attachments: opts?.attachments,
+        replyToId: opts?.replyToId ?? null,
+        ...(opts?.mentions !== undefined ? { mentions: opts.mentions } : {}),
+        ...(opts?.attachments !== undefined ? { attachments: opts.attachments } : {}),
       };
       const arr = messages.get(conversationId) ?? [];
       arr.push(msg);

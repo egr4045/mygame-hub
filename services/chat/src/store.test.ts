@@ -139,7 +139,7 @@ describe('chat store — hydration', () => {
     const s = createMemoryChatStore();
     s.hydrate({
       conversations: [
-        { id: 'c1', type: 'dm', name: null, participantIds: ['a', 'b'], ownerId: null, createdAt: 50 },
+        { id: 'c1', type: 'dm', name: null, participantIds: ['a', 'b'], ownerId: null, admins: [], avatarUrl: null, pinnedMessageId: null, createdAt: 50 },
       ],
       memberships: [
         { conversationId: 'c1', accountId: 'a', lastReadAt: 100 },

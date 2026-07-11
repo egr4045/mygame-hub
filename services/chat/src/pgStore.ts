@@ -108,17 +108,21 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       const msgRows = await pool.query(
         `SELECT id, conversation_id, sender_id, text, created_at, reply_to_id, mentions, attachments FROM messages ORDER BY created_at ASC`,
       );
-      const messages: ChatMessage[] = msgRows.rows.map((r) => ({
-        id: r.id as string,
-        conversationId: r.conversation_id as string,
-        senderId: r.sender_id as string,
-        senderName: mem.getAccount(r.sender_id as string)?.displayName ?? (r.sender_id as string).slice(0, 8),
-        text: r.text as string,
-        createdAt: Number(r.created_at),
-        replyToId: (r.reply_to_id as string | null) ?? undefined,
-        mentions: (r.mentions as string[] | null) ?? undefined,
-        attachments: (r.attachments as any[] | null) ?? undefined,
-      }));
+      const messages: ChatMessage[] = msgRows.rows.map((r) => {
+        const mentions = r.mentions as string[] | null;
+        const attachments = r.attachments as { id: string; url: string; type: string; name: string }[] | null;
+        return {
+          id: r.id as string,
+          conversationId: r.conversation_id as string,
+          senderId: r.sender_id as string,
+          senderName: mem.getAccount(r.sender_id as string)?.displayName ?? (r.sender_id as string).slice(0, 8),
+          text: r.text as string,
+          createdAt: Number(r.created_at),
+          replyToId: r.reply_to_id as string | null,
+          ...(mentions !== null ? { mentions } : {}),
+          ...(attachments !== null ? { attachments } : {}),
+        };
+      });
 
       mem.hydrate({ conversations, memberships, messages });
       logger.info('chat hydrated', {

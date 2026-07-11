@@ -141,8 +141,8 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       const stream = fs.createWriteStream(filePath);
       req.pipe(stream);
-      await new Promise((resolve, reject) => {
-        stream.on('finish', resolve);
+      await new Promise<void>((resolve, reject) => {
+        stream.on('finish', () => resolve());
         stream.on('error', reject);
       });
 

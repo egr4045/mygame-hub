@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { RoomEvent, type RemoteTrack, type RemoteParticipant } from 'livekit-client';
-import { useChatStore, getCallRoom } from '../state/chatStore.js';
+import { useChatStore, getCallRoom, type ChatSession } from '../state/chatStore.js';
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useDroppable } from '@dnd-kit/core';
@@ -12,6 +12,71 @@ const activityText = (f?: Omit<social.Friend, 'status'>): string => {
   if (f.presence === 'offline') return 'Не в сети';
   if (f.activity) return `Играет в ${f.activity.gameName}`;
   return 'В сети';
+};
+
+/** A session-list row that's also a drop target for `SocialDndProvider` — dragging a friend here
+ *  (id `friend:<accountId>`) adds them to this conversation. Id convention: `chat:<sessionId>`. */
+const DroppableChatSession = ({
+  s,
+  activeChatId,
+  onClick,
+}: {
+  s: ChatSession;
+  activeChatId: string | null;
+  onClick: () => void;
+}): JSX.Element => {
+  const { isOver, setNodeRef } = useDroppable({ id: `chat:${s.id}` });
+  const active = s.id === activeChatId;
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={onClick}
+      style={{
+        padding: '12px 16px',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        background: isOver ? 'rgba(42,171,238,0.2)' : active ? '#2a475e' : 'transparent',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}
+      onMouseOver={(e) => { if (!active) e.currentTarget.style.background = '#23262e'; }}
+      onMouseOut={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <div style={{ width: 32, height: 32, borderRadius: s.type === 'group' ? 4 : '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
+        {s.avatar || (s.type === 'group' ? '👥' : '👤')}
+      </div>
+      <div style={{ fontSize: '13px', color: '#dcdedf', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {s.name}
+      </div>
+      {!!s.unreadCount && !active && (
+        <div style={{ background: '#5c7e10', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>
+          {s.unreadCount}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** The "no conversation open" placeholder — also a drop target (id `chat:new`) for starting a new
+ *  DM by dragging a friend here; `SocialDndProvider` special-cases this id to open-or-create a DM. */
+const DroppableNewChatArea = (): JSX.Element => {
+  const { isOver, setNodeRef } = useDroppable({ id: 'chat:new' });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: isOver ? '#2AABEE' : '#6c7784',
+        background: isOver ? 'rgba(42,171,238,0.1)' : 'transparent',
+      }}
+    >
+      Выберите диалог из списка
+    </div>
+  );
 };
 
 export const ChatWidget = (): JSX.Element => {
