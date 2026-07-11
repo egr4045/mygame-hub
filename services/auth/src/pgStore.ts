@@ -120,6 +120,16 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       if (a) persist(a);
       return a;
     },
+    setPasswordHash(id, passwordHash) {
+      const a = mem.setPasswordHash(id, passwordHash);
+      if (a) persist(a);
+      return a;
+    },
+    setDisplayName(id, name) {
+      const result = mem.setDisplayName(id, name);
+      if (result.account) persist(result.account);
+      return result;
+    },
     setAdmin(id, isAdmin) {
       const a = mem.setAdmin(id, isAdmin);
       if (a) persist(a);

@@ -280,7 +280,9 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 - **`client.ts`** — the `mygame` singleton. `mygame.init(gameId, { hubUrl })` configures endpoints,
   mounts the overlay, opens the social **and** chat connections, stamps a playtime "enter", and starts
   the playtime heartbeat. Sub-APIs:
-  - `auth` — session, tokens, handoff.
+  - `auth` — `getAccount()`, `getToken()`, `login(displayName, password)`,
+    `register(displayName, password)`, `logout()`, `getHandoff()` (mint), `loginWithToken(handoffToken)`
+    (redeem — the SSO half a game embedding the SDK actually calls, see "Example game" above).
   - `social` — friends/presence (`getMe`, `getFriends`, `addByCode`, `setActivity`, `getLobbies`,
     `subscribe`). `getMe()`/`getFriends()` both carry `avatarIcon`/`titleAchievement` now (mirrored
     from the account row `auth` owns) alongside `accountId`/`displayName` — richer than
@@ -315,12 +317,15 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
   splitting it silently defeats Vite's dev-mode static analysis, so every default below would fall
   through to `sameOrigin` even in dev (found and fixed while wiring `apps/example-game`; see its
   `vite.config.ts` alias for how a game consuming the SDK from source hits this same code path).
-- **`authClient.ts`** — login + session persistence in `localStorage` (`civa.session`), `getHandoff()`,
-  Telegram helpers (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`), achievement
-  helpers (`grantAchievement`, `getAchievements`), and profile helpers (`getProfile`, `setAvatar`,
+- **`authClient.ts`** — `login(displayName, password)`/`register(displayName, password)` + session
+  persistence in `localStorage` (`civa.session`), `getHandoff()` (mint a token to carry this session
+  elsewhere) and `exchangeHandoff(handoffToken)` (redeem one minted by another origin — the two SSO
+  halves, `client.ts` exposes them as `mygame.auth.getHandoff`/`.loginWithToken`), Telegram helpers
+  (`createTelegramLinkCode`, `getTelegramStatus`, `loginWithTelegram`), achievement helpers
+  (`grantAchievement`, `getAchievements`), and profile helpers (`getProfile`, `setAvatar`,
   `setWallpaper`, `setTitleAchievement`). `freshAccessToken` (re-mints a token for the stored account)
-  is exported for sibling clients (`statsClient.ts`, `communityClient.ts`) that need an authed call
-  without duplicating the refresh dance.
+  is exported for sibling clients (`statsClient.ts`, `communityClient.ts`, and `apps/admin`'s
+  `adminClient.ts`) that need an authed call without duplicating the refresh dance.
 - **`statsClient.ts`** / **`communityClient.ts`** — thin fetch wrappers for `auth`'s `/stats/*` routes
   and `community`'s routes, behind `mygame.stats`/`mygame.community` above.
 - **State (Zustand):** `socialStore` and `chatStore` (both **real**, own Socket.io connections),
@@ -351,15 +356,16 @@ self-mounting Shadow-DOM overlay so the platform UI works on top of any host pag
 
 A minimal Vite+React app — living documentation for a third-party game developer, not a real game.
 Registered in the hub's game library (`example-game`, port 5190) so it's reachable via the normal
-launch flow. It also doubles as the reference implementation of consuming SSO handoff: it exercises
-the whole SDK surface end-to-end: reads `?pt=` on boot and redeems it via `mygame.auth.loginWithToken`
-(`exchangeHandoff` under the hood, `POST /auth/exchange`) to log into its own origin as the same
-platform account — the auth service verifies the token's signature and account existence itself, so
-the client never decodes or trusts the JWT locally — then registers a login/password form for a fresh
-account, `mygame.init()`, a "win" button (`achievements.grant`), a joinable-activity toggle
-(`social.setActivity`, populates the hub's "Найти группы"), a chat-open button, and read-only panels
-for playtime/changelog/discussions. `vite.config.ts` aliases `@mygame/sdk` to source, same as the hub,
-for HMR.
+launch flow. It also doubles as the reference implementation of consuming SSO handoff: on boot it reads
+`?pt=` and, if present, redeems it via `mygame.auth.loginWithToken` (`exchangeHandoff` under the hood,
+`POST /auth/exchange`) to log into its own origin as the same platform account — the auth service
+verifies the token's signature and that the account still exists itself, so the client never decodes
+or trusts the JWT locally. Absent a handoff token (opened directly, not launched from the hub) it falls
+back to its own login/register form (`mygame.auth.login`/`.register`, same password flow as everywhere
+else). Either way, once there's an account it exercises the rest of the SDK surface: `mygame.init()`, a
+"win" button (`achievements.grant`), a joinable-activity toggle (`social.setActivity`, populates the
+hub's "Найти группы"), a chat-open button, and read-only panels for playtime/changelog/discussions.
+`vite.config.ts` aliases `@mygame/sdk` to source, same as the hub, for HMR.
 
 > A real bug surfaced (and was fixed) while wiring this: seeding React state from
 > `mygame.auth.getAccount()` on mount races the async handoff-login when a *different, stale* session
@@ -367,6 +373,36 @@ for HMR.
 > handoff corrects it, and the loser of that race can overwrite the correct login with the stale one.
 > Fixed by starting `account` at `null` whenever a `?pt=` is still unconsumed (`hasPendingHandoff()`),
 > so nothing reads the stale session until the handoff has had its say.
+
+## Admin panel (`apps/admin`)
+
+A small standalone React+Vite SPA — the platform's one privileged surface, path-routed under the
+hub's own origin (`mygame-quiz.ru/admin/`, same pattern as `apps/example-game`'s `/example-game/` —
+both wired into `deploy/gamehub/docker-compose.yml`/`Caddyfile` already, not aspirational). It ships
+its own `App.tsx` rather than using the SDK's self-mount overlay, and logs in with the SDK's plain
+`login`/`register` functions directly — an admin account is an ordinary account, created/authenticated
+the exact same password way as any player. There is no separate credential and no client-side-only
+gate: after login, one upfront check (`GET /auth/admin/admins`, 200 vs 403) decides whether to show the
+app shell at all, and every individual route re-checks `isAdmin` server-side on top of that
+(`requireAdmin` in `auth`'s `app.ts`, the equivalent in `community`, and the orchestrator's own admin
+check) — a logged-in non-admin sees a clear "not authorized" screen, never a silently-empty one. See
+"Admin" under the `auth` section above for how `isAdmin` itself is bootstrapped and managed.
+
+- **Game management (`GamesScreen`).** Per-game changelog CRUD (`POST`/`PUT`/`DELETE
+  /community/changelog...`) and discussion moderation (`DELETE /community/threads/:id` /
+  `.../posts/:id`, soft-delete via `deleted_at`), plus a live lobby table that can force-stop a running
+  game (`POST /orchestrator/games/:id/stop`, bypassing its idle timer).
+- **User management (`UsersScreen`).** A paginated/searchable account list (`GET
+  /auth/admin/accounts`, filtered by a case-insensitive substring on displayName/id) and a detail view
+  per account (profile, achievements, playtime) with moderation actions: clear avatar/wallpaper
+  (`DELETE /auth/admin/accounts/:id/avatar` / `.../wallpaper` — clear only; the self-service `PUT
+  /auth/profile/avatar|wallpaper` routes only ever act on the caller's own account) and grant/revoke an
+  achievement on someone else's behalf (the support-ticket case — same validation as the self-service
+  grant, just targeting `:id` instead of trusting the caller's own token).
+- **General settings (`SettingsScreen`).** The admin roster itself (promote by accountId; demote is
+  blocked server-side for the last remaining admin), a live service-health dashboard (pings every
+  platform service's own public `/health`, client-side, no admin gate needed), and the small fixed set
+  of branding/contact key-value settings (`GET`/`PUT /community/admin/settings`).
 
 ## Hub (`apps/hub`)
 
@@ -396,12 +432,15 @@ The hub still renders `ContextMenu`/`ToastContainer`/`ChatWidget`/`FriendsWidget
 ## Contract (`packages/protocol` → `@mygame/protocol`)
 
 The single source of truth for platform wire messages: `auth.ts`, `social.ts`, `chat.ts`,
-`achievements.ts`, `stats.ts`, `community.ts`, `invite.ts`, `envelope.ts` (the WS envelope
+`achievements.ts`, `stats.ts`, `community.ts`, `admin.ts`, `invite.ts`, `envelope.ts` (the WS envelope
 `{ v, type, seq, ts, traceId?, payload }` + `CONTRACT_VERSION`), `errors.ts` (`ErrorCode` +
 `ContractError.toProtocol()`). Per-game protocols live in each game's repo and may re-export these
 primitives. `stats.ts` and `community.ts` are flat, account-scoped HTTP contracts (like
 `achievements.ts`); `social.ts`/`chat.ts` are namespaced (`export * as social`/`chat`) since they're
-richer Socket.io domains.
+richer Socket.io domains. `admin.ts` is the odd one out — its schemas back routes served by three
+different services (`auth` for accounts/roster, `community` for changelog/discussion moderation and
+platform settings, `orchestrator` for force-stop), unified here because every one of those routes
+shares the same `isAdmin` gate (see "Admin panel" above).
 
 ## Supporting packages
 
@@ -413,10 +452,10 @@ richer Socket.io domains.
 
 ## Key data flows
 
-**Login.** Hub `AuthScreen` → `platformStore.login(name)` → `sdk.authClient.login` → `POST /auth/login`
-→ session saved to `localStorage` → `App` opens the social connection.
+**Login.** Hub `AuthScreen` → `platformStore.login(name, password)` → `sdk.authClient.login` →
+`POST /auth/login` → session saved to `localStorage` → `App` opens the social connection.
 
-**Friends/presence.** `socialStore.connect()` refreshes the access token via `/auth/login`, opens the
+**Friends/presence.** `socialStore.connect()` refreshes the access token via `/auth/refresh`, opens the
 Socket.io connection with `auth.token`, and renders whatever `social.friends` the server pushes.
 
 **Invite a friend.** `inviteFriend` → server checks friendship, mints a code, pushes
@@ -462,8 +501,9 @@ the complete list, dropping any local session absent from it).
 
 **Launch a game.** `handlePlay` → `recordGameEnter(id)` (best-effort, stamps `last_played_at`) →
 `enterGame(id)` (`POST /orchestrator/games/:id/enter`, best-effort) → `getHandoff()` → navigate to
-`http://host:PORT/?pt=<handoff>`. The game exchanges the token at its own `/auth/platform` and
-federates the identity; `mygame.init()` then starts the playtime heartbeat from inside the game.
+`http://host:PORT/?pt=<handoff>`. The game redeems the token via `mygame.auth.loginWithToken`
+(`POST /auth/exchange`, verified server-side by `auth`) to establish the same identity on its own
+origin; `mygame.init()` then starts the playtime heartbeat from inside the game.
 
 **Find a lobby / report activity.** A game calls `mygame.social.setActivity({ game, gameName, room,
 joinable: true })` when its room is open to join. `mygame.social.getLobbies(gameId)` (or the hub's
@@ -488,6 +528,16 @@ Each service has its own adapter next to its port (`auth/src/pgStore.ts` + `pgSt
 > migration genuinely uses `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (`wallpaper`, `title_achievement`)
 > — the first real use of ALTER in this schema, and the template for any future evolution of a table
 > that already has rows worth keeping.
+
+> **Open gap: the `password_hash` migration has no recovery path for pre-existing accounts.** The same
+> `accounts` migration also adds `password_hash TEXT`, backfills every existing row to `''`, then sets
+> the column `NOT NULL` (`packages/platform-db/src/index.ts`) — needed because login moved from
+> passwordless to password-based (see the `auth` section above). Password verification always fails
+> against an empty hash, so any account that existed before this migration runs is permanently locked
+> out of its old displayName/identity the moment this deploys, with no migration or reclaim path
+> implemented. This is a real open gap, not a solved one — it needs a decision (e.g. a one-time
+> password-set flow for pre-existing accounts, or accepting that they're abandoned) before this schema
+> is deployed anywhere with real existing accounts on it.
 
 **Write-behind model.** The in-memory store stays authoritative for **reads** (the hot
 friends/presence/chat path is synchronous and fast). Every **write** also goes to Postgres through the

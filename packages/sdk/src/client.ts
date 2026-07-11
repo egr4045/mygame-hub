@@ -40,6 +40,7 @@ import { useSocialStore } from './state/socialStore.js';
 import { useChatStore, type ChatSession } from './state/chatStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
 import { useToastStore, type ToastData } from './state/toastStore.js';
+import { useNotificationPrefsStore } from './state/notificationPrefsStore.js';
 import { Emitter } from './emitter.js';
 import { mountOverlay } from './overlay/mount.js';
 
@@ -152,7 +153,7 @@ class MygameClient {
     grant: async (achievementId: string): Promise<boolean> => {
       if (!this.gameId) return false;
       const result = await grantAchievement(this.gameId, achievementId);
-      if (result?.granted) {
+      if (result?.granted && useNotificationPrefsStore.getState().achievementToasts) {
         useToastStore.getState().addToast({
           type: 'achievement',
           title: 'Достижение получено',

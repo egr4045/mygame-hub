@@ -3,6 +3,8 @@ import { RoomEvent, type RemoteTrack, type RemoteParticipant } from 'livekit-cli
 import { useChatStore, getCallRoom } from '../state/chatStore.js';
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
+import { useDroppable } from '@dnd-kit/core';
+import ReactMarkdown from 'react-markdown';
 import type { social } from '@mygame/protocol';
 
 const activityText = (f?: Omit<social.Friend, 'status'>): string => {
@@ -12,12 +14,6 @@ const activityText = (f?: Omit<social.Friend, 'status'>): string => {
   return 'В сети';
 };
 
-/**
- * The platform chat widget: DMs and groups, shipped as part of `@mygame/sdk` so any game embedding
- * the SDK gets a working messenger "out of the box" via `mountOverlay()` — the hub renders the same
- * component directly in its own tree instead of through the Shadow-DOM overlay. When closed it's a
- * small launcher button (with an unread badge); when open it's the full draggable/resizable window.
- */
 export const ChatWidget = (): JSX.Element => {
   const isOpen = useChatStore((s) => s.isOpen);
   const sessions = useChatStore((s) => s.sessions);
@@ -29,6 +25,8 @@ export const ChatWidget = (): JSX.Element => {
   const addMembers = useChatStore((s) => s.addMembers);
   const leaveGroup = useChatStore((s) => s.leaveGroup);
   const removeMember = useChatStore((s) => s.removeMember);
+  const sendTyping = useChatStore((s) => s.sendTyping);
+  const typing = useChatStore((s) => s.typing);
   const openMenu = useMenuStore((s) => s.openMenu);
 
   const activeCall = useChatStore((s) => s.activeCall);
@@ -44,15 +42,10 @@ export const ChatWidget = (): JSX.Element => {
   const acceptedFriends = friends.filter((f) => f.status === 'accepted');
   const openChatWithUser = useChatStore((s) => s.openChatWithUser);
   const { addByCode } = useSocialStore.getState();
-  // Omits `status` — a participant being viewed here may not be a friend at all (no accepted/
-  // incoming/outgoing relationship to reflect), everything else `activityText`/the popover reads is required.
   const [viewingProfile, setViewingProfile] = useState<Omit<social.Friend, 'status'> | null>(null);
 
   const [inputText, setInputText] = useState('');
 
-  // Real per-track containers, filled imperatively from LiveKit's own attach()/detach() (raw
-  // MediaStream-backed elements — not something React's vdom should own). Keyed by participant
-  // identity (accountId) so each remote gets its own tile even in a group call.
   const remoteTilesRef = useRef<HTMLDivElement>(null);
   const localTileRef = useRef<HTMLDivElement>(null);
   const [micMuted, setMicMuted] = useState(false);
@@ -92,7 +85,6 @@ export const ChatWidget = (): JSX.Element => {
     room.on(RoomEvent.TrackUnsubscribed, onUnsubscribed);
     room.on(RoomEvent.ParticipantDisconnected, onParticipantLeft);
 
-    // Attach whatever's already subscribed (I may have connected after they published).
     room.remoteParticipants.forEach((p) => {
       p.trackPublications.forEach((pub) => {
         if (pub.track) onSubscribed(pub.track, pub, p);
@@ -130,28 +122,31 @@ export const ChatWidget = (): JSX.Element => {
     }
   }, [activeCall?.status]);
 
-  // New-group creation form
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
-
-  // Add-members-to-existing-group form
   const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [addMemberIds, setAddMemberIds] = useState<string[]>([]);
-
-  // Member list (with kick, owner-only) for an existing group
   const [isViewingMembers, setIsViewingMembers] = useState(false);
 
-  // Dragging state
-  const [position, setPosition] = useState({ x: window.innerWidth - 650, y: window.innerHeight - 500 });
+  const [position, setPosition] = useState(() => {
+    const saved = localStorage.getItem('chat_position');
+    return saved ? JSON.parse(saved) : { x: window.innerWidth - 650, y: window.innerHeight - 500 };
+  });
+  const [size, setSize] = useState(() => {
+    const saved = localStorage.getItem('chat_size');
+    return saved ? JSON.parse(saved) : { w: 600, h: 450 };
+  });
+
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [size, setSize] = useState({ w: 600, h: 450 });
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
-        setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+        const newPos = { x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y };
+        setPosition(newPos);
+        localStorage.setItem('chat_position', JSON.stringify(newPos));
       }
     };
     const handleMouseUp = () => setIsDragging(false);
@@ -188,7 +183,7 @@ export const ChatWidget = (): JSX.Element => {
           fontWeight: 700,
           fontSize: 14,
           boxShadow: '0 -4px 12px rgba(0,0,0,0.7)',
-          pointerEvents: 'auto', // re-enable clicks through the SDK overlay's click-through host
+          pointerEvents: 'auto',
         }}
       >
         <span>💬 Мессенджер</span>
@@ -208,6 +203,11 @@ export const ChatWidget = (): JSX.Element => {
     if (!inputText.trim() || !activeChatId || !me) return;
     sendMessage(activeChatId, inputText, me.accountId);
     setInputText('');
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+    if (activeChatId) sendTyping(activeChatId);
   };
 
   const toggleMember = (id: string) =>
@@ -247,11 +247,20 @@ export const ChatWidget = (): JSX.Element => {
         display: 'flex',
         overflow: 'hidden',
         zIndex: 1000,
-        resize: 'both', // Enables native CSS resizing on bottom-right corner!
-        pointerEvents: 'auto', // re-enable clicks through the SDK overlay's click-through host
+        resize: 'both',
+        pointerEvents: 'auto',
+      }}
+      onMouseUp={(e) => {
+        // Handle resize by storing size on mouseup when not dragging
+        if (!isDragging && e.currentTarget) {
+          const newSize = { w: e.currentTarget.offsetWidth, h: e.currentTarget.offsetHeight };
+          if (newSize.w !== size.w || newSize.h !== size.h) {
+            setSize(newSize);
+            localStorage.setItem('chat_size', JSON.stringify(newSize));
+          }
+        }
       }}
     >
-      {/* Sidebar: Dialogs */}
       <div style={{ width: 220, background: '#171a21', borderRight: '1px solid #3d4450', display: 'flex', flexDirection: 'column' }}>
         <div
           onMouseDown={(e) => {
@@ -274,41 +283,18 @@ export const ChatWidget = (): JSX.Element => {
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {sessions.map(s => (
-            <div
+            <DroppableChatSession
               key={s.id}
+              s={s}
+              activeChatId={activeChatId}
               onClick={() => { openChat(s.id); setIsAddingMembers(false); setIsViewingMembers(false); }}
-              style={{
-                padding: '12px 16px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                background: s.id === activeChatId ? '#2a475e' : 'transparent',
-                borderBottom: '1px solid rgba(255,255,255,0.05)'
-              }}
-              onMouseOver={e => { if(s.id !== activeChatId) e.currentTarget.style.background = '#23262e'; }}
-              onMouseOut={e => { if(s.id !== activeChatId) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <div style={{ width: 32, height: 32, borderRadius: s.type === 'group' ? 4 : '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
-                {s.avatar || (s.type === 'group' ? '👥' : '👤')}
-              </div>
-              <div style={{ fontSize: '13px', color: '#dcdedf', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {s.name}
-              </div>
-              {!!s.unreadCount && s.id !== activeChatId && (
-                <div style={{ background: '#5c7e10', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>
-                  {s.unreadCount}
-                </div>
-              )}
-            </div>
+            />
           ))}
         </div>
       </div>
 
-      {/* Main Chat Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#1b2838' }}>
         {isCreatingGroup ? (
-          /* --- NEW GROUP FORM --- */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Новая группа</div>
             <input
@@ -360,7 +346,6 @@ export const ChatWidget = (): JSX.Element => {
             </div>
           </div>
         ) : isAddingMembers && activeSession ? (
-          /* --- ADD MEMBERS FORM --- */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Добавить в «{activeSession.name}»</div>
             {(() => {
@@ -415,7 +400,6 @@ export const ChatWidget = (): JSX.Element => {
             </div>
           </div>
         ) : isViewingMembers && activeSession ? (
-          /* --- MEMBERS LIST (kick, owner-only) --- */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Участники «{activeSession.name}»</div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
@@ -473,7 +457,6 @@ export const ChatWidget = (): JSX.Element => {
           </div>
         ) : activeSession ? (
           <>
-            {/* Header */}
             <div style={{ height: 60, padding: '0 16px', borderBottom: '1px solid #3d4450', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#23262e' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 32, height: 32, borderRadius: activeSession.type === 'group' ? 4 : '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -485,7 +468,6 @@ export const ChatWidget = (): JSX.Element => {
                 </div>
               </div>
 
-              {/* Call Action Buttons */}
               <div style={{ display: 'flex', gap: 8 }}>
                 {activeSession.type === 'group' && (
                   <>
@@ -526,14 +508,19 @@ export const ChatWidget = (): JSX.Element => {
                 >
                   📹
                 </button>
+                <button
+                  onClick={() => (callForThisChat ? hangup() : ring(activeSession.id, 'screen'))}
+                  style={{ background: callForThisChat?.type === 'screen' ? '#5c7e10' : '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                  title="Демонстрация экрана"
+                >
+                  🖥️
+                </button>
               </div>
             </div>
 
-            {/* Content Area: Chat OR Call */}
             <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
               {callForThisChat ? (
-                /* --- REAL CALL VIEW (LiveKit) --- */
                 <div style={{ flex: 1, background: '#000', display: 'flex', flexDirection: 'column' }}>
                   {callForThisChat.status === 'ringing-out' && (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#dcdedf' }}>
@@ -580,9 +567,33 @@ export const ChatWidget = (): JSX.Element => {
                   )}
                 </div>
               ) : (
-                /* --- CHAT VIEW --- */
                 <>
-                  <div style={{ flex: 1, padding: '16px 16px 32px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files?.[0];
+                      if (!file) return;
+                      // Simple upload logic via standard fetch API to our /chat/upload service
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      try {
+                        const token = localStorage.getItem('mygame:auth');
+                        const res = await fetch('http://localhost:3004/chat/upload', {
+                          method: 'POST',
+                          headers: { authorization: `Bearer ${token}` },
+                          body: formData
+                        });
+                        const data = await res.json();
+                        if (data.url && me) {
+                          useChatStore.getState().sendMessage(activeSession.id, `Вложение: [${file.name}](${data.url})`, me.accountId);
+                        }
+                      } catch (err) {
+                        console.error('File upload failed', err);
+                      }
+                    }}
+                    style={{ flex: 1, padding: '16px 16px 32px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}
+                  >
                     {activeSession.messages.map(m => {
                       const isMe = m.senderId === me?.accountId;
                       const isSys = m.senderId === 'system';
@@ -597,7 +608,13 @@ export const ChatWidget = (): JSX.Element => {
                       return (
                         <div
                           key={m.id}
-                          style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '75%', position: 'relative' }}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: isMe ? 'flex-end' : 'flex-start',
+                            alignSelf: isMe ? 'flex-end' : 'flex-start',
+                            maxWidth: '100%',
+                          }}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -612,34 +629,56 @@ export const ChatWidget = (): JSX.Element => {
                         >
                           {!isMe && activeSession.type === 'group' && <div style={{ fontSize: '11px', color: '#8f98a0', marginBottom: 2 }}>{m.senderName}</div>}
 
-                          <div style={{ background: isMe ? '#2a475e' : '#3d4450', padding: '10px 14px', borderRadius: isMe ? '12px 12px 0 12px' : '12px 12px 12px 0', fontSize: '13px', color: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }}>
-                            <div style={{ lineHeight: 1.4 }}>{m.text}</div>
+                          <div style={{ background: isMe ? '#2AABEE' : '#3d4450', padding: '8px 12px', borderRadius: 8, color: '#fff', maxWidth: '85%', wordBreak: 'break-word' }}>
+                            <div className="chat-markdown" style={{ lineHeight: 1.4, margin: 0 }}>
+                              <ReactMarkdown>{m.text}</ReactMarkdown>
+                            </div>
                           </div>
 
-                          {/* Footer: Reactions & Timestamp */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: isMe ? 'flex-end' : 'flex-start', marginTop: 4, gap: 8 }}>
                             {m.reactions && Object.entries(m.reactions).map(([emoji, count]) => (
                               <div key={emoji} style={{ background: '#23262e', border: '1px solid #3d4450', borderRadius: 12, padding: '2px 8px', fontSize: '11px', color: '#dcdedf', cursor: 'pointer' }}>
                                 {emoji} {count}
                               </div>
                             ))}
-                            <div style={{ fontSize: '11px', color: '#6c7784', display: 'flex', alignItems: 'center', gap: 4 }}>
-                              {m.timestamp}
-                              {showReadReceipt && <span style={{ color: checkColor, fontWeight: 700, letterSpacing: -1 }}>{checkmarks}</span>}
-                            </div>
+                            <div style={{ fontSize: '11px', color: '#6c7784' }}>{m.timestamp} {isMe && (m.status === 'read' ? '✓✓' : '✓')}</div>
                           </div>
                         </div>
                       );
                     })}
+
+                    {/* Typing Indicators */}
+                    {(() => {
+                      const sessionTyping = typing[activeSession.id];
+                      if (!sessionTyping) return null;
+                      const now = Date.now();
+                      const typingUsers = Object.entries(sessionTyping)
+                        .filter(([userId, ts]) => userId !== me?.accountId && (now - ts < 3000))
+                        .map(([userId]) => {
+                          const participant = activeSession.participants.find(p => p.accountId === userId);
+                          return participant?.displayName || 'Кто-то';
+                        });
+
+                      if (typingUsers.length === 0) return null;
+                      
+                      const text = typingUsers.length > 2 
+                        ? `${typingUsers.slice(0, 2).join(', ')} и еще ${typingUsers.length - 2} печатают...`
+                        : `${typingUsers.join(', ')} ${typingUsers.length === 1 ? 'печатает...' : 'печатают...'}`;
+
+                      return (
+                        <div style={{ fontSize: '12px', color: '#8f98a0', fontStyle: 'italic', alignSelf: 'flex-start' }}>
+                          {text}
+                        </div>
+                      );
+                    })()}
                   </div>
 
-                  {/* Input */}
                   <div style={{ padding: '12px 16px', background: '#171a21', borderTop: '1px solid #3d4450', display: 'flex', alignItems: 'center', gap: 12 }}>
                     <input
                       type="text"
                       placeholder="Написать сообщение..."
                       value={inputText}
-                      onChange={e => setInputText(e.target.value)}
+                      onChange={handleInputChange}
                       onKeyDown={e => e.key === 'Enter' && handleSend()}
                       style={{ flex: 1, background: '#23262e', border: '1px solid #3d4450', borderRadius: 20, padding: '10px 16px', color: '#fff', outline: 'none', fontSize: '13px' }}
                     />
@@ -655,9 +694,7 @@ export const ChatWidget = (): JSX.Element => {
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c7784' }}>
-            Выберите диалог из списка
-          </div>
+          <DroppableNewChatArea />
         )}
       </div>
 

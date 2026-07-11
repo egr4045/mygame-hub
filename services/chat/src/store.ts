@@ -25,6 +25,12 @@ export interface Conversation {
   participantIds: string[];
   /** group only: the creator, who alone may remove *other* members. Null for dm. */
   ownerId: string | null;
+  /** group only: admins appointed by the owner. */
+  admins: string[];
+  /** group only: custom avatar URL. */
+  avatarUrl: string | null;
+  /** group only: pinned message. */
+  pinnedMessageId: string | null;
   createdAt: number;
 }
 
@@ -35,6 +41,9 @@ export interface ChatMessage {
   senderName: string;
   text: string;
   createdAt: number;
+  replyToId?: string | null;
+  mentions?: string[];
+  attachments?: { id: string; url: string; type: string; name: string }[];
 }
 
 export interface ChatParticipant {
@@ -52,6 +61,9 @@ export interface ChatThread {
   /** dm only: the other participant's last-read timestamp (read-receipt UI). Null for groups. */
   otherReadAt: number | null;
   ownerId: string | null;
+  admins?: string[];
+  avatarUrl?: string | null;
+  pinnedMessageId?: string | null;
 }
 
 /** Why an `addMembers`/`removeMember` call was rejected by the store (not found or wrong type). */
@@ -73,8 +85,14 @@ export interface ChatStore {
   addMembers(conversationId: string, memberIds: string[]): Conversation | MembershipChangeError;
   /** group only. Removes `targetId` (self-removal = "leave"). */
   removeMember(conversationId: string, targetId: string): Conversation | MembershipChangeError;
+  /** group only. Owner can promote/demote admins. */
+  setGroupRole(conversationId: string, targetId: string, role: 'admin' | 'member'): Conversation | MembershipChangeError;
+  /** group only. Admins/owner can change name/avatar. */
+  updateGroupProfile(conversationId: string, name?: string, avatarUrl?: string | null): Conversation | MembershipChangeError;
+  /** group only. Admins/owner can pin a message. */
+  pinMessage(conversationId: string, messageId: string | null): Conversation | MembershipChangeError;
   /** Null if `senderId` isn't a participant of `conversationId`. */
-  send(conversationId: string, senderId: string, text: string): ChatMessage | null;
+  send(conversationId: string, senderId: string, text: string, opts?: { replyToId?: string, mentions?: string[], attachments?: ChatMessage['attachments'] }): ChatMessage | null;
   /** Mark everything up to now as read for `accountId`. Null if there was nothing unread. */
   markRead(conversationId: string, accountId: string): { upTo: number } | null;
   /** Most recent `limit` messages of a conversation, oldest first. */
@@ -137,6 +155,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         name: null,
         participantIds: [a, b],
         ownerId: null,
+        admins: [],
+        avatarUrl: null,
+        pinnedMessageId: null,
         createdAt: now(),
       };
       conversations.set(conv.id, conv);
@@ -153,6 +174,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         name,
         participantIds,
         ownerId: creator,
+        admins: [],
+        avatarUrl: null,
+        pinnedMessageId: null,
         createdAt: now(),
       };
       conversations.set(conv.id, conv);
@@ -184,11 +208,45 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       if (conv.type !== 'group') return 'not_a_group';
       if (!conv.participantIds.includes(targetId)) return 'not_a_member';
       conv.participantIds = conv.participantIds.filter((id) => id !== targetId);
+      conv.admins = conv.admins.filter((id) => id !== targetId);
       membership.get(conversationId)?.delete(targetId);
       return conv;
     },
 
-    send(conversationId, senderId, text) {
+    setGroupRole(conversationId, targetId, role) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return 'not_found';
+      if (conv.type !== 'group') return 'not_a_group';
+      if (!conv.participantIds.includes(targetId)) return 'not_a_member';
+      
+      if (role === 'admin' && !conv.admins.includes(targetId)) {
+        conv.admins.push(targetId);
+      } else if (role === 'member') {
+        conv.admins = conv.admins.filter(id => id !== targetId);
+      }
+      return conv;
+    },
+
+    updateGroupProfile(conversationId, name, avatarUrl) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return 'not_found';
+      if (conv.type !== 'group') return 'not_a_group';
+      
+      if (name !== undefined) conv.name = name;
+      if (avatarUrl !== undefined) conv.avatarUrl = avatarUrl;
+      return conv;
+    },
+
+    pinMessage(conversationId, messageId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return 'not_found';
+      if (conv.type !== 'group') return 'not_a_group';
+      
+      conv.pinnedMessageId = messageId;
+      return conv;
+    },
+
+    send(conversationId, senderId, text, opts) {
       const conv = conversations.get(conversationId);
       if (!conv || !conv.participantIds.includes(senderId)) return null;
       const msg: ChatMessage = {
@@ -198,6 +256,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         senderName: displayNameOf(senderId),
         text,
         createdAt: now(),
+        replyToId: opts?.replyToId,
+        mentions: opts?.mentions,
+        attachments: opts?.attachments,
       };
       const arr = messages.get(conversationId) ?? [];
       arr.push(msg);
@@ -242,6 +303,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
           unreadCount,
           otherReadAt,
           ownerId: conv.ownerId,
+          admins: conv.admins,
+          avatarUrl: conv.avatarUrl,
+          pinnedMessageId: conv.pinnedMessageId,
         });
       }
       return out.sort((a, b) => (b.lastMessage?.createdAt ?? 0) - (a.lastMessage?.createdAt ?? 0));

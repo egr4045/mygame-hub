@@ -10,8 +10,9 @@ import { getHandoff, recordGameEnter } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { SteamOverlay } from '../components/SteamOverlay.js';
 import { ProfileView } from '../components/ProfileView.js';
+import { SettingsModal } from '../components/SettingsModal.js';
 import { ContextMenu } from '@mygame/sdk';
-import { ChatWidget } from '@mygame/sdk';
+import { ChatWidget, SocialDndProvider } from '@mygame/sdk';
 import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
@@ -32,6 +33,7 @@ export const HubScreen = (): JSX.Element => {
 
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'notifications' | 'account' | null>(null);
 
   useEffect(() => {
     // Show one-time modal per session
@@ -79,10 +81,11 @@ export const HubScreen = (): JSX.Element => {
   const viewedGame = GAMES.find(g => g.id === viewedGameId) || null;
 
   return (
-    <div 
-      style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#1b2838', color: '#dcdedf', fontFamily: 'Motiva Sans, Arial, Helvetica, sans-serif', pointerEvents: 'auto' }} 
-      className="civa-fade-in"
-      onContextMenu={(e) => {
+    <SocialDndProvider>
+      <div 
+        style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#1b2838', color: '#dcdedf', fontFamily: 'Motiva Sans, Arial, Helvetica, sans-serif', pointerEvents: 'auto' }} 
+        className="civa-fade-in"
+        onContextMenu={(e) => {
         e.preventDefault();
         openMenu(e.clientX, e.clientY, [
           { label: '🔄 Перезагрузить Хаб', action: () => window.location.reload() }
@@ -119,7 +122,7 @@ export const HubScreen = (): JSX.Element => {
                   ...(invites.length > 0
                     ? [{ label: '🗑️ Скрыть приглашения', action: () => invites.forEach((inv) => dismissInvite(inv.code)) }]
                     : []),
-                  { label: '⚙️ Настройки уведомлений', action: () => addToast({ type: 'system', title: 'Настройки уведомлений', content: 'Скоро', icon: '⚙️' }) }
+                  { label: '⚙️ Настройки уведомлений', action: () => setSettingsTab('notifications') }
                 ]);
               }}
             >
@@ -138,7 +141,7 @@ export const HubScreen = (): JSX.Element => {
                 e.stopPropagation();
                 const myId = me?.accountId ?? account?.accountId ?? null;
                 openMenu(e.clientX, e.clientY + 20, [
-                  { label: '⚙️ Настройки Хаба', action: () => addToast({ type: 'system', title: 'Настройки Хаба', content: 'Скоро', icon: '⚙️' }) },
+                  { label: '⚙️ Настройки Хаба', action: () => setSettingsTab('account') },
                   {
                     label: '🔗 Скопировать мой ID',
                     action: () => {
@@ -242,11 +245,20 @@ export const HubScreen = (): JSX.Element => {
         </div>
       )}
 
+      {settingsTab && (
+        <SettingsModal
+          initialTab={settingsTab}
+          onClose={() => setSettingsTab(null)}
+          onGoToProfile={() => setActiveTab('profile')}
+        />
+      )}
+
       <FriendsWidget onJoinActivity={handleJoinActivity} />
       <ChatWidget />
       <ContextMenu />
       <ToastContainer />
-    </div>
+      </div>
+    </SocialDndProvider>
   );
 };
 

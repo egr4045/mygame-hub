@@ -4,6 +4,8 @@ import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useChatStore } from '../state/chatStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
 const inputStyle: CSSProperties = {
   flex: 1,
@@ -255,16 +257,29 @@ const FriendRow = ({ f, onContextMenu }: { f: social.Friend, onContextMenu: (e: 
   const isOnline = f.presence === 'online';
   const isInGame = isOnline && f.activity;
 
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `friend:${f.accountId}`,
+  });
+
+  const style = {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '6px 8px',
+    cursor: 'grab',
+    gap: 12,
+    background: isDragging ? '#23262e' : 'transparent',
+    opacity: isDragging ? 0.5 : 1,
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    zIndex: isDragging ? 9999 : undefined,
+  };
+
   return (
     <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
       onContextMenu={onContextMenu}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '6px 8px',
-        cursor: 'pointer',
-        gap: 12
-      }}
+      style={style}
       onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
       onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
     >

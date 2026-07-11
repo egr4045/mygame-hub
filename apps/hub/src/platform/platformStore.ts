@@ -44,6 +44,9 @@ interface PlatformState {
   /** Re-claim the stored account on load (so the hub shows you logged in). */
   restore: () => void;
   toggleFavorite: (gameId: string) => void;
+  /** Reflect a display-name change already applied server-side (`@mygame/sdk`'s `changeDisplayName`)
+   *  in the cached account — that call replaces the session's tokens/name but doesn't touch this store. */
+  renameAccount: (displayName: string) => void;
 }
 
 /** Best-effort: populate favorites once we have a session, without blocking the login flow on it. */
@@ -137,5 +140,10 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
     const next = current.includes(gameId) ? current.filter((id) => id !== gameId) : [...current, gameId];
     set({ favoriteGameIds: next }); // optimistic — matches the rest of this store's style
     void apiSetFavorites(next);
+  },
+
+  renameAccount: (displayName) => {
+    const account = get().account;
+    if (account) set({ account: { ...account, displayName } });
   },
 }));

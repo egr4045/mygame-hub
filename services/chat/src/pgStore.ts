@@ -39,6 +39,14 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       ]),
     );
 
+  const updateConversation = (c: Conversation): void =>
+    queue.push('chat.conversation.update', () =>
+      pool.query(
+        `UPDATE conversations SET name = $1, avatar_url = $2, pinned_message_id = $3, admins = $4 WHERE id = $5`,
+        [c.name, c.avatarUrl, c.pinnedMessageId, JSON.stringify(c.admins), c.id]
+      )
+    );
+
   const persistMember = (conversationId: string, accountId: string, lastReadAt: number): void =>
     queue.push('chat.member', () =>
       pool.query(
@@ -60,9 +68,9 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
   const persistMessage = (m: ChatMessage): void =>
     queue.push('chat.message', () =>
       pool.query(
-        `INSERT INTO messages (id, conversation_id, sender_id, text, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [m.id, m.conversationId, m.senderId, m.text, m.createdAt],
+        `INSERT INTO messages (id, conversation_id, sender_id, text, created_at, reply_to_id, mentions, attachments)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [m.id, m.conversationId, m.senderId, m.text, m.createdAt, m.replyToId ?? null, JSON.stringify(m.mentions ?? []), JSON.stringify(m.attachments ?? [])],
       ),
     );
 
@@ -72,9 +80,9 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       for (const r of accounts.rows) mem.upsertAccount(r.id as string, r.display_name as string);
 
       const convRows = await pool.query(
-        `SELECT c.id, c.type, c.name, c.owner_id, c.created_at, array_agg(cm.account_id) AS participant_ids
+        `SELECT c.id, c.type, c.name, c.owner_id, c.created_at, c.admins, c.avatar_url, c.pinned_message_id, array_agg(cm.account_id) AS participant_ids
          FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id
-         GROUP BY c.id, c.type, c.name, c.owner_id, c.created_at`,
+         GROUP BY c.id, c.type, c.name, c.owner_id, c.created_at, c.admins, c.avatar_url, c.pinned_message_id`,
       );
       const conversations: Conversation[] = convRows.rows.map((r) => ({
         id: r.id as string,
@@ -82,6 +90,9 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
         name: (r.name as string | null) ?? null,
         participantIds: r.participant_ids as string[],
         ownerId: (r.owner_id as string | null) ?? null,
+        admins: (r.admins as string[] | null) ?? [],
+        avatarUrl: (r.avatar_url as string | null) ?? null,
+        pinnedMessageId: (r.pinned_message_id as string | null) ?? null,
         createdAt: Number(r.created_at),
       }));
 
@@ -95,7 +106,7 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       }));
 
       const msgRows = await pool.query(
-        `SELECT id, conversation_id, sender_id, text, created_at FROM messages ORDER BY created_at ASC`,
+        `SELECT id, conversation_id, sender_id, text, created_at, reply_to_id, mentions, attachments FROM messages ORDER BY created_at ASC`,
       );
       const messages: ChatMessage[] = msgRows.rows.map((r) => ({
         id: r.id as string,
@@ -104,6 +115,9 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
         senderName: mem.getAccount(r.sender_id as string)?.displayName ?? (r.sender_id as string).slice(0, 8),
         text: r.text as string,
         createdAt: Number(r.created_at),
+        replyToId: (r.reply_to_id as string | null) ?? undefined,
+        mentions: (r.mentions as string[] | null) ?? undefined,
+        attachments: (r.attachments as any[] | null) ?? undefined,
       }));
 
       mem.hydrate({ conversations, memberships, messages });
@@ -161,8 +175,26 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       return result;
     },
 
-    send(conversationId, senderId, text) {
-      const m = mem.send(conversationId, senderId, text);
+    setGroupRole(conversationId, targetId, role) {
+      const result = mem.setGroupRole(conversationId, targetId, role);
+      if (typeof result !== 'string') updateConversation(result);
+      return result;
+    },
+
+    updateGroupProfile(conversationId, name, avatarUrl) {
+      const result = mem.updateGroupProfile(conversationId, name, avatarUrl);
+      if (typeof result !== 'string') updateConversation(result);
+      return result;
+    },
+
+    pinMessage(conversationId, messageId) {
+      const result = mem.pinMessage(conversationId, messageId);
+      if (typeof result !== 'string') updateConversation(result);
+      return result;
+    },
+
+    send(conversationId, senderId, text, opts) {
+      const m = mem.send(conversationId, senderId, text, opts);
       if (m) persistMessage(m);
       return m;
     },

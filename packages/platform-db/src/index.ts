@@ -92,6 +92,9 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     );
     -- group only: the creator, who alone may remove *other* members. Null for dm.
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_id TEXT;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS admins JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_message_id TEXT;
 
     CREATE TABLE IF NOT EXISTS conversation_members (
       conversation_id  TEXT NOT NULL,
@@ -109,6 +112,9 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       created_at       BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at);
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS mentions JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb;
 
     -- Playtime per (account, game), owned by auth. last_played_at is written on game launch;
     -- seconds_played accrues from in-game SDK heartbeats, clamped server-side so a gap or closed

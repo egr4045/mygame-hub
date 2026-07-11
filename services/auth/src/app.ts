@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Clock, Logger } from '@mygame/shared-types';
 import {
+  changeDisplayNameRequest,
+  changePasswordRequest,
   exchangeRequest,
   grantAchievementRequest,
   handoffRequest,
@@ -452,6 +454,63 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       return;
     }
     send(res, 200, { favoriteGameIds: account.favoriteGameIds });
+    return;
+  }
+
+  // Change the caller's own password. No session revocation exists on this platform (JWTs are
+  // stateless, signature+expiry only — a known gap, see docs/STATUS.md), so already-issued access/
+  // refresh tokens on other devices stay valid until they naturally expire; this only affects future logins.
+  if (method === 'PUT' && url === '/auth/profile/password') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = changePasswordRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid password change' });
+      return;
+    }
+    const account = deps.accounts.get(claims.sub);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    if (!verifyPassword(parsed.data.currentPassword, account.passwordHash)) {
+      send(res, 401, { code: 'unauthorized', message: 'invalid credentials' });
+      return;
+    }
+    deps.accounts.setPasswordHash(claims.sub, hashPassword(parsed.data.newPassword));
+    deps.logger.info('password changed', { accountId: claims.sub });
+    send(res, 200, { ok: true });
+    return;
+  }
+
+  // Rename the caller's own account. `id` (and every friend/chat/achievement relationship keyed off
+  // it) is unchanged — this is a display-name edit, not a re-registration. `name` is baked into every
+  // JWT at mint time (and /auth/refresh only ever forwards the *old* token's claims, never re-reads
+  // the account), so a rename must mint fresh tokens here — otherwise the old name would keep
+  // resurfacing (in this and every other service's socket auth) until the next full login.
+  if (method === 'PUT' && url === '/auth/profile/display-name') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = changeDisplayNameRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid display name' });
+      return;
+    }
+    const { account, conflict } = deps.accounts.setDisplayName(claims.sub, parsed.data.displayName);
+    if (conflict) {
+      send(res, 409, { code: 'conflict', message: 'display name already taken' });
+      return;
+    }
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    const [accessToken, refreshToken] = await Promise.all([
+      deps.auth.signAccess(account.id, account.displayName),
+      deps.auth.signRefresh(account.id, account.displayName),
+    ]);
+    deps.logger.info('display name changed', { accountId: claims.sub });
+    send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
     return;
   }
 

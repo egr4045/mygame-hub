@@ -107,6 +107,15 @@ export type SetTitleRequest = z.infer<typeof setTitleRequest>;
 export const setFavoritesRequest = z.object({ gameIds: z.array(z.string().min(1)) });
 export type SetFavoritesRequest = z.infer<typeof setFavoritesRequest>;
 
+export const changePasswordRequest = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(1),
+});
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequest>;
+
+export const changeDisplayNameRequest = z.object({ displayName: z.string().min(1).max(32) });
+export type ChangeDisplayNameRequest = z.infer<typeof changeDisplayNameRequest>;
+
 export const profileResponse = z.object({
   avatarIcon: z.string().nullable(),
   wallpaper: z.string().nullable(),

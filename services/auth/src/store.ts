@@ -55,6 +55,10 @@ export interface AccountStore {
   /** Full replace, mirroring setWallpaper/setTitleAchievement — the list is small and rarely mutated,
    *  so there's no need for an incremental add/remove API. */
   setFavorites(id: string, gameIds: string[]): Account | undefined;
+  setPasswordHash(id: string, passwordHash: string): Account | undefined;
+  /** `false` if `name` is already taken by a *different* account (case-insensitive, same rule as
+   *  registration). Renaming in place preserves `id` — durable identity, same as every other profile edit. */
+  setDisplayName(id: string, name: string): { account: Account | undefined; conflict: boolean };
   setAdmin(id: string, isAdmin: boolean): Account | undefined;
   /** Paginated, optionally filtered by a case-insensitive substring match on `displayName`/`id`
    *  (apps/admin's account list). `total` is the filtered count, for the caller to compute page count. */
@@ -153,6 +157,24 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       if (!acc) return undefined;
       acc.favoriteGameIds = gameIds;
       return acc;
+    },
+    setPasswordHash(id, passwordHash) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      acc.passwordHash = passwordHash;
+      return acc;
+    },
+    setDisplayName(id, name) {
+      const acc = accounts.get(id);
+      if (!acc) return { account: undefined, conflict: false };
+      const needle = name.toLowerCase();
+      for (const other of accounts.values()) {
+        if (other.id !== id && other.displayName.toLowerCase() === needle) {
+          return { account: undefined, conflict: true };
+        }
+      }
+      acc.displayName = name;
+      return { account: acc, conflict: false };
     },
     setAdmin(id, isAdmin) {
       const acc = accounts.get(id);

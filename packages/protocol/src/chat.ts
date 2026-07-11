@@ -18,6 +18,14 @@ export const chatMessage = z.object({
   senderName: z.string(),
   text: z.string(),
   createdAt: z.number(), // epoch ms
+  replyToId: z.string().nullable().optional(),
+  mentions: z.array(z.string()).optional(),
+  attachments: z.array(z.object({
+    id: z.string(),
+    url: z.string(),
+    type: z.string(),
+    name: z.string()
+  })).optional(),
 });
 export type ChatMessage = z.infer<typeof chatMessage>;
 
@@ -38,6 +46,12 @@ export const chatThread = z.object({
   otherReadAt: z.number().nullable(),
   /** group only: the creator, who alone may remove *other* members. Null for dm. */
   ownerId: z.string().nullable(),
+  /** group only: admins appointed by the owner. */
+  admins: z.array(z.string()).optional(),
+  /** group only: custom avatar URL. */
+  avatarUrl: z.string().nullable().optional(),
+  /** group only: pinned message. */
+  pinnedMessageId: z.string().nullable().optional(),
 });
 export type ChatThread = z.infer<typeof chatThread>;
 
@@ -47,6 +61,9 @@ export const C2S = {
   createGroup: 'chat.createGroup',
   addMembers: 'chat.addMembers', // group only; any current member may add others
   removeMember: 'chat.removeMember', // group only; self (leave) always allowed, others only by the owner
+  setGroupRole: 'chat.setGroupRole', // group only; owner can promote/demote admins
+  updateGroupProfile: 'chat.updateGroupProfile', // group only; admins/owner can change name/avatar
+  pinMessage: 'chat.pinMessage', // group only; admins/owner can pin a message
   send: 'chat.send',
   markRead: 'chat.markRead',
   getHistory: 'chat.getHistory',
@@ -57,6 +74,7 @@ export const C2S = {
   callAccept: 'chat.callAccept', // join the call already ringing for this conversation
   callDecline: 'chat.callDecline', // decline without joining
   callHangup: 'chat.callHangup', // leave an active/ringing call
+  typing: 'chat.typing',
 } as const;
 
 export const openDmPayload = z.object({ withAccountId: z.string().min(1) });
@@ -74,7 +92,31 @@ export const removeMemberPayload = z.object({
   conversationId: z.string().min(1),
   accountId: z.string().min(1),
 });
-export const sendPayload = z.object({ conversationId: z.string().min(1), text: z.string().min(1).max(2000) });
+export const setGroupRolePayload = z.object({
+  conversationId: z.string().min(1),
+  accountId: z.string().min(1),
+  role: z.enum(['admin', 'member']),
+});
+export const updateGroupProfilePayload = z.object({
+  conversationId: z.string().min(1),
+  name: z.string().min(1).max(64).optional(),
+  avatarUrl: z.string().nullable().optional(),
+});
+export const pinMessagePayload = z.object({
+  conversationId: z.string().min(1),
+  messageId: z.string().nullable(), // null to unpin
+});
+export const sendPayload = z.object({ 
+  conversationId: z.string().min(1), 
+  text: z.string().max(2000), // Can be empty if there are attachments
+  replyToId: z.string().optional(),
+  attachments: z.array(z.object({
+    id: z.string(),
+    url: z.string(),
+    type: z.string(),
+    name: z.string()
+  })).optional()
+});
 export const markReadPayload = z.object({ conversationId: z.string().min(1) });
 export const getHistoryPayload = z.object({
   conversationId: z.string().min(1),
@@ -82,29 +124,40 @@ export const getHistoryPayload = z.object({
 });
 export const getStatePayload = z.object({}).strict();
 
-export const callType = z.enum(['audio', 'video']);
+export const callType = z.enum(['audio', 'video', 'screen']);
 export const callRingPayload = z.object({ conversationId: z.string().min(1), callType });
 /** Shared by accept/decline/hangup — all three only ever need to know which call. */
 export const callActionPayload = z.object({ conversationId: z.string().min(1) });
 export const callTokenRequest = z.object({ conversationId: z.string().min(1) });
+export const typingPayload = z.object({ conversationId: z.string().min(1) });
+
+export const typingAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 
 export type CallType = z.infer<typeof callType>;
 export type OpenDmPayload = z.infer<typeof openDmPayload>;
 export type CreateGroupPayload = z.infer<typeof createGroupPayload>;
 export type AddMembersPayload = z.infer<typeof addMembersPayload>;
 export type RemoveMemberPayload = z.infer<typeof removeMemberPayload>;
+export type SetGroupRolePayload = z.infer<typeof setGroupRolePayload>;
+export type UpdateGroupProfilePayload = z.infer<typeof updateGroupProfilePayload>;
+export type PinMessagePayload = z.infer<typeof pinMessagePayload>;
 export type SendPayload = z.infer<typeof sendPayload>;
 export type MarkReadPayload = z.infer<typeof markReadPayload>;
 export type GetHistoryPayload = z.infer<typeof getHistoryPayload>;
 export type CallRingPayload = z.infer<typeof callRingPayload>;
 export type CallActionPayload = z.infer<typeof callActionPayload>;
 export type CallTokenRequest = z.infer<typeof callTokenRequest>;
+export type TypingPayload = z.infer<typeof typingPayload>;
+export type TypingAck = z.infer<typeof typingAck>;
 
 /** Acks returned to the caller of the corresponding C2S event. */
 export const openDmAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
 export const createGroupAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
 export const addMembersAck = z.object({ conversationId: z.string().optional(), error: z.string().optional() });
 export const removeMemberAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
+export const setGroupRoleAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
+export const updateGroupProfileAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
+export const pinMessageAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 export const sendAck = z.object({ message: chatMessage.optional(), error: z.string().optional() });
 export const historyAck = z.object({ conversationId: z.string(), messages: z.array(chatMessage) });
 export const callAck = z.object({ ok: z.boolean(), error: z.string().optional() });
@@ -115,6 +168,9 @@ export type OpenDmAck = z.infer<typeof openDmAck>;
 export type CreateGroupAck = z.infer<typeof createGroupAck>;
 export type AddMembersAck = z.infer<typeof addMembersAck>;
 export type RemoveMemberAck = z.infer<typeof removeMemberAck>;
+export type SetGroupRoleAck = z.infer<typeof setGroupRoleAck>;
+export type UpdateGroupProfileAck = z.infer<typeof updateGroupProfileAck>;
+export type PinMessageAck = z.infer<typeof pinMessageAck>;
 export type SendAck = z.infer<typeof sendAck>;
 export type HistoryAck = z.infer<typeof historyAck>;
 export type CallAck = z.infer<typeof callAck>;
@@ -130,6 +186,7 @@ export const S2C = {
   callAccepted: 'chat.callAccepted', // pushed to everyone already in the call when accountId joins
   callDeclined: 'chat.callDeclined', // pushed to the ringer(s) when accountId declines
   callEnded: 'chat.callEnded', // pushed to everyone once the call has no participants left
+  typing: 'chat.typing', // pushed to every other participant when someone is typing
 } as const;
 
 export const threadsEvent = z.object({ threads: z.array(chatThread) });
@@ -143,6 +200,9 @@ export const callRingEvent = z.object({
 });
 export const callParticipantEvent = z.object({ conversationId: z.string(), accountId: z.string() });
 export const callEndedEvent = z.object({ conversationId: z.string() });
+/** Pushed once per `typing` call — the client debounces/expires these locally (see chatStore.ts),
+ *  the server doesn't track or throttle typing state itself. */
+export const typingEvent = z.object({ conversationId: z.string(), accountId: z.string() });
 
 export type ThreadsEvent = z.infer<typeof threadsEvent>;
 export type MessageEvent = z.infer<typeof messageEvent>;
@@ -150,3 +210,4 @@ export type ReadEvent = z.infer<typeof readEvent>;
 export type CallRingEvent = z.infer<typeof callRingEvent>;
 export type CallParticipantEvent = z.infer<typeof callParticipantEvent>;
 export type CallEndedEvent = z.infer<typeof callEndedEvent>;
+export type TypingEvent = z.infer<typeof typingEvent>;

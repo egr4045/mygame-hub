@@ -12,6 +12,7 @@ import { chat, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
 import { loadSession, freshAccessToken } from '../authClient.js';
 import { useToastStore } from './toastStore.js';
+import { useNotificationPrefsStore } from './notificationPrefsStore.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -61,6 +62,8 @@ interface ChatState {
   sessions: ChatSession[];
   error: string | null;
   activeCall: ActiveCall | null;
+  /** conversationId -> accountId -> timestamp of last typing event */
+  typing: Record<string, Record<string, number>>;
 
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
@@ -82,6 +85,7 @@ interface ChatState {
   leaveGroup: (chatId: string) => void;
   /** `_senderId` is accepted for call-site compatibility but ignored — the server derives it from the JWT. */
   sendMessage: (chatId: string, text: string, _senderId?: string) => void;
+  sendTyping: (chatId: string) => void;
 
   /** Start ringing every other participant of `chatId`. */
   ring: (chatId: string, type: chat.CallType) => void;
@@ -186,6 +190,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   error: null,
   activeCall: null,
+  typing: {},
 
   connect: async () => {
     if (socket?.connected) return;
@@ -262,6 +267,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     socket.on(chat.S2C.error, (e: ProtocolError) => set({ error: e.message }));
 
+    socket.on(chat.S2C.typing, (p: chat.TypingEvent) => {
+      set((s) => {
+        const conv = s.typing[p.conversationId] || {};
+        return {
+          typing: {
+            ...s.typing,
+            [p.conversationId]: {
+              ...conv,
+              [p.accountId]: Date.now()
+            }
+          }
+        };
+      });
+    });
+
     // Someone is ringing me — surface it: open the widget on that exact conversation so the
     // incoming-call view (rendered inline per-conversation, not a separate global banner) is
     // immediately visible. If I'm already in/ringing a call, this simply overwrites it (juggling
@@ -272,12 +292,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isOpen: true,
         activeChatId: p.conversationId,
       });
-      useToastStore.getState().addToast({
-        type: 'system',
-        title: 'Входящий звонок',
-        content: `Звонит ${p.fromName ?? 'пользователь'}...`,
-        icon: '📞',
-      });
+      if (useNotificationPrefsStore.getState().callToasts) {
+        useToastStore.getState().addToast({
+          type: 'system',
+          title: 'Входящий звонок',
+          content: `Звонит ${p.fromName ?? 'пользователь'}...`,
+          icon: '📞',
+        });
+      }
     });
 
     // Someone joined the call. If that's *me* (the callee's own acceptCall already handles its own
@@ -407,6 +429,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket?.emit(chat.C2S.send, { conversationId: chatId, text }, (ack: chat.SendAck) => {
       if (ack?.error) set({ error: ack.error });
     });
+  },
+
+  sendTyping: (chatId) => {
+    if (!socket?.connected) return;
+    socket.emit(chat.C2S.typing, { conversationId: chatId });
   },
 
   ring: (chatId, type) => {

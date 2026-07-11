@@ -2,6 +2,7 @@ import { ToastContainer } from './ToastContainer.js';
 import { ContextMenu } from './ContextMenu.js';
 import { ChatWidget } from './ChatWidget.js';
 import { FriendsWidget } from './FriendsWidget.js';
+import { SocialDndProvider } from './SocialDndProvider.js';
 
 /**
  * The mygame overlay: toast notifications, the right-click context menu, the chat widget (DMs +
@@ -11,10 +12,10 @@ import { FriendsWidget } from './FriendsWidget.js';
  * through this overlay.
  */
 export const MygameOverlay = (): JSX.Element => (
-  <>
+  <SocialDndProvider>
     <ToastContainer />
     <ContextMenu />
     <ChatWidget />
     <FriendsWidget />
-  </>
+  </SocialDndProvider>
 );

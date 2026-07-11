@@ -4,6 +4,7 @@
  * ui/...`) and a self-mounting Shadow-DOM overlay, with these React hooks kept as a thin binding.
  */
 export * from './state/toastStore.js';
+export * from './state/notificationPrefsStore.js';
 export * from './state/socialStore.js';
 export * from './state/chatStore.js';
 export * from './state/menuStore.js';
@@ -14,6 +15,7 @@ export { ChatWidget } from './components/ChatWidget.js';
 export { FriendsWidget } from './components/FriendsWidget.js';
 export { FriendsSidebar } from './components/FriendsSidebar.js';
 export { MygameOverlay } from './components/MygameOverlay.js';
+export { SocialDndProvider } from './components/SocialDndProvider.js';
 export * from './overlay/mount.js';
 
 export * from './config.js';

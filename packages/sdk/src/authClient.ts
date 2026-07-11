@@ -230,6 +230,46 @@ export const setTitleAchievement = async (ref: TitleAchievementRef): Promise<boo
   }
 };
 
+/** Change the current account's password. `false` on failure (including a wrong `currentPassword`). */
+export const changePassword = async (currentPassword: string, newPassword: string): Promise<boolean> => {
+  const token = await freshAccessToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/password`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Rename the current account (accountId is unchanged). The server mints fresh tokens with the new name
+ * baked in (a JWT's `name` claim is fixed at mint time) and this replaces the whole cached session with
+ * them, same as `login`/`register` — a locally-patched `displayName` alone would leave the *old* name
+ * resurfacing on every other service's socket auth until the next full login. `false` on failure
+ * (including if the name is already taken).
+ */
+export const changeDisplayName = async (displayName: string): Promise<boolean> => {
+  const token = await freshAccessToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/profile/display-name`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ displayName }),
+    });
+    if (!res.ok) return false;
+    saveSession((await res.json()) as Session);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** Replace the account's full list of favorited game ids. Returns false on failure. */
 export const setFavorites = async (gameIds: string[]): Promise<boolean> => {
   const token = await freshAccessToken();

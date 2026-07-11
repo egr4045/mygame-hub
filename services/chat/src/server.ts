@@ -6,6 +6,9 @@
  * is also pushed immediately so an open chat window updates without waiting for the next push.
  */
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Server as IOServer, type Socket } from 'socket.io';
 import { AccessToken } from 'livekit-server-sdk';
 import { ContractError, chat } from '@mygame/protocol';
@@ -117,6 +120,73 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       const jwt = await at.toJwt();
       const body: chat.CallTokenResponse = { token: jwt, url: deps.livekit.url };
       sendJson(res, 200, body);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/chat/upload') {
+      const token = bearer(req);
+      if (!token) return sendJson(res, 401, { code: 'unauthorized', message: 'missing token' });
+      try {
+        await deps.auth.verify(token);
+      } catch {
+        return sendJson(res, 401, { code: 'unauthorized', message: 'invalid token' });
+      }
+
+      const fileName = (req.headers['x-file-name'] as string) || 'file';
+      const fileType = req.headers['content-type'] || 'application/octet-stream';
+      const ext = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
+      const id = randomUUID();
+      const filePath = path.join(process.cwd(), '.data', 'uploads', id + ext);
+
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+      const stream = fs.createWriteStream(filePath);
+      req.pipe(stream);
+      await new Promise((resolve, reject) => {
+        stream.on('finish', resolve);
+        stream.on('error', reject);
+      });
+
+      // Simple cleanup logic inline (deletes files older than 30 days)
+      try {
+        const dir = path.dirname(filePath);
+        const files = await fs.promises.readdir(dir);
+        const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        for (const file of files) {
+          const fPath = path.join(dir, file);
+          const stat = await fs.promises.stat(fPath);
+          if (stat.mtimeMs < monthAgo) {
+            await fs.promises.unlink(fPath).catch(() => {});
+          }
+        }
+      } catch (e) {
+        deps.logger.error('cleanup', { err: String(e) });
+      }
+
+      const host = req.headers.host || 'localhost:3002';
+      const protocol = req.headers['x-forwarded-proto'] || 'http';
+      sendJson(res, 200, {
+        id,
+        name: fileName,
+        type: fileType,
+        url: `${protocol}://${host}/chat/media/${id}${ext}`,
+      });
+      return;
+    }
+
+    if (req.method === 'GET' && req.url?.startsWith('/chat/media/')) {
+      const filename = req.url.split('/').pop();
+      if (!filename) return sendJson(res, 404, { error: 'not_found' });
+      const filePath = path.join(process.cwd(), '.data', 'uploads', filename);
+      if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: 'not_found' });
+      
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        'Content-Length': stat.size,
+        'Content-Type': filename.endsWith('.png') ? 'image/png' : filename.endsWith('.jpg') || filename.endsWith('.jpeg') ? 'image/jpeg' : 'application/octet-stream',
+        ...CORS_HEADERS
+      });
+      const readStream = fs.createReadStream(filePath);
+      readStream.pipe(res);
       return;
     }
 
@@ -253,12 +323,13 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       guard(() => {
         const { conversationId, accountId: targetId } = parse(chat.removeMemberPayload, raw);
         const isSelf = targetId === accountId;
-        // Ownership doesn't transfer on leave, so also require the caller still be a participant —
-        // otherwise a departed owner would retain kick power forever over a group they already left.
-        const isOwner =
-          deps.store.isParticipant(conversationId, accountId) && deps.store.ownerOf(conversationId) === accountId;
-        if (!isSelf && !isOwner) {
-          throw new ContractError('forbidden', 'only the group owner may remove other members');
+        const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
+        if (!conv) throw new ContractError('forbidden', 'not a participant of this conversation');
+
+        const isOwner = conv.ownerId === accountId;
+        const isAdmin = conv.admins?.includes(accountId);
+        if (!isSelf && !isOwner && !isAdmin) {
+          throw new ContractError('forbidden', 'only the group owner or admins may remove other members');
         }
         const before = deps.store.participantsOf(conversationId);
         const result = deps.store.removeMember(conversationId, targetId);
@@ -268,13 +339,57 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       }),
     );
 
+    socket.on(chat.C2S.setGroupRole, (raw, ack?: (res: chat.SetGroupRoleAck) => void) =>
+      guard(() => {
+        const { conversationId, accountId: targetId, role } = parse(chat.setGroupRolePayload, raw);
+        const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
+        if (!conv || conv.ownerId !== accountId) {
+          throw new ContractError('forbidden', 'only the owner can set roles');
+        }
+        const result = deps.store.setGroupRole(conversationId, targetId, role);
+        if (typeof result === 'string') throw new ContractError('validation', result);
+        if (typeof ack === 'function') ack({ ok: true });
+        for (const p of deps.store.participantsOf(conversationId)) emitThreads(p);
+      }),
+    );
+
+    socket.on(chat.C2S.updateGroupProfile, (raw, ack?: (res: chat.UpdateGroupProfileAck) => void) =>
+      guard(() => {
+        const { conversationId, name, avatarUrl } = parse(chat.updateGroupProfilePayload, raw);
+        const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
+        if (!conv) throw new ContractError('forbidden', 'not a participant');
+        if (conv.ownerId !== accountId && !conv.admins?.includes(accountId)) {
+          throw new ContractError('forbidden', 'only the owner or admins can update the profile');
+        }
+        const result = deps.store.updateGroupProfile(conversationId, name, avatarUrl);
+        if (typeof result === 'string') throw new ContractError('validation', result);
+        if (typeof ack === 'function') ack({ ok: true });
+        for (const p of deps.store.participantsOf(conversationId)) emitThreads(p);
+      }),
+    );
+
+    socket.on(chat.C2S.pinMessage, (raw, ack?: (res: chat.PinMessageAck) => void) =>
+      guard(() => {
+        const { conversationId, messageId } = parse(chat.pinMessagePayload, raw);
+        const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
+        if (!conv) throw new ContractError('forbidden', 'not a participant');
+        if (conv.ownerId !== accountId && !conv.admins?.includes(accountId)) {
+          throw new ContractError('forbidden', 'only the owner or admins can pin messages');
+        }
+        const result = deps.store.pinMessage(conversationId, messageId);
+        if (typeof result === 'string') throw new ContractError('validation', result);
+        if (typeof ack === 'function') ack({ ok: true });
+        for (const p of deps.store.participantsOf(conversationId)) emitThreads(p);
+      }),
+    );
+
     socket.on(chat.C2S.send, (raw, ack?: (res: chat.SendAck) => void) =>
       guard(() => {
-        const { conversationId, text } = parse(chat.sendPayload, raw);
+        const { conversationId, text, replyToId, mentions, attachments } = parse(chat.sendPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
         }
-        const message = deps.store.send(conversationId, accountId, text);
+        const message = deps.store.send(conversationId, accountId, text, { replyToId, mentions, attachments });
         if (!message) throw new ContractError('internal', 'send failed');
         const payload: chat.MessageEvent = { message };
         if (typeof ack === 'function') ack({ message });
@@ -309,6 +424,19 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     );
 
     socket.on(chat.C2S.getState, () => guard(() => emitThreads(accountId)));
+
+    socket.on(chat.C2S.typing, (raw, ack?: (res: chat.TypingAck) => void) =>
+      guard(() => {
+        const { conversationId } = parse(chat.typingPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+        const payload: chat.TypingEvent = { conversationId, accountId };
+        emitToEveryone(others, chat.S2C.typing, payload);
+        if (typeof ack === 'function') ack({ ok: true });
+      }),
+    );
 
     /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty or 1 person left in DM. */
     const leaveCall = (conversationId: string): void => {

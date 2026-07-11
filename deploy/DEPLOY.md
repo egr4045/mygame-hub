@@ -63,8 +63,8 @@ image: `bash build-images.sh && docker compose up -d --build examplegame`.
 
 `admin` (`apps/admin`, the ops panel) is path-routed under the same origin (`mygame-quiz.ru/admin/`,
 no published port) — same model as `/example-game/`'s Caddy `handle_path`. It reuses the normal
-passwordless login; access is gated server-side by `is_admin` (see `AUTH_BOOTSTRAP_ADMIN_IDS` above),
-not by anything client-side.
+register/login flow every player uses; access is gated server-side by `is_admin` (see
+`AUTH_BOOTSTRAP_ADMIN_IDS` above), not by anything client-side.
 
 The orchestrator brings the lobby up on the first `enter`. To check on-demand + idle:
 
