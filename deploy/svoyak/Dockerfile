@@ -14,8 +14,12 @@ RUN git clone --depth 1 "$SVOYAK_REPO" .
 
 # Frontend build -> /app/dist (served by the server from ../dist).
 RUN npm ci && npm run build
-# Backend deps (native modules compiled with the toolchain above).
-RUN cd server && npm ci --omit=dev
+# Backend deps. Native modules (sqlite3, bcrypt) MUST be compiled here: the npm prebuilds for
+# recent Node ABIs are linked against glibc 2.38+, newer than bookworm's 2.36 (ERR_DLOPEN_FAILED
+# at runtime). The env var alone doesn't reliably reach node-pre-gyp through npm ci, so an
+# explicit rebuild --build-from-source is the enforcement step.
+RUN cd server && npm ci --omit=dev \
+  && npm rebuild --build-from-source sqlite3 bcrypt
 
 ENV NODE_ENV=production
 ENV PORT=8089
