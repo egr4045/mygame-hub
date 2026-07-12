@@ -11,6 +11,8 @@ import { createMemoryAccountStore, type Account, type AccountStore, type TitleAc
 export interface PgAccountStore extends AccountStore {
   /** Load all accounts from Postgres into the in-memory working set. Call once before serving. */
   init(): Promise<void>;
+  /** Flush every queued write — call on shutdown so no acknowledged mutation misses Postgres. */
+  drain(): Promise<void>;
 }
 
 export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore => {
@@ -21,8 +23,8 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   const persist = (a: Account): void =>
     queue.push('account.upsert', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, password_hash, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, now())
+        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name       = EXCLUDED.display_name,
            telegram_id         = EXCLUDED.telegram_id,
@@ -33,6 +35,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
            achievements        = EXCLUDED.achievements,
            favorite_game_ids   = EXCLUDED.favorite_game_ids,
            is_admin            = EXCLUDED.is_admin,
+           is_banned           = EXCLUDED.is_banned,
            password_hash       = EXCLUDED.password_hash,
            updated_at          = now()`,
         [
@@ -46,6 +49,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
           JSON.stringify(a.achievements),
           JSON.stringify(a.favoriteGameIds),
           a.isAdmin,
+          a.isBanned,
           a.passwordHash,
         ],
       ),
@@ -54,7 +58,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   return {
     async init() {
       const { rows } = await pool.query(
-        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, password_hash FROM accounts`,
+        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash FROM accounts`,
       );
       for (const r of rows) {
         const acc = mem.createAccount(r.display_name as string, r.password_hash as string, r.id as string);
@@ -66,6 +70,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
         mem.hydrateAchievements(acc.id, (r.achievements as Account['achievements'] | null) ?? []);
         mem.setFavorites(acc.id, (r.favorite_game_ids as string[] | null) ?? []);
         mem.setAdmin(acc.id, r.is_admin === true);
+        mem.setBanned(acc.id, r.is_banned === true);
       }
       logger.info('accounts hydrated', { count: rows.length });
     },
@@ -135,7 +140,13 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
       if (a) persist(a);
       return a;
     },
+    setBanned(id, isBanned) {
+      const a = mem.setBanned(id, isBanned);
+      if (a) persist(a);
+      return a;
+    },
     listAccounts: (opts) => mem.listAccounts(opts),
     listAdmins: () => mem.listAdmins(),
+    drain: () => queue.drain(),
   };
 };

@@ -69,3 +69,21 @@ if (config.telegramBotToken) {
 const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, stats, telegram });
 
 app.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
+
+// Write-behind persistence: flush queued account/playtime writes before exiting so a deploy can't
+// drop an acknowledged mutation. Hard-exit fallback in case the pool is wedged.
+const shutdown = (signal: string): void => {
+  logger.info('shutting down', { signal });
+  setTimeout(() => process.exit(1), 10_000).unref();
+  void (async () => {
+    try {
+      app.close();
+      await (accounts as Partial<import('./pgStore.js').PgAccountStore>).drain?.();
+      await (stats as Partial<import('./pgStatsStore.js').PgGameStatsStore>).drain?.();
+    } finally {
+      process.exit(0);
+    }
+  })();
+};
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

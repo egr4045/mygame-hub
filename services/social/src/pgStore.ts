@@ -15,6 +15,10 @@ import { createMemorySocialStore, type SocialStore } from './store.js';
 export interface PgSocialStore extends SocialStore {
   /** Load accounts + friendships from Postgres into the in-memory graph. Call once before serving. */
   init(): Promise<void>;
+  /** Flush every queued write — call on shutdown so no acknowledged mutation misses Postgres. */
+  drain(): Promise<void>;
+  /** Live ban check against the shared accounts table (auth writes it). Briefly cached. */
+  isAccountBanned(accountId: string): Promise<boolean>;
 }
 
 const sortPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
@@ -22,6 +26,9 @@ const sortPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [
 export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore => {
   const mem = createMemorySocialStore();
   const queue = new WriteQueue(logger);
+
+  const BAN_CACHE_TTL_MS = 30_000;
+  const banCache = new Map<string, { banned: boolean; at: number }>();
 
   /** Persist the current state of the edge between `from` and `to` (or null if it no longer exists). */
   const persistEdge = (from: string, to: string): void => {
@@ -139,5 +146,20 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
     },
     isBlocked: (a, b) => mem.isBlocked(a, b),
     blockedByMe: (account) => mem.blockedByMe(account),
+    drain: () => queue.drain(),
+
+    async isAccountBanned(accountId) {
+      const cached = banCache.get(accountId);
+      if (cached && Date.now() - cached.at < BAN_CACHE_TTL_MS) return cached.banned;
+      try {
+        const r = await pool.query(`SELECT is_banned FROM accounts WHERE id = $1`, [accountId]);
+        const banned = r.rows[0]?.is_banned === true;
+        banCache.set(accountId, { banned, at: Date.now() });
+        return banned;
+      } catch (err) {
+        logger.error('ban check failed', { err: String(err) });
+        return false; // availability over enforcement on a db blip
+      }
+    },
   };
 };

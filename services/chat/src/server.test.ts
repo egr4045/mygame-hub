@@ -19,13 +19,14 @@ afterEach(() => {
   server = undefined;
 });
 
-const startServer = (): Promise<number> => {
+const startServer = (overrides: Partial<Parameters<typeof createChatServer>[0]> = {}): Promise<number> => {
   server = createChatServer({
     auth,
     store: createMemoryChatStore(),
     logger: createCapturingLogger(),
     corsOrigin: '*',
     livekit: { url: 'ws://localhost:7880', apiKey: 'devkey', apiSecret: 'secret' },
+    ...overrides,
   });
   return new Promise((r) =>
     server!.httpServer.listen(0, () => r((server!.httpServer.address() as AddressInfo).port)),
@@ -342,5 +343,108 @@ describe('chat server — call signaling', () => {
     const ended = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
     c1.close();
     expect(await ended).toMatchObject({ conversationId });
+  });
+
+  it('rejects callDecline from a non-participant (no spoofed call termination)', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    const outsider = await connect(port, 'a3', 'Zed');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'audio');
+
+    let spoofed = false;
+    c1.on(chat.S2C.callDeclined, () => {
+      spoofed = true;
+    });
+    const err = new Promise<{ code: string }>((res) => outsider.once(chat.S2C.error, res));
+    outsider.emit(chat.C2S.callDecline, { conversationId });
+    expect((await err).code).toBe('forbidden');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(spoofed).toBe(false);
+  });
+
+  it("an unanswered ring times out server-side with callEnded reason 'timeout'", async () => {
+    const port = await startServer({ ringTimeoutMs: 60 });
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+
+    const ended1 = new Promise<chat.CallEndedEvent>((res) => c1.once(chat.S2C.callEnded, res));
+    const ended2 = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
+    await ring(c1, conversationId!, 'audio');
+    expect(await ended1).toMatchObject({ conversationId, reason: 'timeout' });
+    expect(await ended2).toMatchObject({ conversationId, reason: 'timeout' });
+  });
+
+  it('a re-ring never reaches someone already connected to the call', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const c3 = await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2', 'a3']);
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+
+    let reRung = false;
+    c2.on(chat.S2C.callRing, () => {
+      reRung = true;
+    });
+    const rang3 = new Promise<chat.CallRingEvent>((res) => c3.once(chat.S2C.callRing, res));
+    await ring(c1, conversationId!, 'audio'); // e.g. the caller nudges the group again
+    await rang3;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reRung).toBe(false);
+  });
+
+  it('rejects the socket handshake for a banned account', async () => {
+    const port = await startServer({ isAccountBanned: async (id) => id === 'outlaw' });
+    await connect(port, 'a1', 'Mara'); // sanity: non-banned connects fine
+    const token = await auth.signAccess('outlaw', 'Outlaw');
+    const c = ioc(`http://127.0.0.1:${port}`, { path: '/chat.io/', auth: { token }, transports: ['websocket'], forceNew: true });
+    clients.push(c);
+    const err = await new Promise<Error>((res) => c.once('connect_error', res));
+    expect(err.message).toBe('forbidden');
+  });
+});
+
+describe('chat server — group ownership on leave', () => {
+  it('transfers ownership to an admin when the owner leaves', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2', 'a3']);
+    await new Promise<chat.SetGroupRoleAck>((res) =>
+      c1.emit(chat.C2S.setGroupRole, { conversationId, accountId: 'a3', role: 'admin' }, res),
+    );
+
+    const c2Sees = waitThreads(
+      c2,
+      (t) => t.find((x) => x.conversationId === conversationId)?.ownerId === 'a3',
+    );
+    await removeMember(c1, conversationId!, 'a1');
+    await c2Sees;
+  });
+
+  it('transfers ownership to the longest-standing member when there are no admins', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    await connect(port, 'a3', 'Zed');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2', 'a3']);
+
+    const c2Sees = waitThreads(
+      c2,
+      (t) => t.find((x) => x.conversationId === conversationId)?.ownerId === 'a2',
+    );
+    await removeMember(c1, conversationId!, 'a1');
+    const threads = await c2Sees;
+    // ...and the new owner can appoint admins (the group is not bricked).
+    expect(threads.find((t) => t.conversationId === conversationId)?.ownerId).toBe('a2');
+    const roleAck = await new Promise<chat.SetGroupRoleAck>((res) =>
+      c2.emit(chat.C2S.setGroupRole, { conversationId, accountId: 'a3', role: 'admin' }, res),
+    );
+    expect(roleAck.ok).toBe(true);
   });
 });

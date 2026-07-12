@@ -11,6 +11,8 @@ import { makeCode, type InviteRecord, type InviteStore, type InviteStoreOptions 
 export interface PgInviteStore extends InviteStore {
   /** Load non-expired invites from Postgres into the cache. Call once before serving. */
   init(): Promise<void>;
+  /** Flush every queued write — call on shutdown so no acknowledged mutation misses Postgres. */
+  drain(): Promise<void>;
 }
 
 const rowToRecord = (r: Record<string, unknown>): InviteRecord => ({
@@ -82,5 +84,7 @@ export const createPgInviteStore = (
       }
       return record;
     },
+
+    drain: () => queue.drain(),
   };
 };

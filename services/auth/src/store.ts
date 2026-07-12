@@ -28,6 +28,7 @@ export interface Account {
   favoriteGameIds: string[];
   /** The platform's one privileged tier (apps/admin) — see docs/ARCHITECTURE.md. */
   isAdmin: boolean;
+  isBanned: boolean;
 }
 
 export interface AccountStore {
@@ -60,6 +61,7 @@ export interface AccountStore {
    *  registration). Renaming in place preserves `id` — durable identity, same as every other profile edit. */
   setDisplayName(id: string, name: string): { account: Account | undefined; conflict: boolean };
   setAdmin(id: string, isAdmin: boolean): Account | undefined;
+  setBanned(id: string, isBanned: boolean): Account | undefined;
   /** Paginated, optionally filtered by a case-insensitive substring match on `displayName`/`id`
    *  (apps/admin's account list). `total` is the filtered count, for the caller to compute page count. */
   listAccounts(opts: { q?: string | undefined; limit: number; offset: number }): { accounts: Account[]; total: number };
@@ -85,6 +87,7 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
         achievements: [],
         favoriteGameIds: [],
         isAdmin: false,
+        isBanned: false,
       };
       accounts.set(account.id, account);
       return account;
@@ -180,6 +183,12 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
       const acc = accounts.get(id);
       if (!acc) return undefined;
       acc.isAdmin = isAdmin;
+      return acc;
+    },
+    setBanned(id, isBanned) {
+      const acc = accounts.get(id);
+      if (!acc) return undefined;
+      acc.isBanned = isBanned;
       return acc;
     },
     listAccounts({ q, limit, offset }) {

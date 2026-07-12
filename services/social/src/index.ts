@@ -37,12 +37,33 @@ const { store, invites } = await (async (): Promise<{ store: SocialStore; invite
   return { store: pgStore, invites: pgInvites };
 })();
 
+const maybePg = store as Partial<import('./pgStore.js').PgSocialStore>;
+
 const { httpServer } = createSocialServer({
   auth,
   store,
   invites,
   logger,
   corsOrigin: config.corsOrigin,
+  ...(maybePg.isAccountBanned ? { isAccountBanned: maybePg.isAccountBanned.bind(store) } : {}),
 });
 
 httpServer.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
+
+// Write-behind persistence: flush queued friend/invite writes before exiting so a deploy can't drop
+// an acknowledged mutation. Hard-exit fallback in case the pool is wedged.
+const shutdown = (signal: string): void => {
+  logger.info('shutting down', { signal });
+  setTimeout(() => process.exit(1), 10_000).unref();
+  void (async () => {
+    try {
+      httpServer.close();
+      await maybePg.drain?.();
+      await (invites as Partial<import('./pgInvites.js').PgInviteStore>).drain?.();
+    } finally {
+      process.exit(0);
+    }
+  })();
+};
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

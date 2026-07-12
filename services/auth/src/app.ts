@@ -13,6 +13,8 @@ import {
   recordEnterRequest,
   refreshRequest,
   setAdminRoleRequest,
+  setAccountBanRequest,
+  adminSetDisplayNameRequest,
   setAvatarRequest,
   setFavoritesRequest,
   setTitleRequest,
@@ -38,6 +40,8 @@ export interface AppDeps {
   readonly accounts: AccountStore;
   readonly stats: GameStatsStore;
   readonly telegram?: TelegramLinking | undefined;
+  /** Override the per-IP register/login limiter (tests raise it; production uses the default). */
+  readonly credRateLimit?: { capacity: number; refillPerSec: number };
 }
 
 const CORS = {
@@ -113,17 +117,47 @@ const requireAdmin = async (
   return claims;
 };
 
+const clientIp = (req: IncomingMessage): string => {
+  const fwd = req.headers['x-forwarded-for'];
+  const first = Array.isArray(fwd) ? fwd[0] : fwd?.split(',')[0];
+  return first?.trim() || req.socket.remoteAddress || 'unknown';
+};
+
+/** Minimal per-IP token bucket for the credential endpoints (register/login): `capacity` attempts
+ *  burst, refilling at `refillPerSec`. Damps brute-force/registration floods; everything else is
+ *  JWT-gated. Per-app instance (not module state) so parallel apps/tests don't share buckets. */
+const createCredLimiter = (capacity: number, refillPerSec: number): ((req: IncomingMessage) => boolean) => {
+  const buckets = new Map<string, { tokens: number; last: number }>();
+  setInterval(() => {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    for (const [k, b] of buckets) if (b.last < cutoff) buckets.delete(k);
+  }, 10 * 60 * 1000).unref?.();
+  return (req) => {
+    const key = clientIp(req);
+    const now = Date.now();
+    const b = buckets.get(key) ?? { tokens: capacity, last: now };
+    b.tokens = Math.min(capacity, b.tokens + ((now - b.last) / 1000) * refillPerSec);
+    b.last = now;
+    const ok = b.tokens >= 1;
+    if (ok) b.tokens -= 1;
+    buckets.set(key, b);
+    return ok;
+  };
+};
+
 const toAdminSummary = (a: NonNullable<ReturnType<AccountStore['get']>>): AdminAccountSummary => ({
   id: a.id,
   displayName: a.displayName,
   isAdmin: a.isAdmin,
+  isBanned: a.isBanned,
   telegramLinked: !!a.telegramId,
   achievementCount: a.achievements.length,
 });
 
-export const createApp = (deps: AppDeps): Server =>
-  createServer((req, res) => {
-    void handle(req, res, deps).catch((err) => {
+export const createApp = (deps: AppDeps): Server => {
+  const takeCredToken = createCredLimiter(deps.credRateLimit?.capacity ?? 10, deps.credRateLimit?.refillPerSec ?? 10 / 60);
+  return createServer((req, res) => {
+    void handle(req, res, deps, takeCredToken).catch((err) => {
       if (res.headersSent) return;
       if (err instanceof PayloadTooLargeError) {
         send(res, 413, { code: 'validation', message: 'payload too large' });
@@ -133,8 +167,14 @@ export const createApp = (deps: AppDeps): Server =>
       send(res, 500, { code: 'internal', message: 'internal error' });
     });
   });
+};
 
-async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps): Promise<void> {
+async function handle(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: AppDeps,
+  takeCredToken: (req: IncomingMessage) => boolean,
+): Promise<void> {
   const { method, url } = req;
 
   if (method === 'OPTIONS') {
@@ -163,6 +203,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
   };
 
   if (method === 'POST' && url === '/auth/register') {
+    if (!takeCredToken(req)) {
+      send(res, 429, { code: 'rate_limited', message: 'too many attempts, try again later' });
+      return;
+    }
     const parsed = registerRequest.safeParse(await readJson(req));
     if (!parsed.success) {
       send(res, 400, { code: 'validation', message: 'invalid register', details: parsed.error.flatten() });
@@ -184,6 +228,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
   }
 
   if (method === 'POST' && url === '/auth/login') {
+    if (!takeCredToken(req)) {
+      send(res, 429, { code: 'rate_limited', message: 'too many attempts, try again later' });
+      return;
+    }
     const parsed = loginRequest.safeParse(await readJson(req));
     if (!parsed.success) {
       send(res, 400, { code: 'validation', message: 'invalid login', details: parsed.error.flatten() });
@@ -196,6 +244,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     }
     if (!verifyPassword(parsed.data.password, account.passwordHash)) {
       send(res, 401, { code: 'unauthorized', message: 'invalid credentials' });
+      return;
+    }
+    if (account.isBanned) {
+      send(res, 403, { code: 'forbidden', message: 'account banned' });
       return;
     }
     const [accessToken, refreshToken] = await Promise.all([
@@ -219,7 +271,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
         send(res, 401, { code: 'unauthorized', message: 'not a refresh token' });
         return;
       }
-      const accessToken = await deps.auth.signAccess(claims.sub, claims.name);
+      // Re-read the account: this is the enforcement backbone for bans — JWTs are stateless, so a
+      // ban takes effect the moment the current (≤15m) access token needs refreshing. Also picks up
+      // renames, so the fresh access token always carries the current display name.
+      const account = deps.accounts.get(claims.sub);
+      if (!account) {
+        send(res, 401, { code: 'unauthorized', message: 'account not found' });
+        return;
+      }
+      if (account.isBanned) {
+        send(res, 403, { code: 'forbidden', message: 'account banned' });
+        return;
+      }
+      const accessToken = await deps.auth.signAccess(account.id, account.displayName);
       send(res, 200, { accessToken });
     } catch (err) {
       const reason = err instanceof TokenError ? err.reason : 'invalid';
@@ -240,6 +304,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       const claims = await deps.auth.verify(parsed.data.refreshToken);
       if (claims.typ !== 'refresh') {
         send(res, 401, { code: 'unauthorized', message: 'not a refresh token' });
+        return;
+      }
+      if (deps.accounts.get(claims.sub)?.isBanned) {
+        send(res, 403, { code: 'forbidden', message: 'account banned' });
         return;
       }
       const handoffToken = await deps.auth.signHandoff(claims.sub, claims.name);
@@ -270,6 +338,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       const account = deps.accounts.get(claims.sub);
       if (!account) {
         send(res, 404, { code: 'not_found', message: 'account not found' });
+        return;
+      }
+      if (account.isBanned) {
+        send(res, 403, { code: 'forbidden', message: 'account banned' });
         return;
       }
       const [accessToken, refreshToken] = await Promise.all([
@@ -325,6 +397,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     const account = deps.telegram.redeemLoginCode(parsed.data.recoveryCode);
     if (!account) {
       send(res, 401, { code: 'unauthorized', message: 'invalid or expired code' });
+      return;
+    }
+    if (deps.accounts.get(account.accountId)?.isBanned) {
+      send(res, 403, { code: 'forbidden', message: 'account banned' });
       return;
     }
     const [accessToken, refreshToken] = await Promise.all([
@@ -485,9 +561,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
 
   // Rename the caller's own account. `id` (and every friend/chat/achievement relationship keyed off
   // it) is unchanged — this is a display-name edit, not a re-registration. `name` is baked into every
-  // JWT at mint time (and /auth/refresh only ever forwards the *old* token's claims, never re-reads
-  // the account), so a rename must mint fresh tokens here — otherwise the old name would keep
-  // resurfacing (in this and every other service's socket auth) until the next full login.
+  // JWT at mint time; /auth/refresh now re-reads the account (for ban enforcement) and so also picks
+  // up the new name, but fresh tokens are still minted here so the rename is visible immediately
+  // rather than on the next refresh.
   if (method === 'PUT' && url === '/auth/profile/display-name') {
     const claims = await requireAccount(req, res, deps);
     if (!claims) return;
@@ -604,6 +680,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       id: account.id,
       displayName: account.displayName,
       isAdmin: account.isAdmin,
+      isBanned: account.isBanned,
       telegramLinked: !!account.telegramId,
       avatarIcon: account.avatarIcon ?? null,
       wallpaper: account.wallpaper ?? null,
@@ -639,6 +716,50 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
       return;
     }
     deps.logger.info('admin role changed', { accountId: targetId, isAdmin: parsed.data.isAdmin, by: claims.sub });
+    send(res, 200, toAdminSummary(account));
+    return;
+  }
+
+  const acctBanMatch = method === 'PUT' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/ban\/?$/);
+  if (acctBanMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const targetId = acctBanMatch[1]!;
+    const parsed = setAccountBanRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid ban state' });
+      return;
+    }
+    const account = deps.accounts.setBanned(targetId, parsed.data.isBanned);
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    deps.logger.info('account ban state changed', { accountId: targetId, isBanned: parsed.data.isBanned, by: claims.sub });
+    send(res, 200, toAdminSummary(account));
+    return;
+  }
+
+  const acctNameMatch = method === 'PUT' && url?.match(/^\/auth\/admin\/accounts\/([^/?]+)\/display-name\/?$/);
+  if (acctNameMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const targetId = acctNameMatch[1]!;
+    const parsed = adminSetDisplayNameRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid display name' });
+      return;
+    }
+    const { account, conflict } = deps.accounts.setDisplayName(targetId, parsed.data.displayName);
+    if (conflict) {
+      send(res, 409, { code: 'conflict', message: 'display name already taken' });
+      return;
+    }
+    if (!account) {
+      send(res, 404, { code: 'not_found', message: 'account not found' });
+      return;
+    }
+    deps.logger.info('account name changed (admin)', { accountId: targetId, displayName: parsed.data.displayName, by: claims.sub });
     send(res, 200, toAdminSummary(account));
     return;
   }

@@ -16,6 +16,7 @@ import type { AuthCore } from '@mygame/auth-core';
 import type { Logger } from '@mygame/shared-types';
 import type { ZodType } from 'zod';
 import type { ChatStore } from './store.js';
+import { createLimiter } from './rateLimit.js';
 
 interface SocketData {
   accountId: string;
@@ -28,13 +29,23 @@ export interface ChatDeps {
   readonly logger: Logger;
   readonly corsOrigin: string;
   readonly livekit: { url: string; apiKey: string; apiSecret: string };
+  /** Live ban check (pg-backed in production; absent = nothing is ever banned, e.g. dev/memory). */
+  readonly isAccountBanned?: (accountId: string) => Promise<boolean>;
+  /** How long an unanswered ring survives before the server ends it. Injectable for tests. */
+  readonly ringTimeoutMs?: number;
 }
 
 /** A call is purely live state — never persisted (see the module doc comment above). */
 interface ActiveCall {
   type: chat.CallType;
+  /** Who started the call — the name shown on a reconnect re-ring (NOT participantIds[0], which
+   *  may be someone else entirely once the originator leaves). */
+  initiatorId: string;
+  startedAt: number;
   participantIds: Set<string>;
   ringingIds: Set<string>;
+  /** Armed while anyone is still ringing; cleared on the last accept/decline. */
+  ringTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Portable-call registry entry: which LiveKit room a `game:<game>:<room>` call actually lives in.
@@ -47,6 +58,19 @@ interface OpenCall {
 }
 
 const OPEN_CALL_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RING_TIMEOUT_MS = 60_000;
+
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+/** MIME -> extension. The extension is always derived from the (allowlisted) MIME type, never the
+ *  client filename — an uploaded `.html`/`.svg` must not come back executable from our origin. */
+const UPLOAD_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+/** uuid + allowlisted extension only — also forecloses path traversal on GET /chat/media/. */
+const MEDIA_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|webp|gif)$/;
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -87,6 +111,40 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   // route and the socket signaling handlers below can check "is the caller actually in this call".
   const activeCalls = new Map<string, ActiveCall>(); // conversationId -> call
   const openCalls = new Map<string, OpenCall>(); // 'game:<game>:<room>' -> where that call lives
+  const ringTimeoutMs = deps.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS;
+
+  // Abuse damping, keyed per account (IP for nothing here — every route is authenticated). Bursts
+  // sized for humans typing/clicking, not scripts.
+  const limits = {
+    message: createLimiter(20, 1), // send/edit/delete
+    typing: createLimiter(10, 1),
+    call: createLimiter(10, 0.5), // socket signaling
+    group: createLimiter(10, 0.5), // membership/profile/pin ops
+    upload: createLimiter(5, 5 / 60), // 5/min
+    callHttp: createLimiter(20, 20 / 60), // token/bind routes, 20/min
+  };
+  const takeOrThrow = (limiter: { take(key: string): boolean }, key: string): void => {
+    if (!limiter.take(key)) throw new ContractError('rate_limited', 'слишком много запросов — подождите немного');
+  };
+
+  // 30-day upload retention, swept hourly off the request path (the old inline sweep ran an
+  // O(files) stat pass on every single upload).
+  const uploadDir = path.join(process.cwd(), '.data', 'uploads');
+  const sweepUploads = async (): Promise<void> => {
+    try {
+      const files = await fs.promises.readdir(uploadDir);
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      for (const file of files) {
+        const fPath = path.join(uploadDir, file);
+        const stat = await fs.promises.stat(fPath).catch(() => null);
+        if (stat && stat.mtimeMs < cutoff) await fs.promises.unlink(fPath).catch(() => {});
+      }
+    } catch {
+      /* dir may not exist yet */
+    }
+  };
+  setInterval(() => void sweepUploads(), 60 * 60 * 1000).unref?.();
+  void sweepUploads();
 
   const purgeOpenCalls = (): void => {
     const cutoff = Date.now() - OPEN_CALL_TTL_MS;
@@ -103,14 +161,19 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       sendJson(res, 401, { code: 'unauthorized', message: 'missing access token' });
       return null;
     }
+    let claims;
     try {
-      const claims = await deps.auth.verify(token);
+      claims = await deps.auth.verify(token);
       if (claims.typ !== 'access') throw new Error('not an access token');
-      return { accountId: claims.sub, displayName: claims.name };
     } catch {
       sendJson(res, 401, { code: 'unauthorized', message: 'invalid access token' });
       return null;
     }
+    if (deps.isAccountBanned && (await deps.isAccountBanned(claims.sub))) {
+      sendJson(res, 403, { code: 'forbidden', message: 'account banned' });
+      return null;
+    }
+    return { accountId: claims.sub, displayName: claims.name };
   };
 
   const mintLivekitToken = async (accountId: string, displayName: string, room: string): Promise<chat.CallTokenResponse> => {
@@ -135,6 +198,10 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     if (req.method === 'POST' && req.url === '/chat/call/token') {
       const caller = await verifyAccess(req, res);
       if (!caller) return;
+      if (!limits.callHttp.take(caller.accountId)) {
+        sendJson(res, 429, { code: 'rate_limited', message: 'too many requests' });
+        return;
+      }
       const parsed = chat.callTokenRequest.safeParse(await readJsonBody(req));
       if (!parsed.success) {
         sendJson(res, 400, { code: 'validation', message: 'invalid request' });
@@ -156,6 +223,10 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     if (req.method === 'POST' && req.url === '/chat/call/room-token') {
       const caller = await verifyAccess(req, res);
       if (!caller) return;
+      if (!limits.callHttp.take(caller.accountId)) {
+        sendJson(res, 429, { code: 'rate_limited', message: 'too many requests' });
+        return;
+      }
       const parsed = chat.roomCallTokenRequest.safeParse(await readJsonBody(req));
       if (!parsed.success) {
         sendJson(res, 400, { code: 'validation', message: 'invalid request' });
@@ -178,6 +249,10 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     if (req.method === 'POST' && req.url === '/chat/call/bind') {
       const caller = await verifyAccess(req, res);
       if (!caller) return;
+      if (!limits.callHttp.take(caller.accountId)) {
+        sendJson(res, 429, { code: 'rate_limited', message: 'too many requests' });
+        return;
+      }
       const parsed = chat.bindCallRequest.safeParse(await readJsonBody(req));
       if (!parsed.success) {
         sendJson(res, 400, { code: 'validation', message: 'invalid request' });
@@ -197,70 +272,101 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/chat/upload') {
-      const token = bearer(req);
-      if (!token) return sendJson(res, 401, { code: 'unauthorized', message: 'missing token' });
-      try {
-        await deps.auth.verify(token);
-      } catch {
-        return sendJson(res, 401, { code: 'unauthorized', message: 'invalid token' });
+    // Image upload for chat attachments. Hardened: size-capped while streaming (not after), MIME
+    // allowlist with the extension derived from the MIME (never the client filename), uploader must
+    // be a participant of the destination conversation, and the returned URL is *relative* — the
+    // client resolves it against its configured chat origin instead of us trusting the Host header.
+    if (req.method === 'POST' && req.url?.startsWith('/chat/upload')) {
+      const caller = await verifyAccess(req, res);
+      if (!caller) return;
+      if (!limits.upload.take(caller.accountId)) {
+        sendJson(res, 429, { code: 'rate_limited', message: 'too many uploads' });
+        return;
       }
-
-      const fileName = (req.headers['x-file-name'] as string) || 'file';
-      const fileType = req.headers['content-type'] || 'application/octet-stream';
-      const ext = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
+      const reqUrl = new URL(req.url, 'http://local');
+      const conversationId = reqUrl.searchParams.get('conversationId');
+      if (!conversationId || !deps.store.isParticipant(conversationId, caller.accountId)) {
+        sendJson(res, 403, { code: 'forbidden', message: 'not a participant of this conversation' });
+        return;
+      }
+      const fileType = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+      const ext = UPLOAD_TYPES[fileType];
+      if (!ext) {
+        sendJson(res, 415, { code: 'validation', message: 'only png/jpeg/webp/gif images are allowed' });
+        return;
+      }
+      const declared = Number(req.headers['content-length'] ?? 0);
+      if (declared > UPLOAD_MAX_BYTES) {
+        sendJson(res, 413, { code: 'validation', message: 'file too large (max 10 MB)' });
+        return;
+      }
+      const fileName = (req.headers['x-file-name'] as string) || `image.${ext}`;
       const id = randomUUID();
-      const filePath = path.join(process.cwd(), '.data', 'uploads', id + ext);
-
+      const filePath = path.join(process.cwd(), '.data', 'uploads', `${id}.${ext}`);
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-      const stream = fs.createWriteStream(filePath);
-      req.pipe(stream);
-      await new Promise<void>((resolve, reject) => {
-        stream.on('finish', () => resolve());
-        stream.on('error', reject);
-      });
 
-      // Simple cleanup logic inline (deletes files older than 30 days)
-      try {
-        const dir = path.dirname(filePath);
-        const files = await fs.promises.readdir(dir);
-        const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        for (const file of files) {
-          const fPath = path.join(dir, file);
-          const stat = await fs.promises.stat(fPath);
-          if (stat.mtimeMs < monthAgo) {
-            await fs.promises.unlink(fPath).catch(() => {});
-          }
+      let received = 0;
+      let overflowed = false;
+      const stream = fs.createWriteStream(filePath);
+      req.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > UPLOAD_MAX_BYTES && !overflowed) {
+          overflowed = true;
+          req.unpipe(stream);
+          stream.destroy();
+          req.destroy();
         }
-      } catch (e) {
-        deps.logger.error('cleanup', { err: String(e) });
+      });
+      req.pipe(stream);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          stream.on('finish', () => resolve());
+          stream.on('error', reject);
+          req.on('error', reject);
+        });
+      } catch (err) {
+        await fs.promises.unlink(filePath).catch(() => {});
+        if (!overflowed) deps.logger.error('upload failed', { err: String(err) });
+        if (!res.headersSent && !res.writableEnded) {
+          sendJson(res, overflowed ? 413 : 500, {
+            code: overflowed ? 'validation' : 'internal',
+            message: overflowed ? 'file too large (max 10 MB)' : 'upload failed',
+          });
+        }
+        return;
+      }
+      if (overflowed) {
+        await fs.promises.unlink(filePath).catch(() => {});
+        return; // connection was destroyed mid-body; nothing sensible to answer
       }
 
-      const host = req.headers.host || 'localhost:3002';
-      const protocol = req.headers['x-forwarded-proto'] || 'http';
-      sendJson(res, 200, {
-        id,
-        name: fileName,
-        type: fileType,
-        url: `${protocol}://${host}/chat/media/${id}${ext}`,
-      });
+      sendJson(res, 200, { id, name: fileName, type: fileType, url: `/chat/media/${id}.${ext}` });
       return;
     }
 
     if (req.method === 'GET' && req.url?.startsWith('/chat/media/')) {
-      const filename = req.url.split('/').pop();
-      if (!filename) return sendJson(res, 404, { error: 'not_found' });
+      const filename = req.url.split('/').pop() ?? '';
+      // Capability-URL serving (unguessable uuid), deliberately tokenless so <img> tags work; the
+      // strict name shape is the whole defense — no traversal, no non-image types ever served.
+      if (!MEDIA_NAME_RE.test(filename)) return sendJson(res, 404, { error: 'not_found' });
       const filePath = path.join(process.cwd(), '.data', 'uploads', filename);
       if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: 'not_found' });
-      
+
+      const dotExt = filename.slice(filename.lastIndexOf('.') + 1);
+      const contentType =
+        dotExt === 'png' ? 'image/png'
+        : dotExt === 'webp' ? 'image/webp'
+        : dotExt === 'gif' ? 'image/gif'
+        : 'image/jpeg';
       const stat = fs.statSync(filePath);
       res.writeHead(200, {
         'Content-Length': stat.size,
-        'Content-Type': filename.endsWith('.png') ? 'image/png' : filename.endsWith('.jpg') || filename.endsWith('.jpeg') ? 'image/jpeg' : 'application/octet-stream',
-        ...CORS_HEADERS
+        'Content-Type': contentType,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        ...CORS_HEADERS,
       });
-      const readStream = fs.createReadStream(filePath);
-      readStream.pipe(res);
+      fs.createReadStream(filePath).pipe(res);
       return;
     }
 
@@ -292,9 +398,13 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     }
     void deps.auth
       .verify(token)
-      .then((claims) => {
+      .then(async (claims) => {
         if (claims.typ !== 'access') {
           next(new Error('unauthorized'));
+          return;
+        }
+        if (deps.isAccountBanned && (await deps.isAccountBanned(claims.sub))) {
+          next(new Error('forbidden'));
           return;
         }
         (socket.data as SocketData).accountId = claims.sub;
@@ -320,6 +430,37 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     emitTo(accountId, chat.S2C.threads, payload);
   };
 
+  /** The ring sweep: nobody answered within `ringTimeoutMs`. A dead 1:1/empty call ends for
+   *  everyone (reason `'timeout'` so the caller shows "no answer"); a live group call keeps going —
+   *  only the still-ringing users get the event, which merely clears their incoming banner. */
+  const expireRing = (conversationId: string, call: ActiveCall): void => {
+    call.ringTimer = null;
+    const stillRinging = [...call.ringingIds];
+    call.ringingIds.clear();
+    const isDm = deps.store.typeOf(conversationId) === 'dm';
+    const payload: chat.CallEndedEvent = { conversationId, reason: 'timeout' };
+    if (call.participantIds.size <= (isDm ? 1 : 0)) {
+      activeCalls.delete(conversationId);
+      emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
+    } else if (stillRinging.length > 0) {
+      emitToEveryone(stillRinging, chat.S2C.callEnded, payload);
+    }
+  };
+
+  const armRingTimer = (conversationId: string, call: ActiveCall): void => {
+    if (call.ringTimer) clearTimeout(call.ringTimer);
+    call.ringTimer = setTimeout(() => expireRing(conversationId, call), ringTimeoutMs);
+    call.ringTimer.unref?.();
+  };
+
+  /** Once the last ringing user answered/declined there is nothing left to time out. */
+  const disarmRingTimerIfIdle = (call: ActiveCall): void => {
+    if (call.ringingIds.size === 0 && call.ringTimer) {
+      clearTimeout(call.ringTimer);
+      call.ringTimer = null;
+    }
+  };
+
   io.on('connection', (socket: Socket) => {
     const { accountId, displayName } = socket.data as SocketData;
     deps.store.upsertAccount(accountId, displayName);
@@ -331,20 +472,18 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     emitThreads(accountId);
 
-    // Resend active call rings if this user was ringing
+    // Resend active call rings if this user was still ringing (e.g. reconnected mid-ring). The ring
+    // sweep clears `ringingIds` on timeout, so a long-dead ring can never resurface here; the banner
+    // names the actual initiator, not whoever happens to be first in the participant set.
     for (const [conversationId, call] of activeCalls.entries()) {
       if (call.ringingIds.has(accountId)) {
-        // Find the caller (first participant) to show who is calling
-        const fromAccountId = [...call.participantIds][0];
-        if (fromAccountId) {
-          const fromName = deps.store.getAccount(fromAccountId)?.displayName;
-          socket.emit(chat.S2C.callRing, {
-            conversationId,
-            fromAccountId,
-            fromName,
-            callType: call.type,
-          });
-        }
+        const payload: chat.CallRingEvent = {
+          conversationId,
+          fromAccountId: call.initiatorId,
+          fromName: deps.store.getAccount(call.initiatorId)?.displayName ?? call.initiatorId.slice(0, 8),
+          callType: call.type,
+        };
+        socket.emit(chat.S2C.callRing, payload);
       }
     }
 
@@ -362,6 +501,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.openDm, (raw, ack?: (res: chat.OpenDmAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { withAccountId } = parse(chat.openDmPayload, raw);
         if (withAccountId === accountId) throw new ContractError('validation', 'cannot DM yourself');
         const conv = deps.store.openDm(accountId, withAccountId);
@@ -373,6 +513,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.createGroup, (raw, ack?: (res: chat.CreateGroupAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { name, memberIds } = parse(chat.createGroupPayload, raw);
         const conv = deps.store.createGroup(accountId, name, memberIds);
         if (typeof ack === 'function') ack({ conversationId: conv.id });
@@ -382,6 +523,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.addMembers, (raw, ack?: (res: chat.AddMembersAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { conversationId, memberIds } = parse(chat.addMembersPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
@@ -395,6 +537,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.removeMember, (raw, ack?: (res: chat.RemoveMemberAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { conversationId, accountId: targetId } = parse(chat.removeMemberPayload, raw);
         const isSelf = targetId === accountId;
         const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
@@ -415,6 +558,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.setGroupRole, (raw, ack?: (res: chat.SetGroupRoleAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { conversationId, accountId: targetId, role } = parse(chat.setGroupRolePayload, raw);
         const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
         if (!conv || conv.ownerId !== accountId) {
@@ -429,6 +573,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.updateGroupProfile, (raw, ack?: (res: chat.UpdateGroupProfileAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { conversationId, name, avatarUrl } = parse(chat.updateGroupProfilePayload, raw);
         const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
         if (!conv) throw new ContractError('forbidden', 'not a participant');
@@ -444,6 +589,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.pinMessage, (raw, ack?: (res: chat.PinMessageAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.group, accountId);
         const { conversationId, messageId } = parse(chat.pinMessagePayload, raw);
         const conv = deps.store.threads(accountId).find(t => t.conversationId === conversationId);
         if (!conv) throw new ContractError('forbidden', 'not a participant');
@@ -459,6 +605,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.send, (raw, ack?: (res: chat.SendAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.message, accountId);
         const { conversationId, text, replyToId, mentions, attachments } = parse(chat.sendPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
@@ -475,6 +622,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.edit, (raw, ack?: (res: chat.EditAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.message, accountId);
         const { conversationId, messageId, text } = parse(chat.editPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
@@ -500,6 +648,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     // ordering and reply chains survive; the store blanks text/attachments.
     socket.on(chat.C2S.del, (raw, ack?: (res: chat.DeleteAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.message, accountId);
         const { conversationId, messageId } = parse(chat.deletePayload, raw);
         const conv = deps.store.threads(accountId).find((t) => t.conversationId === conversationId);
         if (!conv) throw new ContractError('forbidden', 'not a participant of this conversation');
@@ -550,6 +699,9 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.typing, (raw, ack?: (res: chat.TypingAck) => void) =>
       guard(() => {
+        // Over-limit typing is silently dropped (not an error): it's a cosmetic signal and the
+        // client fires it often by design.
+        if (!limits.typing.take(accountId)) return;
         const { conversationId } = parse(chat.typingPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
@@ -565,15 +717,17 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     const leaveCall = (conversationId: string): void => {
       const call = activeCalls.get(conversationId);
       if (!call?.participantIds.delete(accountId)) return;
-      
+
       const isDm = deps.store.typeOf(conversationId) === 'dm';
       const threshold = isDm ? 1 : 0;
-      
+
       call.ringingIds.delete(accountId);
+      disarmRingTimerIfIdle(call);
 
       if (call.participantIds.size <= threshold) {
+        if (call.ringTimer) clearTimeout(call.ringTimer);
         activeCalls.delete(conversationId);
-        const payload: chat.CallEndedEvent = { conversationId };
+        const payload: chat.CallEndedEvent = { conversationId, reason: 'ended' };
         emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
       }
     };
@@ -582,26 +736,41 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     // the actual media flows over LiveKit once a client has a token from `POST /chat/call/token`.
     socket.on(chat.C2S.callRing, (raw, ack?: (res: chat.CallAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.call, accountId);
         const { conversationId, callType } = parse(chat.callRingPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
         }
-        const call = activeCalls.get(conversationId);
         const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
+        let call = activeCalls.get(conversationId);
         if (call) {
           call.participantIds.add(accountId);
-          for (const p of others) call.ringingIds.add(p);
+          call.ringingIds.delete(accountId);
         } else {
-          activeCalls.set(conversationId, { type: callType, participantIds: new Set([accountId]), ringingIds: new Set(others) });
+          call = {
+            type: callType,
+            initiatorId: accountId,
+            startedAt: Date.now(),
+            participantIds: new Set([accountId]),
+            ringingIds: new Set<string>(),
+            ringTimer: null,
+          };
+          activeCalls.set(conversationId, call);
         }
+        // Never (re-)ring someone already connected to this very call — they'd get a spurious
+        // incoming-call banner mid-call.
+        const ringTargets = others.filter((p) => !call.participantIds.has(p));
+        for (const p of ringTargets) call.ringingIds.add(p);
+        armRingTimer(conversationId, call);
         const payload: chat.CallRingEvent = { conversationId, fromAccountId: accountId, fromName: displayName, callType };
-        emitToEveryone(others, chat.S2C.callRing, payload);
+        emitToEveryone(ringTargets, chat.S2C.callRing, payload);
         if (typeof ack === 'function') ack({ ok: true });
       }),
     );
 
     socket.on(chat.C2S.callAccept, (raw, ack?: (res: chat.CallAck) => void) =>
       guard(() => {
+        takeOrThrow(limits.call, accountId);
         const { conversationId } = parse(chat.callActionPayload, raw);
         const call = activeCalls.get(conversationId);
         if (!call) throw new ContractError('validation', 'no call in progress');
@@ -610,6 +779,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         }
         call.participantIds.add(accountId);
         call.ringingIds.delete(accountId);
+        disarmRingTimerIfIdle(call);
         const payload: chat.CallParticipantEvent = { conversationId, accountId };
         emitToEveryone([...call.participantIds], chat.S2C.callAccepted, payload);
         if (typeof ack === 'function') ack({ ok: true });
@@ -619,12 +789,20 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     // Declining doesn't unilaterally end the call (a group call goes on for whoever's already
     // joined) — it only informs the ringer(s), who decide client-side whether to hang up (e.g. a 1:1
     // call has no one left to wait for, so the ringer's own client reacts by hanging up itself).
+    // Participant-only: without the guard an outsider could broadcast a spoofed decline and make a
+    // 1:1 caller's client hang up someone else's call.
     socket.on(chat.C2S.callDecline, (raw) =>
       guard(() => {
+        takeOrThrow(limits.call, accountId);
         const { conversationId } = parse(chat.callActionPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
         const call = activeCalls.get(conversationId);
-        if (call) call.ringingIds.delete(accountId);
-        
+        if (call) {
+          call.ringingIds.delete(accountId);
+          disarmRingTimerIfIdle(call);
+        }
         const payload: chat.CallParticipantEvent = { conversationId, accountId };
         const others = deps.store.participantsOf(conversationId).filter((p) => p !== accountId);
         emitToEveryone(others, chat.S2C.callDeclined, payload);
@@ -633,6 +811,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.callHangup, (raw) =>
       guard(() => {
+        takeOrThrow(limits.call, accountId);
         const { conversationId } = parse(chat.callActionPayload, raw);
         leaveCall(conversationId);
       }),

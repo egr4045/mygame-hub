@@ -13,11 +13,19 @@ import { createMemoryChatStore, type ChatMessage, type ChatStore, type Conversat
 export interface PgChatStore extends ChatStore {
   /** Load accounts + conversations + membership + messages from Postgres. Call once before serving. */
   init(): Promise<void>;
+  /** Flush every queued write — call on shutdown so an ack'd message can't miss its INSERT. */
+  drain(): Promise<void>;
+  /** Live ban check against the shared accounts table (auth writes it; our hydrated copy can be
+   *  stale). Cached briefly — this sits on the socket-handshake path. */
+  isAccountBanned(accountId: string): Promise<boolean>;
 }
 
 export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
   const mem = createMemoryChatStore();
   const queue = new WriteQueue(logger);
+
+  const BAN_CACHE_TTL_MS = 30_000;
+  const banCache = new Map<string, { banned: boolean; at: number }>();
 
   const persistAccount = (id: string, displayName: string): void =>
     queue.push('chat.account', () =>
@@ -42,10 +50,17 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
   const updateConversation = (c: Conversation): void =>
     queue.push('chat.conversation.update', () =>
       pool.query(
-        `UPDATE conversations SET name = $1, avatar_url = $2, pinned_message_id = $3, admins = $4 WHERE id = $5`,
-        [c.name, c.avatarUrl, c.pinnedMessageId, JSON.stringify(c.admins), c.id]
+        `UPDATE conversations SET name = $1, avatar_url = $2, pinned_message_id = $3, admins = $4, owner_id = $5 WHERE id = $6`,
+        [c.name, c.avatarUrl, c.pinnedMessageId, JSON.stringify(c.admins), c.ownerId, c.id]
       )
     );
+
+  const deleteConversationRows = (conversationId: string): void =>
+    queue.push('chat.conversation.delete', async () => {
+      await pool.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
+      await pool.query(`DELETE FROM conversation_members WHERE conversation_id = $1`, [conversationId]);
+      await pool.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+    });
 
   const persistMember = (conversationId: string, accountId: string, lastReadAt: number): void =>
     queue.push('chat.member', () =>
@@ -89,6 +104,19 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
 
   return {
     async init() {
+      // Reap conversations that lost their last member before deletion-on-last-leave existed —
+      // hydration's INNER JOIN silently drops them while their message rows rot forever.
+      await pool.query(
+        `DELETE FROM messages WHERE conversation_id IN (
+           SELECT c.id FROM conversations c
+           LEFT JOIN conversation_members cm ON cm.conversation_id = c.id
+           WHERE cm.conversation_id IS NULL)`,
+      );
+      await pool.query(
+        `DELETE FROM conversations c WHERE NOT EXISTS (
+           SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id)`,
+      );
+
       const accounts = await pool.query(`SELECT id, display_name FROM accounts`);
       for (const r of accounts.rows) mem.upsertAccount(r.id as string, r.display_name as string);
 
@@ -191,7 +219,16 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
 
     removeMember(conversationId, targetId) {
       const result = mem.removeMember(conversationId, targetId);
-      if (typeof result !== 'string') removeMemberRow(conversationId, targetId);
+      if (typeof result !== 'string') {
+        removeMemberRow(conversationId, targetId);
+        if (result.participantIds.length === 0) {
+          deleteConversationRows(conversationId);
+        } else {
+          // Covers the owner-transfer case (memory store may have promoted someone); harmless
+          // no-op otherwise.
+          updateConversation(result);
+        }
+      }
       return result;
     },
 
@@ -240,5 +277,21 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
     history: (conversationId, limit, before) => mem.history(conversationId, limit, before),
     threads: (accountId) => mem.threads(accountId),
     hydrate: (data) => mem.hydrate(data),
+
+    drain: () => queue.drain(),
+
+    async isAccountBanned(accountId) {
+      const cached = banCache.get(accountId);
+      if (cached && Date.now() - cached.at < BAN_CACHE_TTL_MS) return cached.banned;
+      try {
+        const r = await pool.query(`SELECT is_banned FROM accounts WHERE id = $1`, [accountId]);
+        const banned = r.rows[0]?.is_banned === true;
+        banCache.set(accountId, { banned, at: Date.now() });
+        return banned;
+      } catch (err) {
+        logger.error('ban check failed', { err: String(err) });
+        return false; // availability over enforcement on a db blip
+      }
+    },
   };
 };

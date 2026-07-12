@@ -11,6 +11,8 @@ import { createMemoryGameStatsStore, type GameStatRow, type GameStatsStore } fro
 export interface PgGameStatsStore extends GameStatsStore {
   /** Load all rows from Postgres into the in-memory working set. Call once before serving. */
   init(): Promise<void>;
+  /** Flush every queued write — call on shutdown so no acknowledged mutation misses Postgres. */
+  drain(): Promise<void>;
 }
 
 export const createPgGameStatsStore = (pool: Pool, logger: Logger): PgGameStatsStore => {
@@ -61,5 +63,6 @@ export const createPgGameStatsStore = (pool: Pool, logger: Logger): PgGameStatsS
 
     statsFor: (accountId) => mem.statsFor(accountId),
     hydrate: (rows) => mem.hydrate(rows),
+    drain: () => queue.drain(),
   };
 };

@@ -237,6 +237,18 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       conv.participantIds = conv.participantIds.filter((id) => id !== targetId);
       conv.admins = conv.admins.filter((id) => id !== targetId);
       membership.get(conversationId)?.delete(targetId);
+      if (conv.participantIds.length === 0) {
+        // Last member left — reap the conversation and its messages; a memberless group is
+        // unreachable (hydration would silently drop it and its rows would just rot).
+        conversations.delete(conversationId);
+        membership.delete(conversationId);
+        messages.delete(conversationId);
+      } else if (conv.ownerId === targetId) {
+        // The owner left: promote the first admin, else the longest-standing member — otherwise
+        // the group is bricked (setGroupRole requires an owner, so no new admins could ever be
+        // appointed again).
+        conv.ownerId = conv.admins[0] ?? conv.participantIds[0] ?? null;
+      }
       return conv;
     },
 

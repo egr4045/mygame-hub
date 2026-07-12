@@ -30,6 +30,9 @@ const start = async () => {
     auth,
     accounts,
     stats: createMemoryGameStatsStore(),
+    // Effectively disabled here — the per-IP damping is exercised by its own test below and would
+    // otherwise starve suites that register many accounts from one 127.0.0.1.
+    credRateLimit: { capacity: 10_000, refillPerSec: 10_000 },
   });
   const port = await new Promise<number>((r) =>
     server!.listen(0, () => r((server!.address() as AddressInfo).port)),
@@ -156,6 +159,70 @@ describe('auth service', () => {
     const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'X', password: 'pw' }));
     const res = await post(base, '/auth/handoff', { refreshToken: login.accessToken });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('auth service — bans are enforced, not just displayed', () => {
+  const registerAndBan = async () => {
+    const ctx = await start();
+    const login = await json<LoginResponse>(
+      await post(ctx.base, '/auth/register', { displayName: 'Outlaw', password: 'pw' }),
+    );
+    ctx.accounts.setBanned(login.accountId, true);
+    return { ...ctx, login };
+  };
+
+  it('403s login for a banned account (correct password)', async () => {
+    const { base } = await registerAndBan();
+    const res = await post(base, '/auth/login', { displayName: 'Outlaw', password: 'pw' });
+    expect(res.status).toBe(403);
+    expect(await json<{ code: string }>(res)).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('403s refresh for a banned account (bans bite within the access TTL)', async () => {
+    const { base, login } = await registerAndBan();
+    const res = await post(base, '/auth/refresh', { refreshToken: login.refreshToken });
+    expect(res.status).toBe(403);
+  });
+
+  it('403s handoff and exchange for a banned account', async () => {
+    const { base, login, accounts } = await registerAndBan();
+    expect((await post(base, '/auth/handoff', { refreshToken: login.refreshToken })).status).toBe(403);
+
+    // Mint the handoff while unbanned, ban, then try to redeem it.
+    accounts.setBanned(login.accountId, false);
+    const handoff = await json<HandoffResponse>(await post(base, '/auth/handoff', { refreshToken: login.refreshToken }));
+    accounts.setBanned(login.accountId, true);
+    expect((await post(base, '/auth/exchange', { handoffToken: handoff.handoffToken })).status).toBe(403);
+  });
+
+  it('un-banning restores login', async () => {
+    const { base, login, accounts } = await registerAndBan();
+    accounts.setBanned(login.accountId, false);
+    expect((await post(base, '/auth/login', { displayName: 'Outlaw', password: 'pw' })).status).toBe(200);
+  });
+});
+
+describe('auth service — credential rate limiting', () => {
+  it('429s after the per-IP burst is exhausted', async () => {
+    const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+    server = createApp({
+      clock: createFakeClock(0),
+      logger: createCapturingLogger(),
+      auth,
+      accounts: createMemoryAccountStore(),
+      stats: createMemoryGameStatsStore(),
+      credRateLimit: { capacity: 3, refillPerSec: 0.0001 },
+    });
+    const port = await new Promise<number>((r) => server!.listen(0, () => r((server!.address() as AddressInfo).port)));
+    const base = `http://127.0.0.1:${port}`;
+
+    for (let i = 0; i < 3; i++) {
+      const res = await post(base, '/auth/login', { displayName: `nobody${i}`, password: 'pw' });
+      expect(res.status).toBe(401); // wrong creds, but not rate-limited yet
+    }
+    const res = await post(base, '/auth/login', { displayName: 'nobody', password: 'pw' });
+    expect(res.status).toBe(429);
   });
 });
 

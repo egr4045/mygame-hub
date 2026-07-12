@@ -25,6 +25,8 @@ export interface SocialDeps {
   readonly invites: InviteStore;
   readonly logger: Logger;
   readonly corsOrigin: string;
+  /** Live ban check (pg-backed in production; absent = nothing is ever banned, e.g. dev/memory). */
+  readonly isAccountBanned?: (accountId: string) => Promise<boolean>;
 }
 
 /** Strip the internal `expiresAt` to the wire shape the client consumes. */
@@ -100,9 +102,13 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
     }
     void deps.auth
       .verify(token)
-      .then((claims) => {
+      .then(async (claims) => {
         if (claims.typ !== 'access') {
           next(new Error('unauthorized'));
+          return;
+        }
+        if (deps.isAccountBanned && (await deps.isAccountBanned(claims.sub))) {
+          next(new Error('forbidden'));
           return;
         }
         (socket.data as SocketData).accountId = claims.sub;
