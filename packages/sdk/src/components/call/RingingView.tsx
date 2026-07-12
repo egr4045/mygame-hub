@@ -23,7 +23,8 @@ export const RingingView = ({
   onDecline: () => void;
   onCancel: () => void;
 }): JSX.Element => {
-  const kindLabel = type === 'video' ? 'видео' : type === 'screen' ? 'демонстрация экрана' : 'аудио';
+  // 'screen' is a deprecated call type the store already coerces to 'video' before it gets here.
+  const kindLabel = type === 'video' ? 'видео' : 'аудио';
   return (
     <div
       style={{
@@ -67,15 +68,15 @@ export const RingingView = ({
 
       {status === 'ringing-in' ? (
         <div style={{ display: 'flex', gap: 28 }}>
-          <button onClick={onAccept} style={controlButton('active')} title="Принять">
+          <button onClick={onAccept} style={controlButton('active')} title="Принять" aria-label="Принять звонок">
             ✓
           </button>
-          <button onClick={onDecline} style={controlButton('danger')} title="Отклонить">
+          <button onClick={onDecline} style={controlButton('danger')} title="Отклонить" aria-label="Отклонить звонок">
             ✕
           </button>
         </div>
       ) : (
-        <button onClick={onCancel} style={controlButton('danger')} title="Отменить">
+        <button onClick={onCancel} style={controlButton('danger')} title="Отменить" aria-label="Отменить звонок">
           📞
         </button>
       )}

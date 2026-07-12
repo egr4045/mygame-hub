@@ -25,8 +25,12 @@ export interface ChatMessage {
   createdAt: number;
   /** Only ever set for dm messages *I* sent — groups don't show per-message read receipts (v1). */
   status?: 'sent' | 'read';
-  /** Not implemented server-side yet — always undefined for real messages. */
-  reactions?: Record<string, number>;
+  replyToId?: string | null;
+  attachments?: chat.ChatAttachment[];
+  /** Set when the sender edited the message — renders the «(изменено)» label. */
+  editedAt?: number | null;
+  /** Tombstone: text/attachments are blanked server-side; renders as «Сообщение удалено». */
+  deletedAt?: number | null;
 }
 
 export interface ChatSession {
@@ -41,6 +45,11 @@ export interface ChatSession {
   otherReadAt?: number | null;
   /** group only: the creator, who alone may remove *other* members. Null for dm. */
   ownerId?: string | null;
+  /** group only: admins appointed by the owner (may delete others' messages, like the owner). */
+  admins?: string[];
+  /** Whether older history remains before the earliest loaded message (drives infinite scroll-up). */
+  hasMore?: boolean;
+  loadingOlder?: boolean;
 }
 
 /** Purely the *signaling* state — the actual media lives in `callStore` (the portable-call layer),
@@ -83,9 +92,16 @@ interface ChatState {
   removeMember: (chatId: string, accountId: string) => void;
   /** Convenience: remove myself from a group. */
   leaveGroup: (chatId: string) => void;
-  /** `_senderId` is accepted for call-site compatibility but ignored — the server derives it from the JWT. */
-  sendMessage: (chatId: string, text: string, _senderId?: string) => void;
+  sendMessage: (chatId: string, text: string, opts?: { replyToId?: string; attachments?: chat.ChatAttachment[] }) => void;
+  /** Edit my own message (server enforces sender-only / not-deleted). */
+  editMessage: (chatId: string, messageId: string, text: string) => void;
+  /** Delete a message — mine always; others' only when I'm the group owner/admin (server enforces). */
+  deleteMessage: (chatId: string, messageId: string) => void;
+  /** Load the previous page of history (infinite scroll-up). No-op while loading / nothing older. */
+  loadOlder: (chatId: string) => void;
+  /** Throttled to one socket event per ~2s per conversation — safe to call on every keystroke. */
   sendTyping: (chatId: string) => void;
+  clearError: () => void;
 
   /** Start ringing every other participant of `chatId`. Auto-cancels after `RING_TIMEOUT_MS`. */
   ring: (chatId: string, type: chat.CallType) => void;
@@ -111,6 +127,15 @@ const clearRingTimer = (): void => {
   }
 };
 
+/** «Печатает…» must also *disappear*: the server only relays typing pings, so without a local
+ *  expiry the last ping would stick forever (nothing re-renders once the peer goes quiet). */
+const TYPING_EXPIRE_MS = 4_000;
+const typingTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${conversationId}:${accountId}`
+
+/** Outbound typing throttle — the input calls sendTyping per keystroke by design. */
+const TYPING_SEND_INTERVAL_MS = 2_000;
+const lastTypingSent = new Map<string, number>(); // conversationId -> last emit ms
+
 const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const EMPTY_HISTORY_PLACEHOLDER: ChatMessage[] = [
@@ -125,6 +150,10 @@ const toUiMessage = (m: chat.ChatMessage, type: 'dm' | 'group', otherReadAt: num
   text: m.text,
   timestamp: formatTime(m.createdAt),
   createdAt: m.createdAt,
+  replyToId: m.replyToId ?? null,
+  ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+  editedAt: m.editedAt ?? null,
+  deletedAt: m.deletedAt ?? null,
   ...(type === 'dm' && m.senderId === meId
     ? { status: otherReadAt !== null && m.createdAt <= otherReadAt ? ('read' as const) : ('sent' as const) }
     : {}),
@@ -165,6 +194,8 @@ const mergeThreads = (sessions: ChatSession[], threads: chat.ChatThread[]): Chat
       unreadCount: t.unreadCount,
       otherReadAt: t.otherReadAt,
       ownerId: t.ownerId,
+      ...(t.admins !== undefined ? { admins: t.admins } : {}),
+      ...(existing?.hasMore !== undefined ? { hasMore: existing.hasMore } : {}),
     };
   });
 };
@@ -205,7 +236,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // comment in socialStore.ts.
     socket = io(config.chatUrl, { path: '/chat.io/', auth: { token }, transports: ['websocket'] });
 
-    socket.on('connect', () => set({ status: 'connected', error: null }));
+    socket.on('connect', () => {
+      set({ status: 'connected', error: null });
+      // Backfill after a reconnect: the open conversation may have missed messages while offline
+      // (threads pushes only refresh previews/counters, not loaded history).
+      const { activeChatId, isOpen } = get();
+      if (activeChatId && isOpen) get().openChat(activeChatId);
+    });
     socket.on('disconnect', () => set({ status: 'connecting' }));
     socket.on('connect_error', (err: Error) => set({ status: 'error', error: err.message }));
 
@@ -239,6 +276,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessions[idx] = { ...sess, messages: [...withoutPlaceholder, uiMsg] };
         return { sessions };
       });
+      // I'm looking right at this conversation — mark it read immediately, or the next threads
+      // push raises the unread badge on the very chat that's open in front of the user.
+      const { isOpen, activeChatId } = get();
+      if (
+        isOpen &&
+        activeChatId === p.message.conversationId &&
+        p.message.senderId !== meId &&
+        (typeof document === 'undefined' || document.hasFocus())
+      ) {
+        socket?.emit(chat.C2S.markRead, { conversationId: p.message.conversationId });
+      }
+    });
+
+    socket.on(chat.S2C.messageEdited, (p: chat.MessageEditedEvent) => {
+      set((s) => ({
+        sessions: s.sessions.map((sess) =>
+          sess.id !== p.message.conversationId
+            ? sess
+            : {
+                ...sess,
+                messages: sess.messages.map((m) =>
+                  m.id === p.message.id ? { ...m, text: p.message.text, editedAt: p.message.editedAt ?? null } : m,
+                ),
+              },
+        ),
+      }));
+    });
+
+    socket.on(chat.S2C.messageDeleted, (p: chat.MessageDeletedEvent) => {
+      set((s) => ({
+        sessions: s.sessions.map((sess) => {
+          if (sess.id !== p.conversationId) return sess;
+          return {
+            ...sess,
+            messages: sess.messages.map((m) => {
+              if (m.id !== p.messageId) return m;
+              const { attachments: _dropped, ...rest } = m;
+              return { ...rest, text: '', deletedAt: p.deletedAt };
+            }),
+          };
+        }),
+      }));
     });
 
     socket.on(chat.S2C.read, (p: chat.ReadEvent) =>
@@ -266,6 +345,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         };
       });
+      // Arm/reset the expiry so the indicator actually goes away when the peer stops typing.
+      const key = `${p.conversationId}:${p.accountId}`;
+      const prev = typingTimers.get(key);
+      if (prev) clearTimeout(prev);
+      typingTimers.set(
+        key,
+        setTimeout(() => {
+          typingTimers.delete(key);
+          set((s) => {
+            const conv = s.typing[p.conversationId];
+            if (!conv || conv[p.accountId] === undefined) return s;
+            const { [p.accountId]: _expired, ...rest } = conv;
+            return { typing: { ...s.typing, [p.conversationId]: rest } };
+          });
+        }, TYPING_EXPIRE_MS),
+      );
     });
 
     // Someone is ringing me — surface it via the global <CallView />. Also focus the widget on that
@@ -360,11 +455,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const otherReadAt = sess.otherReadAt ?? null;
           const messages =
             p.messages.length > 0 ? p.messages.map((m) => toUiMessage(m, sess.type, otherReadAt)) : EMPTY_HISTORY_PLACEHOLDER;
-          return { ...sess, messages };
+          return { ...sess, messages, hasMore: p.hasMore ?? false, loadingOlder: false };
         }),
       })),
     );
     socket?.emit(chat.C2S.markRead, { conversationId: chatId });
+  },
+
+  loadOlder: (chatId) => {
+    const sess = get().sessions.find((s) => s.id === chatId);
+    if (!sess || sess.loadingOlder || sess.hasMore === false) return;
+    const oldest = sess.messages.find((m) => m.id !== 'sys-empty');
+    if (!oldest || !socket?.connected) return;
+    set((s) => ({ sessions: s.sessions.map((x) => (x.id === chatId ? { ...x, loadingOlder: true } : x)) }));
+    socket.emit(
+      chat.C2S.getHistory,
+      { conversationId: chatId, limit: 100, before: oldest.createdAt },
+      (p: chat.HistoryAck) =>
+        set((s) => ({
+          sessions: s.sessions.map((x) => {
+            if (x.id !== chatId) return x;
+            const seen = new Set(x.messages.map((m) => m.id));
+            const older = p.messages
+              .map((m) => toUiMessage(m, x.type, x.otherReadAt ?? null))
+              .filter((m) => !seen.has(m.id));
+            return { ...x, messages: [...older, ...x.messages], hasMore: p.hasMore ?? false, loadingOlder: false };
+          }),
+        })),
+    );
   },
 
   openChatWithUser: (userId, userName, onReady) => {
@@ -437,16 +555,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().removeMember(chatId, meId);
   },
 
-  sendMessage: (chatId, text) => {
-    socket?.emit(chat.C2S.send, { conversationId: chatId, text }, (ack: chat.SendAck) => {
+  sendMessage: (chatId, text, opts) => {
+    const payload: chat.SendPayload = {
+      conversationId: chatId,
+      text,
+      ...(opts?.replyToId ? { replyToId: opts.replyToId } : {}),
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
+    };
+    socket?.emit(chat.C2S.send, payload, (ack: chat.SendAck) => {
+      if (ack?.error) set({ error: ack.error });
+    });
+  },
+
+  editMessage: (chatId, messageId, text) => {
+    socket?.emit(chat.C2S.edit, { conversationId: chatId, messageId, text }, (ack: chat.EditAck) => {
+      if (ack?.error) set({ error: ack.error });
+    });
+  },
+
+  deleteMessage: (chatId, messageId) => {
+    socket?.emit(chat.C2S.del, { conversationId: chatId, messageId }, (ack: chat.DeleteAck) => {
       if (ack?.error) set({ error: ack.error });
     });
   },
 
   sendTyping: (chatId) => {
     if (!socket?.connected) return;
+    const last = lastTypingSent.get(chatId) ?? 0;
+    if (Date.now() - last < TYPING_SEND_INTERVAL_MS) return;
+    lastTypingSent.set(chatId, Date.now());
     socket.emit(chat.C2S.typing, { conversationId: chatId });
   },
+
+  clearError: () => set({ error: null }),
 
   ring: (chatId, type) => {
     if (!socket?.connected) return;
