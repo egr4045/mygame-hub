@@ -323,6 +323,12 @@ async function handle(
   // Exchange a handoff token (from the hub's `/auth/handoff`) for a full session on the target
   // game's own origin — this is how a game embedding the SDK completes the `?pt=` SSO deep link
   // without ever seeing a password (see packages/protocol/src/auth.ts's exchangeRequest doc).
+  //
+  // One-time-ness, documented for integrators (Svoyak redeems this server-side): the handoff is a
+  // STATELESS JWT with a 120s TTL and no redemption registry — a second exchange within the window
+  // succeeds. Treat it as a short-lived bearer secret: redeem immediately, never log it, and don't
+  // build flows that depend on the second redemption failing. (True one-shot semantics would need a
+  // jti + used-set; not worth the state until a real threat model demands it.)
   if (method === 'POST' && url === '/auth/exchange') {
     const parsed = exchangeRequest.safeParse(await readJson(req));
     if (!parsed.success) {

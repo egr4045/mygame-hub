@@ -64,6 +64,26 @@ export const setAdminRole = async (accountId: string, isAdmin: boolean): Promise
   return res?.ok ?? false;
 };
 
+/** Ban or unban an account. Returns false on failure. */
+export const setAccountBan = async (accountId: string, isBanned: boolean): Promise<boolean> => {
+  const res = await authed(`/auth/admin/accounts/${accountId}/ban`, config.authUrl, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ isBanned }),
+  });
+  return res?.ok ?? false;
+};
+
+/** Change an account's display name. Returns false on failure or conflict. */
+export const setAccountDisplayName = async (accountId: string, displayName: string): Promise<boolean> => {
+  const res = await authed(`/auth/admin/accounts/${accountId}/display-name`, config.authUrl, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ displayName }),
+  });
+  return res?.ok ?? false;
+};
+
 /** Grant an achievement to any account (support-ticket case). Returns false on failure. */
 export const grantAchievementTo = async (accountId: string, gameId: string, achievementId: string): Promise<boolean> => {
   const res = await authed(`/auth/admin/accounts/${accountId}/achievements`, config.authUrl, {

@@ -61,11 +61,14 @@ export const GAMES: GameInfo[] = [
     id: 'svoyak',
     name: 'Своя игра',
     tagline: 'Quiz buzzer party · Jeopardy-style',
-    status: 'maintenance',
+    // Playable via the SDK IIFE embed (its own Vue repo): boot contract is ?pt (handoff), ?join
+    // (room) and ?spectate=1 — exactly what routeToRoom sends. Its server redeems ?pt itself
+    // (/auth/platform-bridge → platform /auth/exchange) and hands the session to the browser via
+    // mygame.auth.adoptSession.
+    status: 'playable',
     accent: '#49a05a',
     emoji: '🧠',
     externalPort: 8089,
-    note: 'Временно недоступна в хабе — переезжает на новый роутинг.',
   },
   {
     id: 'leaders',

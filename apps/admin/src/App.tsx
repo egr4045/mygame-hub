@@ -1,33 +1,16 @@
 import { useEffect, useState } from 'react';
 import { loadSession, login, register, clearSession, freshAccessToken, config } from '@mygame/sdk';
+import { DashboardScreen } from './screens/DashboardScreen.js';
 import { GamesScreen } from './screens/GamesScreen.js';
 import { UsersScreen } from './screens/UsersScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
+import { Sidebar } from './components/Sidebar.js';
+import { ToastProvider } from './components/ToastProvider.js';
 
-type Tab = 'games' | 'users' | 'settings';
-/** Distinct from "logged out" — a logged-in non-admin sees a clear "not authorized" state rather
- *  than silently empty screens (the one place this app deviates from the hub's usual "silent
- *  fallback to defaults" convention: 403 and "no data" mean different things here). */
-type AccessStatus = 'checking' | 'forbidden' | 'ok';
+type Tab = 'dashboard' | 'games' | 'users' | 'settings';
+type AccessStatus = 'checking' | 'forbidden' | 'ok' | 'error';
 
-const card: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid #2a3f5a',
-  borderRadius: 8,
-  padding: 24,
-};
-
-const button: React.CSSProperties = {
-  background: '#1a9fff',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 4,
-  padding: '10px 20px',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-export const App = (): JSX.Element => {
+const AppContent = (): JSX.Element => {
   const [account, setAccount] = useState<{ accountId: string; displayName: string } | null>(() => {
     const s = loadSession();
     return s ? { accountId: s.accountId, displayName: s.displayName } : null;
@@ -36,27 +19,33 @@ export const App = (): JSX.Element => {
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessStatus>('checking');
-  const [tab, setTab] = useState<Tab>('games');
+  const [tab, setTab] = useState<Tab>('dashboard');
 
-  // Every screen's own data calls also re-check admin access via their own 403s, but this one
-  // upfront check is what decides whether to show the app shell at all.
+  const [accessAttempt, setAccessAttempt] = useState(0);
+
   useEffect(() => {
     if (!account) return;
     let cancelled = false;
     setAccess('checking');
     void (async () => {
-      const token = await freshAccessToken();
-      if (!token) {
-        if (!cancelled) setAccess('forbidden');
-        return;
+      try {
+        const token = await freshAccessToken();
+        if (!token) {
+          if (!cancelled) setAccess('forbidden');
+          return;
+        }
+        const res = await fetch(`${config.authUrl}/auth/admin/admins`, { headers: { authorization: `Bearer ${token}` } });
+        if (!cancelled) setAccess(res.ok ? 'ok' : 'forbidden');
+      } catch {
+        // Network/CORS failure (auth service down) is not «нет прав» — show a retryable error
+        // instead of hanging on «Проверка доступа…» forever.
+        if (!cancelled) setAccess('error');
       }
-      const res = await fetch(`${config.authUrl}/auth/admin/admins`, { headers: { authorization: `Bearer ${token}` } });
-      if (!cancelled) setAccess(res.ok ? 'ok' : 'forbidden');
     })();
     return () => {
       cancelled = true;
     };
-  }, [account]);
+  }, [account, accessAttempt]);
 
   const handleLogin = async (): Promise<void> => {
     if (!nameInput.trim() || !passwordInput) return;
@@ -88,31 +77,35 @@ export const App = (): JSX.Element => {
 
   if (!account) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#12161d', color: '#dcdedf', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ ...card, width: 360, textAlign: 'center' }}>
-          <h1 style={{ fontSize: 20, marginBottom: 8 }}>GAMEHUB — Admin</h1>
-          <p style={{ color: '#8f98a0', fontSize: 13, marginBottom: 24 }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="glass-card" style={{ width: 360, textAlign: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontWeight: 800, fontSize: 24 }}>G</div>
+          <h1 style={{ fontSize: 24, marginBottom: 8 }}>GAMEHUB</h1>
+          <div style={{ color: 'var(--text-muted)', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 24 }}>Admin Panel</div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 24 }}>
             Тот же логин, что и в хабе — доступ проверяется по роли на сервере.
           </p>
           <input
+            className="input-field"
             placeholder="Ваше имя"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
-            style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
+            style={{ width: '100%', marginBottom: 12 }}
           />
           <input
+            className="input-field"
             type="password"
             placeholder="Пароль"
             value={passwordInput}
             onChange={(e) => setPasswordInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
-            style={{ width: '100%', boxSizing: 'border-box', background: '#171a21', border: '1px solid #2a3f5a', borderRadius: 4, padding: '10px 12px', color: '#fff', marginBottom: 12 }}
+            style={{ width: '100%', marginBottom: 12 }}
           />
-          {authError && <p style={{ color: '#e07070', fontSize: 12, marginBottom: 12 }}>{authError}</p>}
+          {authError && <p style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 12 }}>{authError}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => void handleLogin()} style={{ ...button, flex: 1 }}>Войти</button>
-            <button onClick={() => void handleRegister()} style={{ ...button, flex: 1, background: '#3d4450' }}>Регистрация</button>
+            <button className="btn" onClick={() => void handleLogin()} style={{ flex: 1 }}>Войти</button>
+            <button className="btn btn-ghost" onClick={() => void handleRegister()} style={{ flex: 1 }}>Регистрация</button>
           </div>
         </div>
       </div>
@@ -121,16 +114,31 @@ export const App = (): JSX.Element => {
 
   if (access !== 'ok') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#12161d', color: '#dcdedf', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ ...card, width: 360, textAlign: 'center' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="glass-card" style={{ width: 360, textAlign: 'center' }}>
           {access === 'checking' ? (
-            <p style={{ color: '#8f98a0', fontSize: 13 }}>Проверка доступа…</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Проверка доступа…</p>
+          ) : access === 'error' ? (
+            <>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+              <p style={{ fontSize: 16, marginBottom: 8 }}>Не удалось проверить доступ</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 24 }}>
+                Сервис авторизации недоступен. Проверьте соединение и попробуйте ещё раз.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={() => setAccessAttempt((n) => n + 1)} style={{ flex: 1, justifyContent: 'center' }}>
+                  Повторить
+                </button>
+                <button className="btn btn-ghost" onClick={handleLogout} style={{ flex: 1, justifyContent: 'center' }}>Выйти</button>
+              </div>
+            </>
           ) : (
             <>
-              <p style={{ fontSize: 14, marginBottom: 16 }}>
-                У аккаунта «{account.displayName}» нет прав администратора.
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+              <p style={{ fontSize: 16, marginBottom: 24 }}>
+                У аккаунта <strong style={{ color: '#fff' }}>{account.displayName}</strong> нет прав администратора.
               </p>
-              <button onClick={handleLogout} style={button}>Выйти</button>
+              <button className="btn btn-ghost" onClick={handleLogout} style={{ width: '100%', justifyContent: 'center' }}>Выйти</button>
             </>
           )}
         </div>
@@ -139,40 +147,24 @@ export const App = (): JSX.Element => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#12161d', color: '#dcdedf', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 5%', borderBottom: '1px solid #2a3f5a' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 1 }}>GAMEHUB ADMIN</div>
-          {(['games', 'users', 'settings'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: tab === t ? '#fff' : '#8f98a0',
-                fontWeight: tab === t ? 700 : 400,
-                fontSize: 14,
-                cursor: 'pointer',
-                borderBottom: tab === t ? '2px solid #1a9fff' : '2px solid transparent',
-                padding: '4px 0',
-              }}
-            >
-              {t === 'games' ? 'ИГРЫ' : t === 'users' ? 'ПОЛЬЗОВАТЕЛИ' : 'НАСТРОЙКИ'}
-            </button>
-          ))}
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar currentTab={tab} onChangeTab={setTab} onLogout={handleLogout} adminName={account.displayName} />
+      <div style={{ flex: 1, padding: '32px 40px', overflowY: 'auto' }}>
+        <div className="animate-fade-in" key={tab}>
+          {tab === 'dashboard' && <DashboardScreen />}
+          {tab === 'games' && <GamesScreen />}
+          {tab === 'users' && <UsersScreen />}
+          {tab === 'settings' && <SettingsScreen />}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ fontSize: 13, color: '#8f98a0' }}>{account.displayName}</span>
-          <button onClick={handleLogout} style={{ ...button, padding: '6px 14px', fontSize: 13 }}>Выйти</button>
-        </div>
-      </div>
-
-      <div style={{ padding: '32px 5%' }}>
-        {tab === 'games' && <GamesScreen />}
-        {tab === 'users' && <UsersScreen />}
-        {tab === 'settings' && <SettingsScreen />}
       </div>
     </div>
+  );
+};
+
+export const App = (): JSX.Element => {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 };
