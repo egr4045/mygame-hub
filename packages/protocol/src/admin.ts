@@ -15,6 +15,7 @@ export const adminAccountSummary = z.object({
   id: z.string(),
   displayName: z.string(),
   isAdmin: z.boolean(),
+  isBanned: z.boolean().default(false),
   telegramLinked: z.boolean(),
   achievementCount: z.number(),
 });
@@ -30,6 +31,7 @@ export const adminAccountDetail = z.object({
   id: z.string(),
   displayName: z.string(),
   isAdmin: z.boolean(),
+  isBanned: z.boolean().default(false),
   telegramLinked: z.boolean(),
   avatarIcon: z.string().nullable(),
   wallpaper: z.string().nullable(),
@@ -42,6 +44,12 @@ export type AdminAccountDetail = z.infer<typeof adminAccountDetail>;
 
 export const setAdminRoleRequest = z.object({ isAdmin: z.boolean() });
 export type SetAdminRoleRequest = z.infer<typeof setAdminRoleRequest>;
+
+export const setAccountBanRequest = z.object({ isBanned: z.boolean() });
+export type SetAccountBanRequest = z.infer<typeof setAccountBanRequest>;
+
+export const adminSetDisplayNameRequest = z.object({ displayName: z.string().min(1).max(32) });
+export type AdminSetDisplayNameRequest = z.infer<typeof adminSetDisplayNameRequest>;
 
 export const adminRosterResponse = z.object({ admins: z.array(adminAccountSummary) });
 export type AdminRosterResponse = z.infer<typeof adminRosterResponse>;

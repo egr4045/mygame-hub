@@ -57,7 +57,10 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
   const persistAccount = (id: string, displayName: string): void =>
     queue.push('social.account', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, updated_at) VALUES ($1, $2, now())
+        // password_hash '' satisfies the NOT NULL constraint when this service sees an account
+        // before auth ever persisted it (auth's own upsert overwrites with the real hash; the
+        // ON CONFLICT branch here never touches it).
+        `INSERT INTO accounts (id, display_name, password_hash, updated_at) VALUES ($1, $2, '', now())
          ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = now()`,
         [id, displayName],
       ),
