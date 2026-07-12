@@ -73,6 +73,9 @@ interface ChatState {
   activeCall: ActiveCall | null;
   /** conversationId -> accountId -> timestamp of last typing event */
   typing: Record<string, Record<string, number>>;
+  /** Discord-style call presence: conversationId -> who's currently in that conversation's call
+   *  (empty list = no active call). Populated from the server whether or not I'm in the call. */
+  callStates: Record<string, { type: chat.CallType; participantIds: string[] }>;
 
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
@@ -210,6 +213,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   activeCall: null,
   typing: {},
+  callStates: {},
 
   connect: async () => {
     if (socket?.connected) return;
@@ -457,6 +461,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     });
+
+    // Discord-style call presence — the live roster of every conversation's call.
+    socket.on(chat.S2C.callState, (p: chat.CallStateEvent) => {
+      set((s) => ({
+        callStates: { ...s.callStates, [p.conversationId]: { type: p.type, participantIds: p.participantIds } },
+      }));
+    });
   },
 
   disconnect: () => {
@@ -466,7 +477,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     meName = null;
     clearRingTimer();
     useCallStore.getState().leave();
-    set({ status: 'idle', sessions: [], activeCall: null });
+    set({ status: 'idle', sessions: [], activeCall: null, callStates: {} });
   },
 
   toggleChat: () => set((s) => ({ isOpen: !s.isOpen })),

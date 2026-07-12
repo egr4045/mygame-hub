@@ -197,7 +197,16 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   };
 
   const mintLivekitToken = async (accountId: string, displayName: string, room: string): Promise<chat.CallTokenResponse> => {
-    const at = new AccessToken(deps.livekit.apiKey, deps.livekit.apiSecret, { identity: accountId, name: displayName });
+    // Identity is per-DEVICE (`accountId#<random>`), not the bare accountId — otherwise a second
+    // device (e.g. streaming camera from a phone while playing on PC) collides on identity and
+    // LiveKit evicts the first. The real accountId travels in `metadata` so the client can still
+    // group a person's devices; the display name is the human label.
+    const identity = `${accountId}#${randomUUID().slice(0, 8)}`;
+    const at = new AccessToken(deps.livekit.apiKey, deps.livekit.apiSecret, {
+      identity,
+      name: displayName,
+      metadata: JSON.stringify({ accountId }),
+    });
     at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
     return { token: await at.toJwt(), url: deps.livekit.url };
   };
@@ -450,6 +459,19 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     emitTo(accountId, chat.S2C.threads, payload);
   };
 
+  /** Discord-style call presence: push the *current* roster of a conversation's call to every one
+   *  of its members (whether or not they're in the call), so they can see who's talking and join.
+   *  An empty `participantIds` means the call ended. */
+  const emitCallState = (conversationId: string): void => {
+    const call = activeCalls.get(conversationId);
+    const payload: chat.CallStateEvent = {
+      conversationId,
+      type: call?.type ?? 'audio',
+      participantIds: call ? [...call.participantIds] : [],
+    };
+    emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callState, payload);
+  };
+
   /** The ring sweep: nobody answered within `ringTimeoutMs`. A dead 1:1/empty call ends for
    *  everyone (reason `'timeout'` so the caller shows "no answer"); a live group call keeps going —
    *  only the still-ringing users get the event, which merely clears their incoming banner. */
@@ -465,6 +487,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     } else if (stillRinging.length > 0) {
       emitToEveryone(stillRinging, chat.S2C.callEnded, payload);
     }
+    emitCallState(conversationId);
   };
 
   const armRingTimer = (conversationId: string, call: ActiveCall): void => {
@@ -504,6 +527,14 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
           callType: call.type,
         };
         socket.emit(chat.S2C.callRing, payload);
+      }
+      // Presence: let a freshly-connected client see calls already in progress in its conversations.
+      if (deps.store.isParticipant(conversationId, accountId)) {
+        socket.emit(chat.S2C.callState, {
+          conversationId,
+          type: call.type,
+          participantIds: [...call.participantIds],
+        } satisfies chat.CallStateEvent);
       }
     }
 
@@ -750,6 +781,8 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         const payload: chat.CallEndedEvent = { conversationId, reason: 'ended' };
         emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
       }
+      // Refresh the presence roster for everyone (empty if the call just ended).
+      emitCallState(conversationId);
     };
 
     // Voice/video call signaling — ephemeral (`activeCalls` above), no store/Postgres involvement;
@@ -784,6 +817,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         armRingTimer(conversationId, call);
         const payload: chat.CallRingEvent = { conversationId, fromAccountId: accountId, fromName: displayName, callType };
         emitToEveryone(ringTargets, chat.S2C.callRing, payload);
+        emitCallState(conversationId);
         if (typeof ack === 'function') ack({ ok: true });
       }),
     );
@@ -802,6 +836,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         disarmRingTimerIfIdle(call);
         const payload: chat.CallParticipantEvent = { conversationId, accountId };
         emitToEveryone([...call.participantIds], chat.S2C.callAccepted, payload);
+        emitCallState(conversationId);
         if (typeof ack === 'function') ack({ ok: true });
       }),
     );

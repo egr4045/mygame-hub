@@ -34,8 +34,11 @@ export type CallKind = 'conv' | 'game';
 export type CallMediaStatus = 'idle' | 'connecting' | 'connected';
 
 export interface CallParticipant {
-  /** Platform accountId — LiveKit identity is minted as the accountId, so they always match. */
+  /** Platform accountId. One account can appear more than once (multi-device — e.g. PC + phone
+   *  camera); those entries share `accountId` but differ in `id`. */
   accountId: string;
+  /** The unique per-device LiveKit identity (`<accountId>#<device>`). Use this as the React key. */
+  id: string;
   name: string;
   isLocal: boolean;
   micOn: boolean;
@@ -249,7 +252,22 @@ const fetchToken = async (path: string, body: unknown): Promise<chat.CallTokenRe
   return (await res.json()) as chat.CallTokenResponse;
 };
 
-// --- video attach plumbing ---------------------------------------------------------------------
+/** The platform accountId behind a LiveKit participant. Identity is minted `<accountId>#<device>`
+ *  and the accountId also rides in `metadata`; multiple devices of one account share this. */
+const accountOf = (p: { identity: string; metadata?: string | undefined }): string => {
+  if (p.metadata) {
+    try {
+      const m = JSON.parse(p.metadata) as { accountId?: string };
+      if (m.accountId) return m.accountId;
+    } catch {
+      /* fall through to the identity prefix */
+    }
+  }
+  return p.identity.split('#')[0] ?? p.identity;
+};
+
+// --- video attach plumbing (keyed by base accountId, so a game's attachVideo(accountId) matches
+//     whichever device is actually publishing that person's camera) --------------------------------
 
 const detachFromContainer = (el: HTMLElement): void => {
   const attached = attachedEl.get(el);
@@ -271,25 +289,28 @@ const attachTrackTo = (track: Track, el: HTMLElement): void => {
   attachedEl.set(el, { track, media });
 };
 
-const cameraTrackOf = (identity: string): Track | null => {
+/** The camera track for `accountId` — across devices, the first device of that account that's
+ *  actually publishing a camera (so PC-plays / phone-streams-camera resolves to the phone). */
+const cameraTrackOf = (accountId: string): Track | null => {
   if (!callRoom) return null;
-  const p =
-    callRoom.localParticipant.identity === identity
-      ? callRoom.localParticipant
-      : callRoom.getParticipantByIdentity(identity);
-  return p?.getTrackPublication(Track.Source.Camera)?.track ?? null;
+  for (const p of [callRoom.localParticipant, ...callRoom.remoteParticipants.values()]) {
+    if (accountOf(p) !== accountId) continue;
+    const track = p.getTrackPublication(Track.Source.Camera)?.track;
+    if (track) return track;
+  }
+  return null;
 };
 
-const attachToTargets = (identity: string): void => {
-  const targets = videoTargets.get(identity);
+const attachToTargets = (accountId: string): void => {
+  const targets = videoTargets.get(accountId);
   if (!targets?.size) return;
-  const track = cameraTrackOf(identity);
+  const track = cameraTrackOf(accountId);
   if (!track) return;
   for (const el of targets) attachTrackTo(track, el);
 };
 
-const detachTargets = (identity: string): void => {
-  const targets = videoTargets.get(identity);
+const detachTargets = (accountId: string): void => {
+  const targets = videoTargets.get(accountId);
   if (!targets) return;
   for (const el of targets) detachFromContainer(el);
 };
@@ -301,10 +322,12 @@ const detachAll = (): void => {
 // --- store --------------------------------------------------------------------------------------
 
 const toCallParticipant = (p: Participant, isLocal: boolean): CallParticipant => {
-  const prefs = playback.get(p.identity);
+  const accountId = accountOf(p);
+  const prefs = playback.get(accountId);
   return {
-    accountId: p.identity,
-    name: p.name || p.identity,
+    accountId,
+    id: p.identity,
+    name: p.name || accountId,
     isLocal,
     micOn: p.isMicrophoneEnabled,
     camOn: p.isCameraEnabled,
@@ -329,33 +352,36 @@ export const useCallStore = create<CallState>((set, get) => {
   };
 
   const applyPlayback = (accountId: string): void => {
-    const p = callRoom?.getParticipantByIdentity(accountId);
-    if (!(p instanceof RemoteParticipant)) return;
+    if (!callRoom) return;
     const prefs = playback.get(accountId);
-    p.setVolume(prefs?.muted ? 0 : (prefs?.volume ?? 1));
+    const vol = prefs?.muted ? 0 : (prefs?.volume ?? 1);
+    // A person may be in from several devices — apply my local volume/mute to all of them.
+    for (const p of callRoom.remoteParticipants.values()) {
+      if (p instanceof RemoteParticipant && accountOf(p) === accountId) p.setVolume(vol);
+    }
   };
 
   const wireRoom = (room: Room): void => {
     room.on(RoomEvent.ParticipantConnected, () => syncParticipants());
     room.on(RoomEvent.ParticipantDisconnected, (p) => {
-      detachTargets(p.identity);
+      detachTargets(accountOf(p));
       syncParticipants();
     });
     room.on(RoomEvent.TrackSubscribed, (_track, pub: TrackPublication, participant) => {
-      if (pub.source === Track.Source.Camera) attachToTargets(participant.identity);
-      if (pub.kind === Track.Kind.Audio) applyPlayback(participant.identity);
+      if (pub.source === Track.Source.Camera) attachToTargets(accountOf(participant));
+      if (pub.kind === Track.Kind.Audio) applyPlayback(accountOf(participant));
       syncParticipants();
     });
     room.on(RoomEvent.TrackUnsubscribed, (_track, pub: TrackPublication, participant) => {
-      if (pub.source === Track.Source.Camera) detachTargets(participant.identity);
+      if (pub.source === Track.Source.Camera) detachTargets(accountOf(participant));
       syncParticipants();
     });
     room.on(RoomEvent.LocalTrackPublished, (pub) => {
-      if (pub.source === Track.Source.Camera) attachToTargets(room.localParticipant.identity);
+      if (pub.source === Track.Source.Camera) attachToTargets(accountOf(room.localParticipant));
       syncParticipants();
     });
     room.on(RoomEvent.LocalTrackUnpublished, (pub) => {
-      if (pub.source === Track.Source.Camera) detachTargets(room.localParticipant.identity);
+      if (pub.source === Track.Source.Camera) detachTargets(accountOf(room.localParticipant));
       syncParticipants();
     });
     room.on(RoomEvent.TrackMuted, () => syncParticipants());
@@ -467,8 +493,8 @@ export const useCallStore = create<CallState>((set, get) => {
     syncParticipants();
     // Attach anything already published (tracks that arrived before/during connect).
     for (const p of [callRoom.localParticipant, ...callRoom.remoteParticipants.values()]) {
-      attachToTargets(p.identity);
-      applyPlayback(p.identity);
+      attachToTargets(accountOf(p));
+      applyPlayback(accountOf(p));
     }
     return true;
   };

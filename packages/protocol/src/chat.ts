@@ -248,6 +248,7 @@ export const S2C = {
   callAccepted: 'chat.callAccepted', // pushed to everyone already in the call when accountId joins
   callDeclined: 'chat.callDeclined', // pushed to the ringer(s) when accountId declines
   callEnded: 'chat.callEnded', // pushed to everyone once the call has no participants left
+  callState: 'chat.callState', // Discord-style presence: the live roster of who's in a conversation's call, pushed to ALL its members (empty = no active call)
   typing: 'chat.typing', // pushed to every other participant when someone is typing
 } as const;
 
@@ -267,6 +268,14 @@ export const callRingEvent = z.object({
   callType,
 });
 export const callParticipantEvent = z.object({ conversationId: z.string(), accountId: z.string() });
+/** The live roster of a conversation's call (Discord-style presence). `participantIds` empty means
+ *  no active call. Pushed to every conversation member, whether or not they're in the call. */
+export const callStateEvent = z.object({
+  conversationId: z.string(),
+  type: callType,
+  participantIds: z.array(z.string()),
+});
+export type CallStateEvent = z.infer<typeof callStateEvent>;
 /** `reason: 'timeout'` = the server's ring sweep gave up on an unanswered ring (no one to blame,
  *  the caller shows "no answer" and the still-ringing callees just clear their banner). */
 export const callEndedEvent = z.object({

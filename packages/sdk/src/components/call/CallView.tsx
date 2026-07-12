@@ -100,14 +100,26 @@ export const CallView = (): JSX.Element | null => {
   const conversationId = mediaConversationId ?? activeCall?.conversationId ?? null;
   const session = conversationId ? sessions.find((s) => s.id === conversationId) : undefined;
   const title = session?.name ?? mediaLabel ?? activeCall?.fromName ?? (mediaKind === 'game' ? 'Игровой звонок' : 'Звонок');
-  const myIdentity = me?.accountId ?? null;
+  // LiveKit identity is now per-device (`<accountId>#<device>`); the local tile is the exact local
+  // identity, and names resolve on the base accountId (so a second device of mine still gets a name).
+  const myIdentity = room ? room.localParticipant.identity : null;
+  const myAccountId = me?.accountId ?? null;
+  const baseOf = (identity: string): string => identity.split('#')[0] ?? identity;
   const nameFor = (identity: string): string => {
     if (identity === myIdentity) return me?.displayName ?? 'Вы';
-    return (
-      session?.participants.find((p) => p.accountId === identity)?.displayName ??
-      mediaParticipants.find((p) => p.accountId === identity)?.name ??
-      identity
-    );
+    const acc = baseOf(identity);
+    const name =
+      (acc === myAccountId ? me?.displayName : undefined) ??
+      session?.participants.find((p) => p.accountId === acc)?.displayName ??
+      mediaParticipants.find((p) => p.accountId === acc)?.name ??
+      acc;
+    // Disambiguate when the same person is in from more than one device.
+    const sameAccount = mediaParticipants.filter((p) => p.accountId === acc);
+    if (sameAccount.length > 1) {
+      const idx = sameAccount.findIndex((p) => p.id === identity);
+      return idx >= 0 ? `${name} (${idx + 1})` : name;
+    }
+    return name;
   };
 
   const toggleFullscreen = () => {

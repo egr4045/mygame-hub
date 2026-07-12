@@ -117,10 +117,13 @@ const loadJson = <T,>(key: string, fallback: T): T => {
 const DroppableChatSession = ({
   s,
   activeChatId,
+  callCount,
   onClick,
 }: {
   s: ChatSession;
   activeChatId: string | null;
+  /** How many people are currently in this conversation's call (0 = none). */
+  callCount: number;
   onClick: () => void;
 }): JSX.Element => {
   const { isOver, setNodeRef } = useDroppable({ id: `chat:${s.id}` });
@@ -145,6 +148,12 @@ const DroppableChatSession = ({
       <div style={{ fontSize: '13px', color: '#dcdedf', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {s.name}
       </div>
+      {callCount > 0 && (
+        <div title={`В звонке: ${callCount}`} style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#3ba55d', fontSize: 11, fontWeight: 700 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#3ba55d', display: 'inline-block' }} />
+          {callCount}
+        </div>
+      )}
       {!!s.unreadCount && !active && (
         <div style={{ background: '#5c7e10', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>
           {s.unreadCount}
@@ -195,6 +204,8 @@ export const ChatWidget = (): JSX.Element => {
   const setGroupRole = useChatStore((s) => s.setGroupRole);
   const sendTyping = useChatStore((s) => s.sendTyping);
   const typing = useChatStore((s) => s.typing);
+  const callStates = useChatStore((s) => s.callStates);
+  const acceptCall = useChatStore((s) => s.acceptCall);
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
 
@@ -592,6 +603,7 @@ export const ChatWidget = (): JSX.Element => {
               key={s.id}
               s={s}
               activeChatId={activeChatId}
+              callCount={callStates[s.id]?.participantIds.length ?? 0}
               onClick={() => { openChat(s.id); setIsAddingMembers(false); setIsViewingMembers(false); }}
             />
           ))}
@@ -841,6 +853,31 @@ export const ChatWidget = (): JSX.Element => {
                 </button>
               </div>
             </div>
+
+            {(() => {
+              // Discord-style: an ongoing call I'm not in → a join bar naming who's already there.
+              const cs = callStates[activeSession.id];
+              const inCall = !!me && (cs?.participantIds.includes(me.accountId) ?? false);
+              if (!cs || cs.participantIds.length === 0 || inCall) return null;
+              const names = cs.participantIds
+                .map((id) => activeSession.participants.find((p) => p.accountId === id)?.displayName ?? 'участник')
+                .slice(0, 3)
+                .join(', ');
+              return (
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: '#20342a', borderBottom: '1px solid #3d4450' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3ba55d', flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#dcdedf', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    Идёт звонок · {names}{cs.participantIds.length > 3 ? ` и ещё ${cs.participantIds.length - 3}` : ''}
+                  </span>
+                  <button
+                    onClick={() => void acceptCall(activeSession.id)}
+                    style={{ background: '#3ba55d', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    Присоединиться
+                  </button>
+                </div>
+              );
+            })()}
 
             <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                   <div
