@@ -242,6 +242,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // (threads pushes only refresh previews/counters, not loaded history).
       const { activeChatId, isOpen } = get();
       if (activeChatId && isOpen) get().openChat(activeChatId);
+      // A conv call's media survived a page navigation (callStore.resume()) — re-register the
+      // signaling side so the server counts this device as a call participant again (the promise
+      // callStore's resume() doc comment makes about us).
+      const cs = useCallStore.getState();
+      if (cs.status === 'connected' && cs.kind === 'conv' && cs.conversationId) {
+        socket?.emit(chat.C2S.callAccept, { conversationId: cs.conversationId });
+        if (!get().activeCall) {
+          set({
+            activeCall: { conversationId: cs.conversationId, type: cs.callType ?? 'audio', status: 'connected' },
+          });
+        }
+      }
     });
     socket.on('disconnect', () => set({ status: 'connecting' }));
     socket.on('connect_error', (err: Error) => set({ status: 'error', error: err.message }));
@@ -427,10 +439,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     socket.on(chat.S2C.callEnded, (p: chat.CallEndedEvent) => {
-      if (get().activeCall?.conversationId !== p.conversationId) return;
+      const call = get().activeCall;
+      if (call?.conversationId !== p.conversationId) return;
       clearRingTimer();
       useCallStore.getState().leave();
       set({ activeCall: null });
+      // The server's ring sweep gave up: tell the caller nobody answered; a still-ringing callee
+      // just has the banner cleared silently (there's no one to blame them for).
+      if (p.reason === 'timeout' && call.status === 'ringing-out') {
+        useToastStore.getState().addToast({
+          type: 'system',
+          title: 'Нет ответа',
+          content: 'Никто не ответил на звонок',
+          icon: '📞',
+        });
+      }
     });
   },
 

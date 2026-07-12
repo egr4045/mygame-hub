@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { usePlatformStore } from './platform/platformStore.js';
-import { useSocialStore, useChatStore } from '@mygame/sdk';
+import { useSocialStore, useChatStore, useCallStore, useToastStore } from '@mygame/sdk';
 import { resolveInvite } from './net/inviteClient.js';
 import { routeToInvite } from './platform/inviteRouting.js';
 import { AuthScreen } from './screens/AuthScreen.js';
@@ -30,6 +30,9 @@ export const App = (): JSX.Element => {
     if (account) {
       void useSocialStore.getState().connect();
       void useChatStore.getState().connect();
+      // Portable calls: the hub never calls mygame.init(), so trigger the post-navigation call
+      // resume explicitly (game→hub direction; chatStore re-registers the signaling on connect).
+      void useCallStore.getState().resume();
     } else {
       useSocialStore.getState().disconnect();
       useChatStore.getState().disconnect();
@@ -47,7 +50,12 @@ export const App = (): JSX.Element => {
 
       const invite = await resolveInvite(inviteCode);
       if (!invite) {
-        alert('Приглашение не найдено или истекло.');
+        useToastStore.getState().addToast({
+          type: 'system',
+          title: 'Приглашение',
+          content: 'Приглашение не найдено или истекло.',
+          icon: '✉️',
+        });
         return;
       }
       await routeToInvite(invite);

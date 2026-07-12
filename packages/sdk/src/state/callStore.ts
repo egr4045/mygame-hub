@@ -28,7 +28,7 @@ import {
 } from 'livekit-client';
 import type { chat } from '@mygame/protocol';
 import { config } from '../config.js';
-import { freshAccessToken } from '../authClient.js';
+import { freshAccessToken, loadSession } from '../authClient.js';
 
 export type CallKind = 'conv' | 'game';
 export type CallMediaStatus = 'idle' | 'connecting' | 'connected';
@@ -603,6 +603,10 @@ export const useCallStore = create<CallState>((set, get) => {
 
     resume: async () => {
       if (callRoom || typeof window === 'undefined') return;
+      // No session yet (e.g. init() ran before the host page finished its own auth bridge): leave
+      // the `?call=` param and localStorage untouched so a later resume() — via
+      // `mygame.auth.adoptSession` — can still consume them. Joining would only fail anyway.
+      if (!loadSession()) return;
       let target: PersistedCall | null = null;
       try {
         const url = new URL(window.location.href);

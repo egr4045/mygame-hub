@@ -16,6 +16,7 @@ import type {
 import { configure, type ConfigureOptions } from './config.js';
 import {
   loadSession,
+  saveSession,
   login as authLogin,
   register as authRegister,
   clearSession,
@@ -38,6 +39,14 @@ import {
 import { getChangelog, getThreads, getThread, createThread, createPost } from './communityClient.js';
 import { useSocialStore } from './state/socialStore.js';
 import { useChatStore, type ChatSession } from './state/chatStore.js';
+import {
+  useCallStore,
+  type CallJoinOpts,
+  type CallKind,
+  type CallMediaStatus,
+  type CallParticipant,
+  type GameCallInvite,
+} from './state/callStore.js';
 import { useMenuStore, type MenuItem } from './state/menuStore.js';
 import { useToastStore, type ToastData } from './state/toastStore.js';
 import { useNotificationPrefsStore } from './state/notificationPrefsStore.js';
@@ -52,6 +61,18 @@ export type { TitleAchievementRef };
 export interface MygameAccount {
   accountId: string;
   displayName: string;
+}
+
+/** The snapshot `mygame.call.getState()` hands to non-React hosts (Vue/vanilla games polling or
+ *  subscribing via `mygame.call.subscribe`). */
+export interface MygameCallState {
+  status: CallMediaStatus;
+  kind: CallKind | null;
+  callKey: string | null;
+  participants: CallParticipant[];
+  embedded: boolean;
+  pendingInvite: GameCallInvite | null;
+  error: string | null;
 }
 
 export type MygameInitOptions = ConfigureOptions;
@@ -74,6 +95,10 @@ class MygameClient {
       mountOverlay();
       void this.social.connect();
       void useChatStore.getState().connect();
+      // Portable calls: re-join the call this browser was in before navigating here (`?call=` param
+      // or localStorage). No-op without a session — `auth.adoptSession` retries it after the host
+      // page's own auth bridge completes.
+      void useCallStore.getState().resume();
       // Playtime: stamp this launch and start the in-game heartbeat (server derives + clamps duration).
       void recordGameEnter(gameId);
       startPlaytimeHeartbeat(gameId);
@@ -99,6 +124,18 @@ class MygameClient {
     /** Redeem a hub `?pt=` handoff token for a session on this origin — no password needed. Null on
      *  failure (expired/invalid token). This is how a game embedding the SDK completes hub SSO. */
     loginWithToken: (handoffToken: string): Promise<Session | null> => exchangeHandoff(handoffToken),
+    /**
+     * Adopt a platform session obtained outside the SDK — for games whose *server* redeems the
+     * handoff token (their own `/auth/platform-bridge` → the platform's one-shot `/auth/exchange`)
+     * and hands the resulting session to the browser. Saves it and brings the social/chat links
+     * (and any resumable call) up without a second exchange.
+     */
+    adoptSession: (session: Session): void => {
+      saveSession(session);
+      void this.social.connect();
+      void useChatStore.getState().connect();
+      void useCallStore.getState().resume();
+    },
   };
 
   readonly social = {
@@ -143,6 +180,61 @@ class MygameClient {
       useChatStore.getState().sessions.reduce((n, s) => n + (s.unreadCount ?? 0), 0),
     /** Subscribe to chat-store changes (new messages, thread updates); returns an unsubscribe. */
     subscribe: (cb: () => void): (() => void) => useChatStore.subscribe(cb),
+  };
+
+  /** Portable calls (see state/callStore.ts): everything a non-React game reaches through
+   *  `window.mygame` in the IIFE build. Media state lives in callStore; conversation ring/accept
+   *  signaling stays in chatStore — `leave()` routes through it so the chat service is notified. */
+  readonly call = {
+    /** Join (or create) a game-room call: room `game:<game>:<room>`, or the conversation call a
+     *  host bound onto that room (`bindToRoom`) — both entry paths land in one LiveKit room. */
+    joinGameRoom: (game: string, room: string, opts?: CallJoinOpts): Promise<boolean> =>
+      useCallStore.getState().joinGameRoom(game, room, opts),
+    /** Join a conversation call's media (the chat-side ring/accept flow lives in `mygame.chat`). */
+    joinConversation: (conversationId: string, opts?: CallJoinOpts): Promise<boolean> =>
+      useCallStore.getState().joinConversation(conversationId, opts),
+    /** Leave the current call. Signaling-aware: an active conversation call hangs up through the
+     *  chat socket (so the server's call state clears); a game call just drops the media. */
+    leave: (): void => {
+      const chatState = useChatStore.getState();
+      if (chatState.activeCall) chatState.hangup();
+      else useCallStore.getState().leave();
+    },
+    setMic: (on: boolean): Promise<void> => useCallStore.getState().setMic(on),
+    setCam: (on: boolean): Promise<void> => useCallStore.getState().setCam(on),
+    setScreenShare: (on: boolean): Promise<void> => useCallStore.getState().setScreenShare(on),
+    /** Local playback volume for one participant (0..1) — what *I* hear, not what they broadcast. */
+    setVolume: (accountId: string, volume: number): void => useCallStore.getState().setVolume(accountId, volume),
+    /** Locally mute/unmute one participant's audio (my playback only). */
+    setMuted: (accountId: string, muted: boolean): void => useCallStore.getState().setMuted(accountId, muted),
+    /** Mount `accountId`'s camera into `el`; returns a detach function. Safe to call before their
+     *  video exists — the track attaches the moment it arrives. */
+    attachVideo: (accountId: string, el: HTMLElement): (() => void) => useCallStore.getState().attachVideo(accountId, el),
+    /** `true` = the host game renders call video itself; the SDK keeps only the audio pipeline. */
+    setEmbedded: (embedded: boolean): void => useCallStore.getState().setEmbedded(embedded),
+    /** Host: alias `game:<game>:<room>` onto my current conversation call so game-side joiners land
+     *  in the same LiveKit room. */
+    bindToRoom: (target: { game: string; room: string }): Promise<boolean> => useCallStore.getState().bindToRoom(target),
+    /** Host: push a "come play" invite to every call participant over the data channel. */
+    inviteToGame: (invite: { game: string; gameName: string; room: string; url: string }): void =>
+      useCallStore.getState().inviteToGame(invite),
+    dismissInvite: (): void => useCallStore.getState().dismissInvite(),
+    /** Re-join the call this browser was in before a page navigation (init() calls this once). */
+    resume: (): Promise<void> => useCallStore.getState().resume(),
+    getState: (): MygameCallState => {
+      const s = useCallStore.getState();
+      return {
+        status: s.status,
+        kind: s.kind,
+        callKey: s.callKey,
+        participants: s.participants,
+        embedded: s.embedded,
+        pendingInvite: s.pendingInvite,
+        error: s.error,
+      };
+    },
+    /** Subscribe to call-store changes; returns an unsubscribe. */
+    subscribe: (cb: () => void): (() => void) => useCallStore.subscribe(cb),
   };
 
   readonly achievements = {
