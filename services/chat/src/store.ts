@@ -377,7 +377,15 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
           0,
         );
         const other = conv.participantIds.find((p) => p !== accountId);
-        const name = conv.type === 'group' ? (conv.name ?? 'Group') : displayNameOf(other ?? accountId);
+        // Groups may be created without a name — derive one from the *other* members' display names.
+        const derivedGroupName = (): string =>
+          conv.participantIds
+            .filter((id) => id !== accountId)
+            .map(displayNameOf)
+            .slice(0, 3)
+            .join(', ') || 'Группа';
+        const name =
+          conv.type === 'group' ? (conv.name?.trim() || derivedGroupName()) : displayNameOf(other ?? accountId);
         const otherReadAt =
           conv.type === 'dm' && other ? (membership.get(conv.id)?.get(other) ?? 0) : null;
         out.push({

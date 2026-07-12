@@ -39,6 +39,27 @@ export const controlButton = (variant: 'neutral' | 'active' | 'danger' = 'neutra
   flexShrink: 0,
 });
 
+/** Wraps a round control button + its caption into a centered vertical stack. The devices item also
+ *  sets `position: relative` inline so the DeviceMenu popover (absolute, bottom-anchored) opens above it. */
+export const controlItem: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 5,
+  minWidth: 58,
+};
+
+/** The tiny caption under a control button. `tone` mirrors the button variant so "off" reads red. */
+export const controlCaption = (tone: 'subtle' | 'danger' | 'active' = 'subtle'): CSSProperties => ({
+  fontSize: 11,
+  lineHeight: 1,
+  fontWeight: 600,
+  letterSpacing: 0.1,
+  color: tone === 'danger' ? palette.danger : tone === 'active' ? palette.text : palette.subtle,
+  whiteSpace: 'nowrap',
+  userSelect: 'none',
+});
+
 /** Small square icon button used for expand / fullscreen / minimize in the top bar. */
 export const chromeButton: CSSProperties = {
   background: 'rgba(255,255,255,0.08)',

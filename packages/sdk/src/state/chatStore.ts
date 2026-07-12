@@ -90,6 +90,8 @@ interface ChatState {
   addMembers: (chatId: string, memberIds: string[]) => void;
   /** group only; self-removal (leave) is always allowed, removing someone else requires being the owner. */
   removeMember: (chatId: string, accountId: string) => void;
+  /** group only; owner promotes/demotes a member to admin. */
+  setGroupRole: (chatId: string, accountId: string, role: 'admin' | 'member') => void;
   /** Convenience: remove myself from a group. */
   leaveGroup: (chatId: string) => void;
   sendMessage: (chatId: string, text: string, opts?: { replyToId?: string; attachments?: chat.ChatAttachment[] }) => void;
@@ -569,6 +571,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   removeMember: (chatId, accountId) => {
     if (!socket?.connected) return;
     socket.emit(chat.C2S.removeMember, { conversationId: chatId, accountId }, (ack: chat.RemoveMemberAck) => {
+      if (ack?.error) set({ error: ack.error });
+    });
+  },
+
+  setGroupRole: (chatId, accountId, role) => {
+    if (!socket?.connected) return;
+    socket.emit(chat.C2S.setGroupRole, { conversationId: chatId, accountId, role }, (ack: chat.SetGroupRoleAck) => {
       if (ack?.error) set({ error: ack.error });
     });
   },

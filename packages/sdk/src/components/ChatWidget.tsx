@@ -16,10 +16,80 @@ const activityText = (f?: Omit<social.Friend, 'status'>): string => {
   return 'В сети';
 };
 
+/** First 1–2 letters for an avatar placeholder. */
+const initials = (name: string): string =>
+  (name || '?')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+
+/** Deterministic pleasant background from a name, so placeholders aren't all one flat colour. */
+const avatarBg = (name: string): string => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h} 45% 42%)`;
+};
+
+/** Avatar that always shows *something* — the image, or initials on a coloured disc/square (never a
+ *  blank box). `shape` is 'circle' for people, 'square' for groups. */
+const Avatar = ({
+  src,
+  name,
+  size,
+  shape = 'circle',
+}: {
+  src?: string | null | undefined;
+  name: string;
+  size: number;
+  shape?: 'circle' | 'square';
+}): JSX.Element => {
+  const radius = shape === 'circle' ? '50%' : Math.max(4, size * 0.18);
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        flexShrink: 0,
+        borderRadius: radius,
+        overflow: 'hidden',
+        background: src ? '#3d4450' : avatarBg(name),
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontWeight: 700,
+        fontSize: Math.round(size * 0.4),
+        lineHeight: 1,
+      }}
+    >
+      {src ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials(name)}
+    </div>
+  );
+};
+
 const MIN_W = 380;
 const MIN_H = 320;
 /** Client-side upload guard — mirrors the chat service's default CHAT_UPLOAD_MAX_BYTES (50 MB). */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+/** Small round icon button used in the window headers (close, etc.). */
+const headerIconBtn: React.CSSProperties = {
+  background: '#3d4450',
+  border: 'none',
+  color: '#dcdedf',
+  cursor: 'pointer',
+  fontSize: 14,
+  lineHeight: 1,
+  width: 26,
+  height: 26,
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+};
 
 const clampSize = (s: { w: number; h: number }): { w: number; h: number } => ({
   w: Math.min(Math.max(MIN_W, s.w), window.innerWidth),
@@ -70,9 +140,8 @@ const DroppableChatSession = ({
         borderBottom: '1px solid rgba(255,255,255,0.05)',
       }}
     >
-      <div style={{ width: 32, height: 32, borderRadius: s.type === 'group' ? 4 : '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
-        {s.avatar || (s.type === 'group' ? '👥' : '👤')}
-      </div>
+      <Avatar src={s.avatar} name={s.name} size={32} shape={s.type === 'group' ? 'square' : 'circle'} />
+
       <div style={{ fontSize: '13px', color: '#dcdedf', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {s.name}
       </div>
@@ -123,6 +192,7 @@ export const ChatWidget = (): JSX.Element => {
   const addMembers = useChatStore((s) => s.addMembers);
   const leaveGroup = useChatStore((s) => s.leaveGroup);
   const removeMember = useChatStore((s) => s.removeMember);
+  const setGroupRole = useChatStore((s) => s.setGroupRole);
   const sendTyping = useChatStore((s) => s.sendTyping);
   const typing = useChatStore((s) => s.typing);
   const openMenu = useMenuStore((s) => s.openMenu);
@@ -316,6 +386,14 @@ export const ChatWidget = (): JSX.Element => {
     if (activeChatId && !editing) sendTyping(activeChatId);
   };
 
+  /** Start dragging the window from a header bar — but not when the press lands on a button/input
+   *  inside that bar (so the call/close/action controls stay clickable). */
+  const startDrag = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, input, a')) return;
+    setIsDragging(true);
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
+  };
+
   /** Upload one image and send it as a structured attachment (the server rejects non-images and
    *  oversize files — surface those as toasts instead of a silent console error). The size guard
    *  mirrors the server default (CHAT_UPLOAD_MAX_BYTES) so we don't stream a doomed 50 MB+ body. */
@@ -388,9 +466,19 @@ export const ChatWidget = (): JSX.Element => {
   const toggleMember = (id: string) =>
     setSelectedMemberIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  /** Name is optional — default to the members' names (server derives the same fallback if we send
+   *  an empty name, but filling it here makes the suggestion visible/editable). */
+  const suggestedGroupName = (): string => {
+    const names = selectedMemberIds
+      .map((id) => acceptedFriends.find((f) => f.accountId === id)?.displayName)
+      .filter(Boolean) as string[];
+    if (me?.displayName) names.unshift(me.displayName);
+    return names.slice(0, 3).join(', ') + (names.length > 3 ? ` и ещё ${names.length - 3}` : '');
+  };
+
   const submitGroup = () => {
-    if (!groupName.trim() || selectedMemberIds.length === 0) return;
-    createGroup(groupName.trim(), selectedMemberIds);
+    if (selectedMemberIds.length === 0) return;
+    createGroup(groupName.trim() || suggestedGroupName(), selectedMemberIds);
     setGroupName('');
     setSelectedMemberIds([]);
     setIsCreatingGroup(false);
@@ -460,32 +548,44 @@ export const ChatWidget = (): JSX.Element => {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       <div style={{ width: 220, flexShrink: 0, background: '#171a21', borderRight: '1px solid #3d4450', display: 'flex', flexDirection: 'column' }}>
         <div
-          onMouseDown={(e) => {
-            setIsDragging(true);
-            setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
-          }}
-          style={{ padding: 16, borderBottom: '1px solid #3d4450', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'grab', background: '#23262e' }}
+          onMouseDown={startDrag}
+          title="Перетащите за эту полосу, чтобы переместить окно"
+          style={{ padding: '10px 10px 10px 12px', borderBottom: '1px solid #3d4450', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'grab', background: '#23262e', userSelect: 'none' }}
         >
-          <div style={{ fontWeight: 700, fontSize: '14px', color: '#fff' }}>Мессенджер</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={() => setIsCreatingGroup(true)}
-              title="Новая группа"
-              aria-label="Новая группа"
-              style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 16 }}
-            >
-              +
-            </button>
-            <button
-              onClick={toggleChat}
-              title="Свернуть"
-              aria-label="Свернуть мессенджер"
-              style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 16 }}
-            >
-              ×
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span aria-hidden style={{ color: '#5a6673', fontSize: 15, lineHeight: 1 }}>⠿</span>
+            <span style={{ fontWeight: 700, fontSize: '14px', color: '#fff' }}>Мессенджер</span>
           </div>
+          <button
+            onClick={toggleChat}
+            title="Свернуть"
+            aria-label="Свернуть мессенджер"
+            style={headerIconBtn}
+          >
+            ✕
+          </button>
         </div>
+        <button
+          onClick={() => setIsCreatingGroup(true)}
+          title="Создать групповой чат"
+          style={{
+            margin: '8px',
+            padding: '8px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            background: 'rgba(42,171,238,0.12)',
+            color: '#2AABEE',
+            border: '1px solid rgba(42,171,238,0.35)',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 13,
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 15 }}>👥</span> Новая группа
+        </button>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {sessions.map(s => (
             <DroppableChatSession
@@ -505,7 +605,7 @@ export const ChatWidget = (): JSX.Element => {
             <input
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
-              placeholder="Название группы"
+              placeholder={selectedMemberIds.length ? `${suggestedGroupName()} (необязательно)` : 'Название группы (необязательно)'}
               style={{ background: '#23262e', border: '1px solid #3d4450', borderRadius: 4, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}
             />
             <div style={{ fontSize: 12, color: '#8f98a0' }}>Участники ({acceptedFriends.length ? selectedMemberIds.length : 0}):</div>
@@ -519,12 +619,8 @@ export const ChatWidget = (): JSX.Element => {
                 return (
                   <label key={f.accountId} className="cw-hover-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13, borderRadius: 4 }}>
                     <input type="checkbox" checked={selectedMemberIds.includes(f.accountId)} onChange={() => toggleMember(f.accountId)} />
-                    <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
-                      {f.avatarIcon ? (
-                        <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
-                      )}
+                    <div style={{ padding: 2, borderRadius: 4, flexShrink: 0, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450') }}>
+                      <Avatar src={f.avatarIcon} name={f.displayName} size={28} shape="square" />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <span style={{ fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>{f.displayName}</span>
@@ -540,8 +636,8 @@ export const ChatWidget = (): JSX.Element => {
               </button>
               <button
                 onClick={submitGroup}
-                disabled={!groupName.trim() || selectedMemberIds.length === 0}
-                style={{ flex: 1, background: '#1a9fff', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: !groupName.trim() || selectedMemberIds.length === 0 ? 0.5 : 1 }}
+                disabled={selectedMemberIds.length === 0}
+                style={{ flex: 1, background: '#1a9fff', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: selectedMemberIds.length === 0 ? 0.5 : 1 }}
               >
                 Создать
               </button>
@@ -604,50 +700,56 @@ export const ChatWidget = (): JSX.Element => {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
               {activeSession.participants.map((p) => {
                 const isOwner = p.accountId === activeSession.ownerId;
-                const canKick = me?.accountId === activeSession.ownerId && !isOwner && p.accountId !== me?.accountId;
+                const isMe = p.accountId === me?.accountId;
+                const iAmOwner = me?.accountId === activeSession.ownerId;
+                const isAdmin = activeSession.admins?.includes(p.accountId) ?? false;
                 const f = friends.find(fr => fr.accountId === p.accountId);
+
+                // Right-click OR the ⋯ button opens the same menu (right-click alone isn't discoverable).
+                const openPersonMenu = (x: number, y: number) => {
+                  const items: { label?: string; action: () => void; separator?: boolean; danger?: boolean }[] = [];
+                  if (!isMe) items.push({ label: '💬 Написать в ЛС', action: () => openChatWithUser(p.accountId, p.displayName) });
+                  items.push({
+                    label: '👤 Профиль',
+                    action: () =>
+                      setViewingProfile(
+                        f ?? { accountId: p.accountId, displayName: p.displayName, avatarIcon: null, titleAchievement: null, presence: 'offline', activity: null },
+                      ),
+                  });
+                  if (iAmOwner && !isMe && !isOwner) {
+                    items.push({ separator: true, action: () => {} });
+                    items.push(
+                      isAdmin
+                        ? { label: '⬇️ Снять администратора', action: () => setGroupRole(activeSession.id, p.accountId, 'member') }
+                        : { label: '⭐ Сделать администратором', action: () => setGroupRole(activeSession.id, p.accountId, 'admin') },
+                    );
+                    items.push({ label: '🚪 Исключить из группы', action: () => removeMember(activeSession.id, p.accountId), danger: true });
+                  }
+                  if (!isMe && !f) items.push({ label: '➕ Добавить в друзья', action: () => addByCode(p.accountId) });
+                  openMenu(x, y, items);
+                };
 
                 return (
                   <div
                     key={p.accountId}
                     className="cw-hover-row"
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', color: '#dcdedf', fontSize: 13, borderRadius: 4, cursor: 'pointer' }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      openMenu(e.clientX, e.clientY, [
-                        { label: '💬 Написать сообщение', action: () => openChatWithUser(p.accountId, p.displayName) },
-                        { label: '👤 Посмотреть профиль', action: () => {
-                           if (f) setViewingProfile(f);
-                           else setViewingProfile({ accountId: p.accountId, displayName: p.displayName, avatarIcon: null, titleAchievement: null, presence: 'offline', activity: null });
-                        } },
-                        { separator: true, action: () => {} },
-                        // The account id doubles as the friend code (see services/social) — passing it
-                        // to addByCode is the intended add-by-id path.
-                        ...(f ? [] : [{ label: '➕ Добавить в друзья', action: () => addByCode(p.accountId) }]),
-                        { label: '🔗 Скопировать ID', action: () => void navigator.clipboard?.writeText(p.accountId) },
-                      ]);
-                    }}
+                    onContextMenu={(e) => { e.preventDefault(); openPersonMenu(e.clientX, e.clientY); }}
                   >
-                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                      {f?.avatarIcon ? <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '👤'}
-                    </div>
-                    <span style={{ flex: 1 }}>
+                    <Avatar src={f?.avatarIcon} name={p.displayName} size={28} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.displayName}
                       {isOwner && <span style={{ color: '#8f98a0', fontSize: 11 }}> (владелец)</span>}
-                      {!isOwner && activeSession.admins?.includes(p.accountId) && (
-                        <span style={{ color: '#8f98a0', fontSize: 11 }}> (админ)</span>
-                      )}
+                      {!isOwner && isAdmin && <span style={{ color: '#8f98a0', fontSize: 11 }}> (админ)</span>}
                     </span>
-                    {canKick && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeMember(activeSession.id, p.accountId); }}
-                        title="Исключить из группы"
-                        aria-label={`Исключить ${p.displayName} из группы`}
-                        style={{ background: '#3d4450', border: 'none', borderRadius: 4, color: '#ff5c5c', cursor: 'pointer', padding: '2px 8px', fontSize: 13 }}
-                      >
-                        ✕
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openPersonMenu(e.clientX, e.clientY); }}
+                      title="Действия"
+                      aria-label={`Действия с ${p.displayName}`}
+                      style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                    >
+                      ⋯
+                    </button>
                   </div>
                 );
               })}
@@ -661,11 +763,17 @@ export const ChatWidget = (): JSX.Element => {
           </div>
         ) : activeSession ? (
           <>
-            <div style={{ height: 60, flexShrink: 0, padding: '0 16px', borderBottom: '1px solid #3d4450', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#23262e' }}>
+            <div
+              onMouseDown={startDrag}
+              title="Перетащите шапку, чтобы переместить окно"
+              style={{ height: 60, flexShrink: 0, padding: '0 16px', borderBottom: '1px solid #3d4450', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#23262e', cursor: 'grab', userSelect: 'none' }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <div style={{ width: 32, height: 32, flexShrink: 0, borderRadius: activeSession.type === 'group' ? 4 : '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {activeSession.avatar || (activeSession.type === 'group' ? '👥' : '👤')}
-                </div>
+                {activeSession.type === 'group' ? (
+                  <Avatar src={activeSession.avatar} name={activeSession.name} size={32} shape="square" />
+                ) : (
+                  <Avatar src={dmPeer?.avatarIcon} name={activeSession.name} size={32} />
+                )}
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSession.name}</div>
                   <div style={{ fontSize: '12px', color: '#8f98a0' }}>

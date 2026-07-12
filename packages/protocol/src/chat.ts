@@ -92,7 +92,8 @@ export const C2S = {
 
 export const openDmPayload = z.object({ withAccountId: z.string().min(1) });
 export const createGroupPayload = z.object({
-  name: z.string().min(1).max(64),
+  // Optional — an empty name makes the server/thread view derive one from the member names.
+  name: z.string().max(64),
   /** Other members to include; the creator is added automatically. */
   memberIds: z.array(z.string().min(1)).min(1),
 });
