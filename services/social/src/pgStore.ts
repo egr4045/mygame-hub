@@ -19,6 +19,9 @@ export interface PgSocialStore extends SocialStore {
   drain(): Promise<void>;
   /** Live ban check against the shared accounts table (auth writes it). Briefly cached. */
   isAccountBanned(accountId: string): Promise<boolean>;
+  /** Resolve a friend code (or a raw accountId) to an accountId via the shared accounts table.
+   *  Null if no such account. */
+  resolveFriendCode(code: string): Promise<string | null>;
 }
 
 const sortPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
@@ -162,6 +165,22 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
       } catch (err) {
         logger.error('ban check failed', { err: String(err) });
         return false; // availability over enforcement on a db blip
+      }
+    },
+
+    async resolveFriendCode(code) {
+      // Accept either the short friend code OR a raw accountId (the member-menu "add friend" path
+      // hands over a full id). Friend codes are stored uppercase; normalise the input.
+      const needle = code.trim();
+      try {
+        const r = await pool.query(
+          `SELECT id FROM accounts WHERE friend_code = $1 OR id = $2 LIMIT 1`,
+          [needle.toUpperCase(), needle],
+        );
+        return (r.rows[0]?.id as string | undefined) ?? null;
+      } catch (err) {
+        logger.error('friend code resolve failed', { err: String(err) });
+        return null;
       }
     },
   };

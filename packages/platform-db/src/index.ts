@@ -49,6 +49,10 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     -- tier was ever asked for; widen into a real role column later if a second tier is ever needed.
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false;
+    -- Short, human-dictatable friend code (e.g. "K7W2PX"), unique per account. Backfilled in app
+    -- (auth) for rows that predate it — a per-row unique value can't be generated cleanly in DDL.
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS friend_code TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS accounts_friend_code_idx ON accounts (friend_code);
 
     CREATE TABLE IF NOT EXISTS friendships (
       lo            TEXT NOT NULL,

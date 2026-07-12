@@ -13,9 +13,19 @@ export interface AccountAchievement {
 /** A title badge references one of the account's own achievements; null clears it. */
 export type TitleAchievementRef = { gameId: string; achievementId: string } | null;
 
+/** Alphabet for the short friend code — no visually ambiguous chars (0/O, 1/I/L). */
+const FRIEND_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export const generateFriendCode = (): string => {
+  let s = '';
+  for (let i = 0; i < 6; i++) s += FRIEND_CODE_ALPHABET[Math.floor(Math.random() * FRIEND_CODE_ALPHABET.length)]!;
+  return s;
+};
+
 export interface Account {
   id: string;
   displayName: string;
+  /** Short, human-dictatable code others use to friend you (e.g. "K7W2PX"). Unique per account. */
+  friendCode: string;
   telegramId?: string;
   vkId?: string;
   /** Profile avatar image, as a data URL. */
@@ -32,7 +42,9 @@ export interface Account {
 }
 
 export interface AccountStore {
-  createAccount(displayName: string, passwordHash: string, id?: string): Account;
+  /** `friendCode` is only supplied during hydration (to preserve the stored code); new accounts
+   *  get a freshly generated unique one. */
+  createAccount(displayName: string, passwordHash: string, id?: string, friendCode?: string): Account;
   findByDisplayName(name: string): Account | undefined;
   get(id: string): Account | undefined;
   findBySocial(network: 'telegram' | 'vk', socialId: string): Account | undefined;
@@ -78,10 +90,18 @@ export const createMemoryAccountStore = (opts: AccountStoreOptions = {}): Accoun
   const now = opts.now ?? (() => Date.now());
   const accounts = new Map<string, Account>();
   return {
-    createAccount(displayName, passwordHash, id) {
+    createAccount(displayName, passwordHash, id, friendCode) {
+      const codeTaken = (c: string): boolean => {
+        for (const a of accounts.values()) if (a.friendCode === c) return true;
+        return false;
+      };
+      // Reuse the hydrated code if given and free; otherwise mint a fresh unique one.
+      let code = friendCode && !codeTaken(friendCode) ? friendCode : generateFriendCode();
+      while (codeTaken(code)) code = generateFriendCode();
       const account: Account = {
         id: id ?? randomUUID(),
         displayName,
+        friendCode: code,
         passwordHash,
         titleAchievement: null,
         achievements: [],

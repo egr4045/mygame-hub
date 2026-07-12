@@ -6,7 +6,7 @@ import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView, type GameDetailsTab } from '../components/GameDetailsView.js';
 import { enterGame } from '../net/orchestratorClient.js';
 import { routeToInvite, routeToRoom } from '../platform/inviteRouting.js';
-import { getHandoff, recordGameEnter } from '@mygame/sdk';
+import { getHandoff, recordGameEnter, loadSession } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { ProfileView } from '../components/ProfileView.js';
 import { SettingsModal } from '../components/SettingsModal.js';
@@ -192,14 +192,14 @@ export const HubScreen = (): JSX.Element => {
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
               onClick={(e) => {
                 e.stopPropagation();
-                const myId = me?.accountId ?? account?.accountId ?? null;
+                const myCode = loadSession()?.friendCode ?? me?.accountId ?? account?.accountId ?? null;
                 openMenu(e.clientX, e.clientY + 20, [
                   { label: '⚙️ Настройки Хаба', action: () => setSettingsTab('account') },
                   {
-                    label: '🔗 Скопировать мой ID',
+                    label: '🔗 Скопировать код друга',
                     action: () => {
-                      if (!myId) return;
-                      copyMyId(myId);
+                      if (!myCode) return;
+                      copyMyId(myCode);
                     },
                   },
                   { separator: true, action: () => {} },

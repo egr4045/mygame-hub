@@ -27,6 +27,9 @@ export interface SocialDeps {
   readonly corsOrigin: string;
   /** Live ban check (pg-backed in production; absent = nothing is ever banned, e.g. dev/memory). */
   readonly isAccountBanned?: (accountId: string) => Promise<boolean>;
+  /** Resolve a short friend code (or raw accountId) to an accountId. Absent (dev/memory) → the code
+   *  is treated as the accountId, preserving the pre-friend-code behaviour. */
+  readonly resolveFriendCode?: (code: string) => Promise<string | null>;
 }
 
 /** Strip the internal `expiresAt` to the wire shape the client consumes. */
@@ -219,17 +222,39 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       }
     };
 
-    socket.on(social.C2S.request, (raw) =>
-      guard(() => {
-        const { code } = parse(social.requestPayload, raw);
-        if (code === accountId) throw new ContractError('validation', 'cannot friend yourself');
-        // Target has blocked me: pretend nothing happened rather than reveal the block (avoids a
-        // harassment/probing vector — no error, no pending edge, no refresh).
-        if (deps.store.isBlocked(code, accountId)) return;
-        deps.store.request(accountId, code);
-        refresh(accountId);
-      }),
-    );
+    socket.on(social.C2S.request, (raw, ack?: (res: social.RequestAck) => void) => {
+      // Async (resolves the short friend code → accountId via the shared DB), so it can't use the
+      // sync `guard`. The ack reports «код не найден» so the client can tell the user.
+      void (async () => {
+        try {
+          const { code } = parse(social.requestPayload, raw);
+          // With no resolver (dev/memory) the code IS the accountId, matching the old behaviour.
+          const target = deps.resolveFriendCode ? await deps.resolveFriendCode(code) : code;
+          if (!target) {
+            ack?.({ error: 'Код не найден' });
+            return;
+          }
+          if (target === accountId) {
+            ack?.({ error: 'Нельзя добавить себя' });
+            return;
+          }
+          // Target has blocked me: pretend it worked rather than reveal the block (anti-probing).
+          if (deps.store.isBlocked(target, accountId)) {
+            ack?.({ ok: true });
+            return;
+          }
+          deps.store.request(accountId, target);
+          refresh(accountId);
+          ack?.({ ok: true });
+        } catch (err) {
+          if (err instanceof ContractError) ack?.({ error: err.message });
+          else {
+            deps.logger.error('friend request', { err: String(err) });
+            ack?.({ error: 'Ошибка' });
+          }
+        }
+      })();
+    });
     socket.on(social.C2S.accept, (raw) =>
       guard(() => {
         deps.store.accept(accountId, parse(social.targetPayload, raw).accountId);

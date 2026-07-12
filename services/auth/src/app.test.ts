@@ -311,7 +311,8 @@ describe('auth service — profile', () => {
     const { base } = await start();
     const login = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Mara', password: 'pw' }));
     const profile = await json<ProfileResponse>(await get(base, '/auth/profile', login.accessToken));
-    expect(profile).toEqual({ avatarIcon: null, wallpaper: null, titleAchievement: null, favoriteGameIds: [] });
+    expect(profile).toMatchObject({ avatarIcon: null, wallpaper: null, titleAchievement: null, favoriteGameIds: [] });
+    expect(profile.friendCode).toMatch(/^[A-Z2-9]{6}$/);
   });
 
   it('sets and persists an avatar and a wallpaper', async () => {

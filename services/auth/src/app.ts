@@ -223,7 +223,7 @@ async function handle(
       deps.auth.signRefresh(account.id, account.displayName),
     ]);
     deps.logger.info('register', { accountId: account.id });
-    send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+    send(res, 200, { accountId: account.id, displayName: account.displayName, friendCode: account.friendCode, accessToken, refreshToken });
     return;
   }
 
@@ -255,7 +255,7 @@ async function handle(
       deps.auth.signRefresh(account.id, account.displayName),
     ]);
     deps.logger.info('login', { accountId: account.id });
-    send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+    send(res, 200, { accountId: account.id, displayName: account.displayName, friendCode: account.friendCode, accessToken, refreshToken });
     return;
   }
 
@@ -355,7 +355,7 @@ async function handle(
         deps.auth.signRefresh(account.id, account.displayName),
       ]);
       deps.logger.info('exchange', { accountId: account.id });
-      send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+      send(res, 200, { accountId: account.id, displayName: account.displayName, friendCode: account.friendCode, accessToken, refreshToken });
     } catch (err) {
       const reason = err instanceof TokenError ? err.reason : 'invalid';
       send(res, 401, { code: 'unauthorized', message: `exchange ${reason}` });
@@ -417,6 +417,7 @@ async function handle(
     send(res, 200, {
       accountId: account.accountId,
       displayName: account.displayName,
+      friendCode: deps.accounts.get(account.accountId)?.friendCode,
       accessToken,
       refreshToken,
     });
@@ -592,7 +593,7 @@ async function handle(
       deps.auth.signRefresh(account.id, account.displayName),
     ]);
     deps.logger.info('display name changed', { accountId: claims.sub });
-    send(res, 200, { accountId: account.id, displayName: account.displayName, accessToken, refreshToken });
+    send(res, 200, { accountId: account.id, displayName: account.displayName, friendCode: account.friendCode, accessToken, refreshToken });
     return;
   }
 
@@ -606,6 +607,7 @@ async function handle(
       wallpaper: account?.wallpaper ?? null,
       titleAchievement: account?.titleAchievement ?? null,
       favoriteGameIds: account?.favoriteGameIds ?? [],
+      friendCode: account?.friendCode,
     });
     return;
   }
@@ -685,6 +687,7 @@ async function handle(
     send(res, 200, {
       id: account.id,
       displayName: account.displayName,
+      friendCode: account.friendCode,
       isAdmin: account.isAdmin,
       isBanned: account.isBanned,
       telegramLinked: !!account.telegramId,

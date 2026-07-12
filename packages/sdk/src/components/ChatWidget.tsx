@@ -725,7 +725,19 @@ export const ChatWidget = (): JSX.Element => {
                     );
                     items.push({ label: '🚪 Исключить из группы', action: () => removeMember(activeSession.id, p.accountId), danger: true });
                   }
-                  if (!isMe && !f) items.push({ label: '➕ Добавить в друзья', action: () => addByCode(p.accountId) });
+                  if (!isMe && !f)
+                    items.push({
+                      label: '➕ Добавить в друзья',
+                      action: () =>
+                        void addByCode(p.accountId).then((ack) =>
+                          addToast({
+                            type: 'system',
+                            title: 'Друзья',
+                            content: ack.error ?? `Запрос отправлен: ${p.displayName}`,
+                            icon: ack.error ? '⚠️' : '➕',
+                          }),
+                        ),
+                    });
                   openMenu(x, y, items);
                 };
 

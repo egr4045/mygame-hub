@@ -20,6 +20,8 @@ export type RegisterRequest = z.infer<typeof registerRequest>;
 export const loginResponse = z.object({
   accountId: z.string(),
   displayName: z.string(),
+  /** Short human-dictatable friend code (optional for back-compat with older servers). */
+  friendCode: z.string().optional(),
   accessToken: z.string(),
   refreshToken: z.string(),
 });
@@ -121,6 +123,8 @@ export const profileResponse = z.object({
   wallpaper: z.string().nullable(),
   titleAchievement: titleAchievementRef,
   favoriteGameIds: z.array(z.string()),
+  /** Short human-dictatable friend code (optional for back-compat with older servers). */
+  friendCode: z.string().optional(),
 });
 export type ProfileResponse = z.infer<typeof profileResponse>;
 

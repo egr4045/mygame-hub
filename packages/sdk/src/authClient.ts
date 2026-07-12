@@ -17,6 +17,8 @@ import { config } from './config.js';
 export interface Session {
   accountId: string;
   displayName: string;
+  /** Short human-dictatable friend code (absent on sessions minted by older servers). */
+  friendCode?: string | undefined;
   accessToken: string;
   refreshToken: string;
 }

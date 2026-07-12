@@ -108,9 +108,9 @@ describe('social server — friends + presence', () => {
   it('rejects friending yourself', async () => {
     const port = await startServer();
     const c1 = await connect(port, 'a1', 'Mara');
-    const err = new Promise<{ code: string }>((res) => c1.once(social.S2C.error, res));
-    c1.emit(social.C2S.request, { code: 'a1' });
-    expect((await err).code).toBe('validation');
+    // With no resolver (memory/dev) the code IS the accountId — requesting your own id acks an error.
+    const ack = await new Promise<social.RequestAck>((res) => c1.emit(social.C2S.request, { code: 'a1' }, res));
+    expect(ack.error).toBeTruthy();
   });
 
   it('mints a join code (ack) that resolves over HTTP to the room + role', async () => {

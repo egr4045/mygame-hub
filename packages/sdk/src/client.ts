@@ -144,7 +144,8 @@ class MygameClient {
     /** The live, connected identity — richer than `auth.getAccount()` (also carries avatar/title). */
     getMe: (): social.MeEvent | null => useSocialStore.getState().me,
     getFriends: (): social.Friend[] => useSocialStore.getState().friends,
-    addByCode: (code: string): void => useSocialStore.getState().addByCode(code),
+    /** Friend by short code (or raw accountId); resolves with the server ack ({ ok } / { error }). */
+    addByCode: (code: string): Promise<social.RequestAck> => useSocialStore.getState().addByCode(code),
     setActivity: (activity: social.Activity): void => useSocialStore.getState().setActivity(activity),
     /** Currently-joinable rooms for `gameId` (defaults to the current game), from live presence. */
     getLobbies: (gameId?: string): Promise<social.Lobby[]> => {

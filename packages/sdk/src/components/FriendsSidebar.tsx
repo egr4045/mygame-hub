@@ -4,6 +4,7 @@ import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useChatStore } from '../state/chatStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { loadSession } from '../authClient.js';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -76,22 +77,26 @@ export const FriendsSidebar = ({
   const online = accepted.filter(f => f.presence === 'online' && !f.activity);
   const offline = accepted.filter(f => f.presence === 'offline');
 
+  // Your dictatable friend code (from the stored session); falls back to a shortened id only if an
+  // older server didn't mint one.
+  const myFriendCode = loadSession()?.friendCode ?? me?.accountId?.slice(0, 8) ?? '...';
+
   const add = () => {
-    if (code.trim()) {
-      addByCode(code);
+    const c = code.trim();
+    if (!c) return;
+    setCode('');
+    void addByCode(c).then((ack) =>
       addToast({
         type: 'system',
-        title: 'Заявка отправлена',
-        content: `Запрос в друзья отправлен: ${code.trim()}`,
-        icon: '✉️'
-      });
-      setCode('');
-    }
+        title: ack.error ? 'Не добавлено' : 'Заявка отправлена',
+        content: ack.error ?? `Запрос в друзья отправлен по коду ${c.toUpperCase()}`,
+        icon: ack.error ? '⚠️' : '✉️',
+      }),
+    );
   };
 
   const copyCode = () => {
-    if (!me) return;
-    void navigator.clipboard?.writeText(me.accountId).then(() => {
+    void navigator.clipboard?.writeText(myFriendCode).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     });
@@ -225,7 +230,7 @@ export const FriendsSidebar = ({
 
       {/* Footer / Your code */}
       <div style={{ padding: 12, background: '#171a21', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ color: '#8f98a0' }}>Ваш код: {me?.accountId?.slice(0, 8) ?? '...'}</span>
+        <span style={{ color: '#8f98a0' }}>Ваш код: <strong style={{ color: '#dcdedf', letterSpacing: 1 }}>{myFriendCode}</strong></span>
         <button onClick={copyCode} style={{...smallBtn, padding: '4px 8px'}}>{copied ? 'Скопировано' : 'Копировать'}</button>
       </div>
 

@@ -32,7 +32,9 @@ interface SocialUIState {
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
   disconnect: () => void;
-  addByCode: (code: string) => void;
+  /** Send a friend request by short friend code (or raw accountId). Resolves with the server's ack
+   *  so the caller can show «Код не найден» etc. */
+  addByCode: (code: string) => Promise<social.RequestAck>;
   accept: (accountId: string) => void;
   decline: (accountId: string) => void;
   removeFriend: (accountId: string) => void;
@@ -106,7 +108,15 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     set({ status: 'idle', friends: [], invites: [], myActivity: null });
   },
 
-  addByCode: (code) => emit(social.C2S.request, { code: code.trim() }),
+  addByCode: (code) =>
+    new Promise<social.RequestAck>((resolve) => {
+      if (!socket?.connected) {
+        resolve({ error: 'Нет соединения' });
+        return;
+      }
+      // Send as-typed — the server normalises (UPPER for the friend code, exact for a raw accountId).
+      socket.emit(social.C2S.request, { code: code.trim() }, (ack: social.RequestAck) => resolve(ack ?? { ok: true }));
+    }),
   accept: (accountId) => emit(social.C2S.accept, { accountId }),
   decline: (accountId) => emit(social.C2S.decline, { accountId }),
   removeFriend: (accountId) => emit(social.C2S.remove, { accountId }),

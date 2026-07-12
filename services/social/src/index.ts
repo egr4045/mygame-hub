@@ -46,6 +46,7 @@ const { httpServer } = createSocialServer({
   logger,
   corsOrigin: config.corsOrigin,
   ...(maybePg.isAccountBanned ? { isAccountBanned: maybePg.isAccountBanned.bind(store) } : {}),
+  ...(maybePg.resolveFriendCode ? { resolveFriendCode: maybePg.resolveFriendCode.bind(store) } : {}),
 });
 
 httpServer.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));

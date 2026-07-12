@@ -41,7 +41,7 @@ export type Friend = z.infer<typeof friend>;
 
 // --- Client -> Server events -------------------------------------------------
 export const C2S = {
-  request: 'social.request', // send a friend request by code (= target accountId)
+  request: 'social.request', // send a friend request by short friend code (or raw accountId); ack {ok|error}
   accept: 'social.accept',
   decline: 'social.decline', // decline an incoming request / cancel an outgoing one
   remove: 'social.remove',
@@ -56,6 +56,8 @@ export const C2S = {
 } as const;
 
 export const requestPayload = z.object({ code: z.string().min(1).max(64) });
+export const requestAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
+export type RequestAck = z.infer<typeof requestAck>;
 export const targetPayload = z.object({ accountId: z.string().min(1) });
 export const setActivityPayload = z.object({ activity });
 export const getStatePayload = z.object({}).strict();

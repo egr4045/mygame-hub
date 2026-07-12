@@ -23,10 +23,11 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   const persist = (a: Account): void =>
     queue.push('account.upsert', () =>
       pool.query(
-        `INSERT INTO accounts (id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, now())
+        `INSERT INTO accounts (id, display_name, friend_code, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name       = EXCLUDED.display_name,
+           friend_code         = EXCLUDED.friend_code,
            telegram_id         = EXCLUDED.telegram_id,
            vk_id               = EXCLUDED.vk_id,
            avatar_icon         = EXCLUDED.avatar_icon,
@@ -41,6 +42,7 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
         [
           a.id,
           a.displayName,
+          a.friendCode,
           a.telegramId ?? null,
           a.vkId ?? null,
           a.avatarIcon ?? null,
@@ -58,10 +60,17 @@ export const createPgAccountStore = (pool: Pool, logger: Logger): PgAccountStore
   return {
     async init() {
       const { rows } = await pool.query(
-        `SELECT id, display_name, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash FROM accounts`,
+        `SELECT id, display_name, friend_code, telegram_id, vk_id, avatar_icon, wallpaper, title_achievement, achievements, favorite_game_ids, is_admin, is_banned, password_hash FROM accounts`,
       );
       for (const r of rows) {
-        const acc = mem.createAccount(r.display_name as string, r.password_hash as string, r.id as string);
+        const acc = mem.createAccount(
+          r.display_name as string,
+          r.password_hash as string,
+          r.id as string,
+          (r.friend_code as string | null) ?? undefined,
+        );
+        // Backfill a code for accounts that predate the friend_code column.
+        if (!r.friend_code) persist(acc);
         if (r.telegram_id) mem.linkSocial(acc.id, 'telegram', r.telegram_id as string);
         if (r.vk_id) mem.linkSocial(acc.id, 'vk', r.vk_id as string);
         if (r.avatar_icon) mem.setAvatar(acc.id, r.avatar_icon as string);
