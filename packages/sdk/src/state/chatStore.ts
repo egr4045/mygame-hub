@@ -7,12 +7,12 @@
  */
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
-import { Room } from 'livekit-client';
 import { chat, type ProtocolError } from '@mygame/protocol';
 import { config } from '../config.js';
 import { loadSession, freshAccessToken } from '../authClient.js';
 import { useToastStore } from './toastStore.js';
 import { useNotificationPrefsStore } from './notificationPrefsStore.js';
+import { useCallStore } from './callStore.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -43,8 +43,8 @@ export interface ChatSession {
   ownerId?: string | null;
 }
 
-/** Purely the *signaling* state — the actual media lives on the `Room` instance (`getCallRoom()`),
- *  not duplicated into Zustand; `ChatWidget` attaches to the room's own track/participant events. */
+/** Purely the *signaling* state — the actual media lives in `callStore` (the portable-call layer),
+ *  which owns the LiveKit room and projects participant state for any UI. */
 export interface ActiveCall {
   conversationId: string;
   type: chat.CallType;
@@ -87,41 +87,27 @@ interface ChatState {
   sendMessage: (chatId: string, text: string, _senderId?: string) => void;
   sendTyping: (chatId: string) => void;
 
-  /** Start ringing every other participant of `chatId`. */
+  /** Start ringing every other participant of `chatId`. Auto-cancels after `RING_TIMEOUT_MS`. */
   ring: (chatId: string, type: chat.CallType) => void;
-  /** Join the call currently ringing for `chatId` (mints a LiveKit token, connects, publishes tracks). */
+  /** Join the call currently ringing for `chatId` — media via `callStore.joinConversation`, then
+   *  `callAccept` signaling. Mic/cam/screen-share toggles live on `useCallStore` (setMic/setCam/...). */
   acceptCall: (chatId: string) => Promise<void>;
   declineCall: (chatId: string) => void;
   hangup: () => void;
-  toggleMic: () => Promise<void>;
-  toggleCam: () => Promise<void>;
 }
 
 let socket: Socket | null = null;
 let meId: string | null = null;
 let meName: string | null = null;
 
-/** The live LiveKit room for the current call, if connected — not store state (see `ActiveCall`'s
- *  doc comment): `ChatWidget` reads this once `activeCall.status === 'connected'` and attaches its
- *  own listeners for track/participant events, rather than duplicating that model into Zustand. */
-let callRoom: Room | null = null;
-export const getCallRoom = (): Room | null => callRoom;
-
-/** Mint a LiveKit token for `conversationId` from the chat service's HTTP surface (not a socket
- *  event — the token is a plain string handed straight to `Room.connect`). Null on any failure. */
-const fetchCallToken = async (conversationId: string): Promise<chat.CallTokenResponse | null> => {
-  const token = await freshAccessToken();
-  if (!token) return null;
-  try {
-    const res = await fetch(`${config.chatUrl}/chat/call/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ conversationId }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as chat.CallTokenResponse;
-  } catch {
-    return null;
+/** Unanswered outgoing rings auto-cancel after this long (kept below the server's own 60s ring
+ *  timeout so the caller's UI resolves first — the server sweep is the authority for stragglers). */
+const RING_TIMEOUT_MS = 45_000;
+let ringTimer: ReturnType<typeof setTimeout> | null = null;
+const clearRingTimer = (): void => {
+  if (ringTimer) {
+    clearTimeout(ringTimer);
+    ringTimer = null;
   }
 };
 
@@ -282,13 +268,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     });
 
-    // Someone is ringing me — surface it: open the widget on that exact conversation so the
-    // incoming-call view (rendered inline per-conversation, not a separate global banner) is
-    // immediately visible. If I'm already in/ringing a call, this simply overwrites it (juggling
-    // concurrent calls is out of scope for v1).
+    // Someone is ringing me — surface it via the global <CallView />. Also focus the widget on that
+    // conversation so its chat is one tap away. `'screen'` is a deprecated call type — screen share
+    // is now an in-call toggle — so an inbound `'screen'` ring is treated as a video call.
     socket.on(chat.S2C.callRing, (p: chat.CallRingEvent) => {
+      const current = get().activeCall;
+      // Busy line: already connecting/connected to a *different* call — don't tear it down.
+      // Auto-decline the newcomer and surface a missed-call toast instead.
+      if (
+        current &&
+        current.conversationId !== p.conversationId &&
+        (current.status === 'connecting' || current.status === 'connected')
+      ) {
+        socket?.emit(chat.C2S.callDecline, { conversationId: p.conversationId });
+        useToastStore.getState().addToast({
+          type: 'system',
+          title: 'Пропущенный звонок',
+          content: `${p.fromName ?? 'Пользователь'} звонил(а), пока вы были в другом звонке`,
+          icon: '📞',
+        });
+        return;
+      }
+      // Re-ring of the call I'm already in/answering — just refresh who's calling.
+      if (current && current.conversationId === p.conversationId && current.status !== 'ringing-in') {
+        set({ activeCall: { ...current, fromName: p.fromName } });
+        return;
+      }
       set({
-        activeCall: { conversationId: p.conversationId, type: p.callType, status: 'ringing-in', fromName: p.fromName },
+        activeCall: {
+          conversationId: p.conversationId,
+          type: p.callType === 'screen' ? 'video' : p.callType,
+          status: 'ringing-in',
+          fromName: p.fromName,
+        },
         isOpen: true,
         activeChatId: p.conversationId,
       });
@@ -321,8 +333,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     socket.on(chat.S2C.callEnded, (p: chat.CallEndedEvent) => {
       if (get().activeCall?.conversationId !== p.conversationId) return;
-      callRoom?.disconnect();
-      callRoom = null;
+      clearRingTimer();
+      useCallStore.getState().leave();
       set({ activeCall: null });
     });
   },
@@ -332,8 +344,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     socket = null;
     meId = null;
     meName = null;
-    callRoom?.disconnect();
-    callRoom = null;
+    clearRingTimer();
+    useCallStore.getState().leave();
     set({ status: 'idle', sessions: [], activeCall: null });
   },
 
@@ -440,30 +452,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!socket?.connected) return;
     set({ activeCall: { conversationId: chatId, type, status: 'ringing-out' } });
     socket.emit(chat.C2S.callRing, { conversationId: chatId, callType: type }, (ack: chat.CallAck) => {
-      if (!ack?.ok) set({ activeCall: null, error: ack?.error ?? 'call failed' });
+      if (!ack?.ok) {
+        clearRingTimer();
+        set({ activeCall: null, error: ack?.error ?? 'call failed' });
+      }
     });
+    clearRingTimer();
+    ringTimer = setTimeout(() => {
+      ringTimer = null;
+      const call = get().activeCall;
+      if (call?.conversationId !== chatId || call.status !== 'ringing-out') return;
+      get().hangup();
+      useToastStore.getState().addToast({
+        type: 'system',
+        title: 'Нет ответа',
+        content: 'Никто не ответил на звонок',
+        icon: '📞',
+      });
+    }, RING_TIMEOUT_MS);
   },
 
   acceptCall: async (chatId) => {
     const call = get().activeCall;
     const type = call?.conversationId === chatId ? call.type : 'audio';
-    set({ activeCall: { conversationId: chatId, type, status: 'connecting' } });
-    const token = await fetchCallToken(chatId);
-    if (!token) {
-      set({ activeCall: null, error: 'failed to join call' });
+    clearRingTimer();
+    set({
+      activeCall: {
+        conversationId: chatId,
+        type,
+        status: 'connecting',
+        ...(call?.fromName ? { fromName: call.fromName } : {}),
+      },
+    });
+    const label = get().sessions.find((s) => s.id === chatId)?.name;
+    const ok = await useCallStore.getState().joinConversation(chatId, {
+      mic: true,
+      cam: type === 'video',
+      type,
+      ...(label ? { label } : {}),
+    });
+    // Race guard: the user may have hung up (or a decline may have landed) while we were connecting —
+    // in that case the freshly-joined media must not resurrect the call.
+    const now = get().activeCall;
+    if (!now || now.conversationId !== chatId || now.status !== 'connecting') {
+      useCallStore.getState().leave();
       return;
     }
-    const room = new Room();
-    try {
-      await room.connect(token.url, token.token);
-      await room.localParticipant.setMicrophoneEnabled(true);
-      if (type === 'video') await room.localParticipant.setCameraEnabled(true);
-    } catch (err) {
-      room.disconnect();
-      set({ activeCall: null, error: String(err) });
+    if (!ok) {
+      set({ activeCall: null, error: useCallStore.getState().error ?? 'failed to join call' });
       return;
     }
-    callRoom = room;
     socket?.emit(chat.C2S.callAccept, { conversationId: chatId }, (ack: chat.CallAck) => {
       if (!ack?.ok) get().hangup();
     });
@@ -472,26 +510,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   declineCall: (chatId) => {
     socket?.emit(chat.C2S.callDecline, { conversationId: chatId });
+    clearRingTimer();
     set({ activeCall: null });
   },
 
   hangup: () => {
     const call = get().activeCall;
     if (call) socket?.emit(chat.C2S.callHangup, { conversationId: call.conversationId });
-    callRoom?.disconnect();
-    callRoom = null;
+    clearRingTimer();
+    useCallStore.getState().leave();
     set({ activeCall: null });
   },
-
-  toggleMic: async () => {
-    if (!callRoom) return;
-    const enabled = callRoom.localParticipant.isMicrophoneEnabled;
-    await callRoom.localParticipant.setMicrophoneEnabled(!enabled);
-  },
-
-  toggleCam: async () => {
-    if (!callRoom) return;
-    const enabled = callRoom.localParticipant.isCameraEnabled;
-    await callRoom.localParticipant.setCameraEnabled(!enabled);
-  },
 }));
+
+// Bridge for unexpected media teardown (server drop, reconnect give-up): callStore's own
+// Disconnected handler resets it to idle with an error — if signaling still shows a live conv call,
+// close that out too so the server clears its ephemeral call state. Intentional exits (hangup,
+// callEnded, the acceptCall race guard) go through `leave()`, which resets with `error: null`, so
+// they never re-enter here.
+useCallStore.subscribe((cs, prev) => {
+  if (prev.status === 'idle' || cs.status !== 'idle' || !cs.error) return;
+  const call = useChatStore.getState().activeCall;
+  if (call && call.status === 'connected') {
+    socket?.emit(chat.C2S.callHangup, { conversationId: call.conversationId });
+    useChatStore.setState({ activeCall: null, error: cs.error });
+  }
+});

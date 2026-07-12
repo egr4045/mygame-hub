@@ -1,6 +1,7 @@
 import { ToastContainer } from './ToastContainer.js';
 import { ContextMenu } from './ContextMenu.js';
 import { ChatWidget } from './ChatWidget.js';
+import { CallView } from './call/CallView.js';
 import { FriendsWidget } from './FriendsWidget.js';
 import { SocialDndProvider } from './SocialDndProvider.js';
 
@@ -16,6 +17,7 @@ export const MygameOverlay = (): JSX.Element => (
     <ToastContainer />
     <ContextMenu />
     <ChatWidget />
+    <CallView />
     <FriendsWidget />
   </SocialDndProvider>
 );

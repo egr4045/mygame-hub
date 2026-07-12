@@ -12,6 +12,7 @@ let host: HTMLDivElement | null = null;
 const OVERLAY_STYLES = `
 .civa-fade-in { animation: mygame-fade-in 0.15s ease-out; }
 @keyframes mygame-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes mygame-call-pulse { 0% { box-shadow: 0 0 0 0 rgba(59,165,93,0.55); } 70% { box-shadow: 0 0 0 16px rgba(59,165,93,0); } 100% { box-shadow: 0 0 0 0 rgba(59,165,93,0); } }
 `;
 
 /**

@@ -1,6 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { RoomEvent, type RemoteTrack, type RemoteParticipant } from 'livekit-client';
-import { useChatStore, getCallRoom, type ChatSession } from '../state/chatStore.js';
+import { useState, useEffect } from 'react';
+import { useChatStore, type ChatSession } from '../state/chatStore.js';
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useDroppable } from '@dnd-kit/core';
@@ -94,13 +93,11 @@ export const ChatWidget = (): JSX.Element => {
   const typing = useChatStore((s) => s.typing);
   const openMenu = useMenuStore((s) => s.openMenu);
 
+  // Call *starting* lives here (the header buttons); the call surface itself is rendered globally by
+  // <CallView />, independent of which chat is open.
   const activeCall = useChatStore((s) => s.activeCall);
   const ring = useChatStore((s) => s.ring);
-  const acceptCall = useChatStore((s) => s.acceptCall);
-  const declineCall = useChatStore((s) => s.declineCall);
   const hangup = useChatStore((s) => s.hangup);
-  const toggleMic = useChatStore((s) => s.toggleMic);
-  const toggleCam = useChatStore((s) => s.toggleCam);
 
   const me = useSocialStore((s) => s.me);
   const friends = useSocialStore((s) => s.friends);
@@ -110,82 +107,6 @@ export const ChatWidget = (): JSX.Element => {
   const [viewingProfile, setViewingProfile] = useState<Omit<social.Friend, 'status'> | null>(null);
 
   const [inputText, setInputText] = useState('');
-
-  const remoteTilesRef = useRef<HTMLDivElement>(null);
-  const localTileRef = useRef<HTMLDivElement>(null);
-  const [micMuted, setMicMuted] = useState(false);
-  const [camMuted, setCamMuted] = useState(false);
-
-  useEffect(() => {
-    if (activeCall?.status !== 'connected') return;
-    const room = getCallRoom();
-    if (!room) return;
-
-    const tileFor = (identity: string): HTMLDivElement => {
-      const grid = remoteTilesRef.current!;
-      let tile = grid.querySelector<HTMLDivElement>(`[data-participant="${identity}"]`);
-      if (!tile) {
-        tile = document.createElement('div');
-        tile.dataset.participant = identity;
-        tile.style.cssText =
-          'background:#1a1f29;border-radius:8px;position:relative;overflow:hidden;border:2px solid #5c7e10;min-height:120px;';
-        grid.appendChild(tile);
-      }
-      return tile;
-    };
-
-    const onSubscribed = (track: RemoteTrack, _pub: unknown, participant: RemoteParticipant) => {
-      const el = track.attach();
-      el.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      tileFor(participant.identity).appendChild(el);
-    };
-    const onUnsubscribed = (track: RemoteTrack) => {
-      track.detach().forEach((el) => el.remove());
-    };
-    const onParticipantLeft = (participant: RemoteParticipant) => {
-      remoteTilesRef.current?.querySelector(`[data-participant="${participant.identity}"]`)?.remove();
-    };
-
-    room.on(RoomEvent.TrackSubscribed, onSubscribed);
-    room.on(RoomEvent.TrackUnsubscribed, onUnsubscribed);
-    room.on(RoomEvent.ParticipantDisconnected, onParticipantLeft);
-
-    room.remoteParticipants.forEach((p) => {
-      p.trackPublications.forEach((pub) => {
-        if (pub.track) onSubscribed(pub.track, pub, p);
-      });
-    });
-
-    const attachLocal = () => {
-      const container = localTileRef.current;
-      if (!container) return;
-      container.innerHTML = '';
-      room.localParticipant.videoTrackPublications.forEach((pub) => {
-        if (!pub.track) return;
-        const el = pub.track.attach();
-        el.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-        container.appendChild(el);
-      });
-    };
-    attachLocal();
-    room.on(RoomEvent.LocalTrackPublished, attachLocal);
-    room.on(RoomEvent.LocalTrackUnpublished, attachLocal);
-
-    return () => {
-      room.off(RoomEvent.TrackSubscribed, onSubscribed);
-      room.off(RoomEvent.TrackUnsubscribed, onUnsubscribed);
-      room.off(RoomEvent.ParticipantDisconnected, onParticipantLeft);
-      room.off(RoomEvent.LocalTrackPublished, attachLocal);
-      room.off(RoomEvent.LocalTrackUnpublished, attachLocal);
-    };
-  }, [activeCall?.status]);
-
-  useEffect(() => {
-    if (activeCall?.status !== 'connected') {
-      setMicMuted(false);
-      setCamMuted(false);
-    }
-  }, [activeCall?.status]);
 
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
@@ -573,66 +494,12 @@ export const ChatWidget = (): JSX.Element => {
                 >
                   📹
                 </button>
-                <button
-                  onClick={() => (callForThisChat ? hangup() : ring(activeSession.id, 'screen'))}
-                  style={{ background: callForThisChat?.type === 'screen' ? '#5c7e10' : '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
-                  title="Демонстрация экрана"
-                >
-                  🖥️
-                </button>
               </div>
             </div>
 
             <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
-              {callForThisChat ? (
-                <div style={{ flex: 1, background: '#000', display: 'flex', flexDirection: 'column' }}>
-                  {callForThisChat.status === 'ringing-out' && (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#dcdedf' }}>
-                      <div style={{ width: 80, height: 80, borderRadius: '50%', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, boxShadow: '0 0 20px rgba(92,126,16,0.5)' }}>👤</div>
-                      <div>Звоним «{activeSession.name}»…</div>
-                    </div>
-                  )}
-                  {callForThisChat.status === 'ringing-in' && (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#dcdedf' }}>
-                      <div>{callForThisChat.fromName ?? activeSession.name} звонит ({callForThisChat.type === 'video' ? 'видео' : 'аудио'})…</div>
-                      <div style={{ display: 'flex', gap: 16 }}>
-                        <button onClick={() => void acceptCall(activeSession.id)} style={{ background: '#5c7e10', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', cursor: 'pointer', fontSize: 20 }}>✓</button>
-                        <button onClick={() => declineCall(activeSession.id)} style={{ background: '#ff5c5c', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', cursor: 'pointer', fontSize: 20 }}>✕</button>
-                      </div>
-                    </div>
-                  )}
-                  {callForThisChat.status === 'connecting' && (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8f98a0' }}>Подключение…</div>
-                  )}
-                  {callForThisChat.status === 'connected' && (
-                    <>
-                      <div ref={remoteTilesRef} style={{ flex: 1, padding: 16, display: 'grid', gridTemplateColumns: activeSession.type === 'group' ? '1fr 1fr' : '1fr', gap: 16, gridAutoRows: '1fr' }} />
-                      {callForThisChat.type === 'video' && (
-                        <div ref={localTileRef} style={{ position: 'absolute', bottom: 76, right: 16, width: 120, height: 90, background: '#1a1f29', borderRadius: 8, border: '1px solid #3d4450', overflow: 'hidden' }} />
-                      )}
-                      <div style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '0 16px', background: 'rgba(23,26,33,0.8)' }}>
-                        <button
-                          onClick={() => { setMicMuted(!micMuted); void toggleMic(); }}
-                          style={{ background: micMuted ? '#ff5c5c' : '#3d4450', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}
-                        >
-                          {micMuted ? '🔇' : '🎤'}
-                        </button>
-                        <button
-                          onClick={() => { setCamMuted(!camMuted); void toggleCam(); }}
-                          style={{ background: camMuted ? '#ff5c5c' : '#3d4450', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}
-                        >
-                          {camMuted ? '🚫' : '📹'}
-                        </button>
-                        <button onClick={() => hangup()} style={{ background: '#ff5c5c', border: 'none', width: 44, height: 44, borderRadius: '50%', color: '#fff', cursor: 'pointer', fontSize: 20 }}>
-                          📞
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <>
+              <>
                   <div
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={async (e) => {
@@ -754,8 +621,7 @@ export const ChatWidget = (): JSX.Element => {
                       ➤
                     </button>
                   </div>
-                </>
-              )}
+              </>
             </div>
           </>
         ) : (

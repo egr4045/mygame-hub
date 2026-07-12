@@ -125,11 +125,31 @@ export const getHistoryPayload = z.object({
 });
 export const getStatePayload = z.object({}).strict();
 
+/** `'screen'` is DEPRECATED: screen sharing is now an in-call toggle (a published ScreenShare
+ *  track), not a distinct call type. Clients no longer originate `'screen'` rings and treat any
+ *  inbound one as `'video'`. The value is kept in the enum so the server (which persists `call.type`)
+ *  and older clients don't break; drop it once no client can emit it. */
 export const callType = z.enum(['audio', 'video', 'screen']);
 export const callRingPayload = z.object({ conversationId: z.string().min(1), callType });
 /** Shared by accept/decline/hangup — all three only ever need to know which call. */
 export const callActionPayload = z.object({ conversationId: z.string().min(1) });
 export const callTokenRequest = z.object({ conversationId: z.string().min(1) });
+/** `POST /chat/call/room-token` — mint a LiveKit token for a *game-room* call (portable calls).
+ *  The room code is the capability: any authenticated account that knows it may join, matching the
+ *  game's own "know the code, you're in" trust posture. */
+export const roomCallTokenRequest = z.object({
+  game: z.string().min(1).max(64),
+  room: z.string().min(1).max(64),
+});
+/** `POST /chat/call/bind` — alias a game room onto the caller's current *conversation* call, so
+ *  players who join the game-room call land in the very same LiveKit room and nobody's media ever
+ *  migrates or reconnects. Requires being a participant of that conversation. */
+export const bindCallRequest = z.object({
+  conversationId: z.string().min(1),
+  game: z.string().min(1).max(64),
+  room: z.string().min(1).max(64),
+});
+export const bindCallResponse = z.object({ ok: z.boolean() });
 export const typingPayload = z.object({ conversationId: z.string().min(1) });
 
 export const typingAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
@@ -148,6 +168,9 @@ export type GetHistoryPayload = z.infer<typeof getHistoryPayload>;
 export type CallRingPayload = z.infer<typeof callRingPayload>;
 export type CallActionPayload = z.infer<typeof callActionPayload>;
 export type CallTokenRequest = z.infer<typeof callTokenRequest>;
+export type RoomCallTokenRequest = z.infer<typeof roomCallTokenRequest>;
+export type BindCallRequest = z.infer<typeof bindCallRequest>;
+export type BindCallResponse = z.infer<typeof bindCallResponse>;
 export type TypingPayload = z.infer<typeof typingPayload>;
 export type TypingAck = z.infer<typeof typingAck>;
 

@@ -37,6 +37,17 @@ interface ActiveCall {
   ringingIds: Set<string>;
 }
 
+/** Portable-call registry entry: which LiveKit room a `game:<game>:<room>` call actually lives in.
+ *  Defaults to its own key; `/chat/call/bind` points it at an existing conversation's call instead,
+ *  so a pre-game hangout call carries into the game with zero media migration (the LiveKit room name
+ *  never changes — people who navigate simply rejoin the same room). Ephemeral, like `ActiveCall`. */
+interface OpenCall {
+  livekitRoom: string;
+  createdAt: number;
+}
+
+const OPEN_CALL_TTL_MS = 24 * 60 * 60 * 1000;
+
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
@@ -75,6 +86,38 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   // Ephemeral call state (see the ActiveCall doc comment) — declared here so both the HTTP token
   // route and the socket signaling handlers below can check "is the caller actually in this call".
   const activeCalls = new Map<string, ActiveCall>(); // conversationId -> call
+  const openCalls = new Map<string, OpenCall>(); // 'game:<game>:<room>' -> where that call lives
+
+  const purgeOpenCalls = (): void => {
+    const cutoff = Date.now() - OPEN_CALL_TTL_MS;
+    for (const [key, entry] of openCalls) if (entry.createdAt < cutoff) openCalls.delete(key);
+  };
+
+  /** Verify the request's bearer token as a platform *access* token; replies 401 itself on failure. */
+  const verifyAccess = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<{ accountId: string; displayName: string } | null> => {
+    const token = bearer(req);
+    if (!token) {
+      sendJson(res, 401, { code: 'unauthorized', message: 'missing access token' });
+      return null;
+    }
+    try {
+      const claims = await deps.auth.verify(token);
+      if (claims.typ !== 'access') throw new Error('not an access token');
+      return { accountId: claims.sub, displayName: claims.name };
+    } catch {
+      sendJson(res, 401, { code: 'unauthorized', message: 'invalid access token' });
+      return null;
+    }
+  };
+
+  const mintLivekitToken = async (accountId: string, displayName: string, room: string): Promise<chat.CallTokenResponse> => {
+    const at = new AccessToken(deps.livekit.apiKey, deps.livekit.apiSecret, { identity: accountId, name: displayName });
+    at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
+    return { token: await at.toJwt(), url: deps.livekit.url };
+  };
 
   const handleHttp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (req.method === 'OPTIONS') {
@@ -90,35 +133,66 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     // Mint a LiveKit room-scoped access token for an ongoing/ringing call. HTTP (not a socket event)
     // because the client needs it as a plain string to hand to livekit-client's Room.connect.
     if (req.method === 'POST' && req.url === '/chat/call/token') {
-      const token = bearer(req);
-      if (!token) {
-        sendJson(res, 401, { code: 'unauthorized', message: 'missing access token' });
-        return;
-      }
-      let accountId: string;
-      let displayName: string;
-      try {
-        const claims = await deps.auth.verify(token);
-        if (claims.typ !== 'access') throw new Error('not an access token');
-        accountId = claims.sub;
-        displayName = claims.name;
-      } catch {
-        sendJson(res, 401, { code: 'unauthorized', message: 'invalid access token' });
-        return;
-      }
+      const caller = await verifyAccess(req, res);
+      if (!caller) return;
       const parsed = chat.callTokenRequest.safeParse(await readJsonBody(req));
       if (!parsed.success) {
         sendJson(res, 400, { code: 'validation', message: 'invalid request' });
         return;
       }
-      if (!deps.store.isParticipant(parsed.data.conversationId, accountId)) {
+      if (!deps.store.isParticipant(parsed.data.conversationId, caller.accountId)) {
         sendJson(res, 403, { code: 'forbidden', message: 'not a participant of this conversation' });
         return;
       }
-      const at = new AccessToken(deps.livekit.apiKey, deps.livekit.apiSecret, { identity: accountId, name: displayName });
-      at.addGrant({ roomJoin: true, room: parsed.data.conversationId, canPublish: true, canSubscribe: true });
-      const jwt = await at.toJwt();
-      const body: chat.CallTokenResponse = { token: jwt, url: deps.livekit.url };
+      sendJson(res, 200, await mintLivekitToken(caller.accountId, caller.displayName, parsed.data.conversationId));
+      return;
+    }
+
+    // Mint a LiveKit token for a *game-room* call (portable calls). Trust model: the room code is
+    // the capability — any authenticated account that knows it may join, same posture as the game's
+    // own "know the 4-char code, you're in" and chat's "any known accountId can be DMed". If the
+    // host bound this room onto a pre-game conversation call (`/chat/call/bind` below), the registry
+    // resolves to that call's LiveKit room, so both entry paths converge on one uninterrupted call.
+    if (req.method === 'POST' && req.url === '/chat/call/room-token') {
+      const caller = await verifyAccess(req, res);
+      if (!caller) return;
+      const parsed = chat.roomCallTokenRequest.safeParse(await readJsonBody(req));
+      if (!parsed.success) {
+        sendJson(res, 400, { code: 'validation', message: 'invalid request' });
+        return;
+      }
+      purgeOpenCalls();
+      const key = `game:${parsed.data.game}:${parsed.data.room}`;
+      let entry = openCalls.get(key);
+      if (!entry) {
+        entry = { livekitRoom: key, createdAt: Date.now() };
+        openCalls.set(key, entry);
+      }
+      sendJson(res, 200, await mintLivekitToken(caller.accountId, caller.displayName, entry.livekitRoom));
+      return;
+    }
+
+    // Bind a game room onto the caller's current conversation call: subsequent room-token requests
+    // for that game room land in the conversation's LiveKit room — the call "follows" the party into
+    // the game without anyone's media reconnecting. Participant-of-the-conversation only.
+    if (req.method === 'POST' && req.url === '/chat/call/bind') {
+      const caller = await verifyAccess(req, res);
+      if (!caller) return;
+      const parsed = chat.bindCallRequest.safeParse(await readJsonBody(req));
+      if (!parsed.success) {
+        sendJson(res, 400, { code: 'validation', message: 'invalid request' });
+        return;
+      }
+      if (!deps.store.isParticipant(parsed.data.conversationId, caller.accountId)) {
+        sendJson(res, 403, { code: 'forbidden', message: 'not a participant of this conversation' });
+        return;
+      }
+      purgeOpenCalls();
+      openCalls.set(`game:${parsed.data.game}:${parsed.data.room}`, {
+        livekitRoom: parsed.data.conversationId,
+        createdAt: Date.now(),
+      });
+      const body: chat.BindCallResponse = { ok: true };
       sendJson(res, 200, body);
       return;
     }
