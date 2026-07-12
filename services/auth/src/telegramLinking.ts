@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Logger } from '@mygame/shared-types';
 import type { AccountStore } from './store.js';
-import type { TelegramClient, TelegramMessage } from './telegram.js';
+import type { TelegramClient, TelegramMessage } from '@mygame/telegram';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I

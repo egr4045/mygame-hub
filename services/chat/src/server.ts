@@ -33,6 +33,12 @@ export interface ChatDeps {
   readonly isAccountBanned?: (accountId: string) => Promise<boolean>;
   /** How long an unanswered ring survives before the server ends it. Injectable for tests. */
   readonly ringTimeoutMs?: number;
+  /** Root dir for the upload store (`<dataDir>/uploads`). Defaults to `<cwd>/.data`. */
+  readonly dataDir?: string;
+  /** Max accepted upload size in bytes. Defaults to 10 MB. */
+  readonly uploadMaxBytes?: number;
+  /** Delete messages older than this many days on a daily sweep (0/undefined disables it). */
+  readonly retentionDays?: number;
 }
 
 /** A call is purely live state — never persisted (see the module doc comment above). */
@@ -60,7 +66,6 @@ interface OpenCall {
 const OPEN_CALL_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RING_TIMEOUT_MS = 60_000;
 
-const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 /** MIME -> extension. The extension is always derived from the (allowlisted) MIME type, never the
  *  client filename — an uploaded `.html`/`.svg` must not come back executable from our origin. */
 const UPLOAD_TYPES: Record<string, string> = {
@@ -112,6 +117,9 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   const activeCalls = new Map<string, ActiveCall>(); // conversationId -> call
   const openCalls = new Map<string, OpenCall>(); // 'game:<game>:<room>' -> where that call lives
   const ringTimeoutMs = deps.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS;
+  const uploadMaxBytes = deps.uploadMaxBytes ?? 10 * 1024 * 1024;
+  const uploadMaxLabel = `${Math.round(uploadMaxBytes / (1024 * 1024))} MB`;
+  const uploadDir = path.join(deps.dataDir ?? path.join(process.cwd(), '.data'), 'uploads');
 
   // Abuse damping, keyed per account (IP for nothing here — every route is authenticated). Bursts
   // sized for humans typing/clicking, not scripts.
@@ -129,7 +137,6 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
   // 30-day upload retention, swept hourly off the request path (the old inline sweep ran an
   // O(files) stat pass on every single upload).
-  const uploadDir = path.join(process.cwd(), '.data', 'uploads');
   const sweepUploads = async (): Promise<void> => {
     try {
       const files = await fs.promises.readdir(uploadDir);
@@ -145,6 +152,19 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   };
   setInterval(() => void sweepUploads(), 60 * 60 * 1000).unref?.();
   void sweepUploads();
+
+  // Message retention: daily, trim messages older than `retentionDays` (the store keeps each
+  // conversation's most recent message so thread previews survive). Text is tiny, but this bounds
+  // history growth; the upload sweep above handles the bytes-heavy attachments on the same horizon.
+  const retentionDays = deps.retentionDays ?? 0;
+  if (retentionDays > 0) {
+    const sweepMessages = (): void => {
+      const removed = deps.store.pruneMessagesBefore(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      if (removed > 0) deps.logger.info('message retention sweep', { removed, retentionDays });
+    };
+    setInterval(sweepMessages, 24 * 60 * 60 * 1000).unref?.();
+    sweepMessages();
+  }
 
   const purgeOpenCalls = (): void => {
     const cutoff = Date.now() - OPEN_CALL_TTL_MS;
@@ -296,13 +316,13 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         return;
       }
       const declared = Number(req.headers['content-length'] ?? 0);
-      if (declared > UPLOAD_MAX_BYTES) {
-        sendJson(res, 413, { code: 'validation', message: 'file too large (max 10 MB)' });
+      if (declared > uploadMaxBytes) {
+        sendJson(res, 413, { code: 'validation', message: `file too large (max ${uploadMaxLabel})` });
         return;
       }
       const fileName = (req.headers['x-file-name'] as string) || `image.${ext}`;
       const id = randomUUID();
-      const filePath = path.join(process.cwd(), '.data', 'uploads', `${id}.${ext}`);
+      const filePath = path.join(uploadDir, `${id}.${ext}`);
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 
       let received = 0;
@@ -310,7 +330,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       const stream = fs.createWriteStream(filePath);
       req.on('data', (chunk: Buffer) => {
         received += chunk.length;
-        if (received > UPLOAD_MAX_BYTES && !overflowed) {
+        if (received > uploadMaxBytes && !overflowed) {
           overflowed = true;
           req.unpipe(stream);
           stream.destroy();
@@ -330,7 +350,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         if (!res.headersSent && !res.writableEnded) {
           sendJson(res, overflowed ? 413 : 500, {
             code: overflowed ? 'validation' : 'internal',
-            message: overflowed ? 'file too large (max 10 MB)' : 'upload failed',
+            message: overflowed ? `file too large (max ${uploadMaxLabel})` : 'upload failed',
           });
         }
         return;
@@ -349,7 +369,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       // Capability-URL serving (unguessable uuid), deliberately tokenless so <img> tags work; the
       // strict name shape is the whole defense — no traversal, no non-image types ever served.
       if (!MEDIA_NAME_RE.test(filename)) return sendJson(res, 404, { error: 'not_found' });
-      const filePath = path.join(process.cwd(), '.data', 'uploads', filename);
+      const filePath = path.join(uploadDir, filename);
       if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: 'not_found' });
 
       const dotExt = filename.slice(filename.lastIndexOf('.') + 1);

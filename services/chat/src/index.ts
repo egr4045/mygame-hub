@@ -4,12 +4,13 @@
  * otherwise — with a loud warning, since that loses every message on restart.
  */
 import { createAuthCore } from '@mygame/auth-core';
-import { createPool, runMigrations } from '@mygame/platform-db';
+import { createPool, runMigrations, type Pool } from '@mygame/platform-db';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createChatServer } from './server.js';
 import { createMemoryChatStore, type ChatStore } from './store.js';
 import { createPgChatStore, type PgChatStore } from './pgStore.js';
+import { createOpsMonitor } from './ops.js';
 
 const config = loadConfig();
 const logger = createConsoleLogger({ svc: config.service });
@@ -20,12 +21,13 @@ const auth = createAuthCore({
   refreshTtl: '30d',
 });
 
+let pool: Pool | undefined;
 const store: ChatStore | PgChatStore = await (async () => {
   if (!config.databaseUrl) {
     logger.warn('DATABASE_URL not set — messages are in-memory and will not survive a restart');
     return createMemoryChatStore();
   }
-  const pool = createPool(config.databaseUrl);
+  pool = createPool(config.databaseUrl);
   await runMigrations(pool);
   const pgStore = createPgChatStore(pool, logger);
   await pgStore.init();
@@ -41,7 +43,21 @@ const { httpServer, io } = createChatServer({
   logger,
   corsOrigin: config.corsOrigin,
   livekit: { url: config.livekitUrl, apiKey: config.livekitApiKey, apiSecret: config.livekitApiSecret },
+  dataDir: config.dataDir,
+  uploadMaxBytes: config.uploadMaxBytes,
+  retentionDays: config.retentionDays,
   ...(maybePg.isAccountBanned ? { isAccountBanned: maybePg.isAccountBanned.bind(store) } : {}),
+});
+
+// Platform-ops: disk-space alerting + the ops-alert Telegram bot (separate token). No-op without a token.
+const stopOps = createOpsMonitor({
+  logger,
+  dataDir: config.dataDir,
+  botToken: config.opsBotToken,
+  pool,
+  diskAlertPct: config.diskAlertPct,
+  diskAlertMinBytes: config.diskAlertMinBytes,
+  diskCheckMs: config.diskCheckMs,
 });
 
 httpServer.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
@@ -54,6 +70,7 @@ const shutdown = (signal: string): void => {
   setTimeout(() => process.exit(1), 10_000).unref();
   void (async () => {
     try {
+      stopOps();
       io.close();
       httpServer.close();
       await maybePg.drain?.();

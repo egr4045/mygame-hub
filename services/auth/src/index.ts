@@ -12,7 +12,7 @@ import { createMemoryAccountStore, type AccountStore } from './store.js';
 import { createPgAccountStore } from './pgStore.js';
 import { createMemoryGameStatsStore, type GameStatsStore } from './statsStore.js';
 import { createPgGameStatsStore } from './pgStatsStore.js';
-import { createTelegramClient } from './telegram.js';
+import { createTelegramClient } from '@mygame/telegram';
 import { createTelegramLinking, type TelegramLinking } from './telegramLinking.js';
 
 const config = loadConfig();

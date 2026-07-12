@@ -10,12 +10,23 @@
 #   bash build-images.sh && docker compose up -d
 name: gamehub
 
+# All service logs go to stdout (json-file driver). Cap them so container logs can't fill the host
+# disk — 3×10 MB per service. Referenced as `logging: *default-logging` on every service below.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 networks:
   gamehub-net:
     external: true
 
 volumes:
   gamehub-postgres-data:
+  # Durable chat image uploads (was ephemeral container fs — died on every redeploy). Also the
+  # filesystem the disk monitor watches.
+  gamehub-chat-uploads:
 
 services:
   # Dedicated Postgres for GAMEHUB — isolated from Leaders' own Postgres (different network,
@@ -31,6 +42,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   auth:
     image: gamehub-service:latest
@@ -52,6 +64,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   social:
     image: gamehub-service:latest
@@ -72,6 +85,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   chat:
     image: gamehub-service:latest
@@ -89,13 +103,25 @@ services:
       LIVEKIT_URL: "${LIVEKIT_URL:?set LIVEKIT_URL in deploy/gamehub/.env, e.g. wss://mygame-quiz.ru/gamehub-livekit}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in deploy/gamehub/.env}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in deploy/gamehub/.env}"
+      # Image uploads live under this dir (mounted volume below) — 50 MB cap, 30-day message
+      # retention, and the disk this filesystem sits on is what the ops monitor alerts on.
+      CHAT_DATA_DIR: /data
+      CHAT_UPLOAD_MAX_BYTES: ${CHAT_UPLOAD_MAX_BYTES:-52428800}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-30}
+      # Separate ops-alert Telegram bot (NOT the auth linking bot). Unset → alerting disabled.
+      OPS_ALERT_BOT_TOKEN: ${OPS_ALERT_BOT_TOKEN:-}
+      CHAT_DISK_ALERT_PCT: ${CHAT_DISK_ALERT_PCT:-15}
+      CHAT_DISK_ALERT_MIN_GB: ${CHAT_DISK_ALERT_MIN_GB:-3}
       NODE_ENV: production
+    volumes:
+      - gamehub-chat-uploads:/data
     depends_on:
       - postgres
       - livekit
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   # GAMEHUB's own self-hosted LiveKit for chat voice/video — a separate instance from Leaders' own
   # (port 7881, do not touch), on different ports (see livekit.yaml + the RTC ports below). The
@@ -119,6 +145,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   community:
     image: gamehub-service:latest
@@ -139,6 +166,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   orchestrator:
     image: gamehub-orchestrator:latest
@@ -174,6 +202,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   web:
     image: gamehub-web:latest
@@ -195,6 +224,7 @@ services:
       - admin
       - livekit
     restart: unless-stopped
+    logging: *default-logging
 
   # SDK starter template — path-routed under the hub's own origin (web's Caddyfile strips
   # /example-game/ before proxying here), not its own port: same-origin means a browser's
@@ -213,6 +243,7 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging
 
   # Minimal admin panel — path-routed under the hub's own origin (web's Caddyfile strips /admin/
   # before proxying here), same reasoning as examplegame above. Never shipped in the player-facing
@@ -229,3 +260,4 @@ services:
     networks:
       - gamehub-net
     restart: unless-stopped
+    logging: *default-logging

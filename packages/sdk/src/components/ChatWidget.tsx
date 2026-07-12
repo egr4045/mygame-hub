@@ -18,6 +18,8 @@ const activityText = (f?: Omit<social.Friend, 'status'>): string => {
 
 const MIN_W = 380;
 const MIN_H = 320;
+/** Client-side upload guard — mirrors the chat service's default CHAT_UPLOAD_MAX_BYTES (50 MB). */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 const clampSize = (s: { w: number; h: number }): { w: number; h: number } => ({
   w: Math.min(Math.max(MIN_W, s.w), window.innerWidth),
@@ -315,9 +317,19 @@ export const ChatWidget = (): JSX.Element => {
   };
 
   /** Upload one image and send it as a structured attachment (the server rejects non-images and
-   *  >10 MB — surface those as toasts instead of a silent console error). */
+   *  oversize files — surface those as toasts instead of a silent console error). The size guard
+   *  mirrors the server default (CHAT_UPLOAD_MAX_BYTES) so we don't stream a doomed 50 MB+ body. */
   const uploadFile = async (file: File) => {
     if (!activeSession) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addToast({
+        type: 'system',
+        title: 'Файл слишком большой',
+        content: `Максимум ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} МБ`,
+        icon: '⚠️',
+      });
+      return;
+    }
     try {
       const token = await freshAccessToken();
       if (!token) throw new Error('сессия истекла — войдите заново');

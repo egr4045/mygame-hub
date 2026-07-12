@@ -278,6 +278,26 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
     },
 
     history: (conversationId, limit, before) => mem.history(conversationId, limit, before),
+
+    pruneMessagesBefore(cutoff) {
+      const removed = mem.pruneMessagesBefore(cutoff);
+      if (removed > 0) {
+        // Mirror the memory prune: delete rows older than the cutoff but keep each conversation's
+        // most recent message (DISTINCT ON returns one newest row per conversation).
+        queue.push('chat.message.prune', () =>
+          pool.query(
+            `DELETE FROM messages m
+             WHERE m.created_at < $1
+               AND m.id NOT IN (
+                 SELECT DISTINCT ON (conversation_id) id FROM messages
+                 ORDER BY conversation_id, created_at DESC)`,
+            [cutoff],
+          ),
+        );
+      }
+      return removed;
+    },
+
     threads: (accountId) => mem.threads(accountId),
     hydrate: (data) => mem.hydrate(data),
 

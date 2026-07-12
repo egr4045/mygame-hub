@@ -15,6 +15,20 @@ export interface ServiceConfig {
   readonly livekitUrl: string;
   readonly livekitApiKey: string;
   readonly livekitApiSecret: string;
+  /** Root dir for the on-disk upload store (`<dataDir>/uploads`) — also the filesystem the disk
+   *  monitor watches. In prod it's a named docker volume so uploads survive redeploys. */
+  readonly dataDir: string;
+  /** Max accepted image upload size in bytes. */
+  readonly uploadMaxBytes: number;
+  /** Delete messages older than this many days (0 disables the retention sweep). */
+  readonly retentionDays: number;
+  /** Ops-alert Telegram bot token — a SEPARATE bot from auth's linking bot. Unset disables alerts. */
+  readonly opsBotToken: string | undefined;
+  /** Alert when free disk drops below this fraction (0..1) OR below `diskAlertMinBytes`. */
+  readonly diskAlertPct: number;
+  readonly diskAlertMinBytes: number;
+  /** How often the disk monitor samples free space. */
+  readonly diskCheckMs: number;
 }
 
 export const loadConfig = (): ServiceConfig => ({
@@ -28,4 +42,11 @@ export const loadConfig = (): ServiceConfig => ({
   livekitUrl: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
   livekitApiKey: process.env.LIVEKIT_API_KEY ?? 'devkey',
   livekitApiSecret: process.env.LIVEKIT_API_SECRET ?? 'secret',
+  dataDir: process.env.CHAT_DATA_DIR ?? `${process.cwd()}/.data`,
+  uploadMaxBytes: Number(process.env.CHAT_UPLOAD_MAX_BYTES ?? 50 * 1024 * 1024),
+  retentionDays: Number(process.env.CHAT_RETENTION_DAYS ?? 30),
+  opsBotToken: process.env.OPS_ALERT_BOT_TOKEN || undefined,
+  diskAlertPct: Number(process.env.CHAT_DISK_ALERT_PCT ?? 15) / 100,
+  diskAlertMinBytes: Number(process.env.CHAT_DISK_ALERT_MIN_GB ?? 3) * 1024 * 1024 * 1024,
+  diskCheckMs: Number(process.env.CHAT_DISK_CHECK_MS ?? 10 * 60 * 1000),
 });

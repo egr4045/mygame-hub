@@ -253,6 +253,22 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.21)
 
+  packages/telegram:
+    dependencies:
+      '@mygame/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.21
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.21)
+
   packages/test-harness:
     dependencies:
       '@mygame/protocol':
@@ -292,6 +308,9 @@ importers:
       '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@mygame/telegram':
+        specifier: workspace:*
+        version: link:../../packages/telegram
     devDependencies:
       '@mygame/test-harness':
         specifier: workspace:*
@@ -323,6 +342,9 @@ importers:
       '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@mygame/telegram':
+        specifier: workspace:*
+        version: link:../../packages/telegram
       livekit-server-sdk:
         specifier: ^2.9.7
         version: 2.16.0

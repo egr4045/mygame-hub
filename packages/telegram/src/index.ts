@@ -1,8 +1,10 @@
 /**
- * Minimal Telegram Bot API client over global fetch (no SDK dependency). Uses **long polling**
- * (`getUpdates`) so it needs no public webhook — it works in dev and behind a firewall. Only one
- * consumer may poll a given bot token at a time, so run a single auth instance (or switch to a
- * webhook) in production.
+ * @mygame/telegram — a minimal Telegram Bot API client over global fetch (no SDK dependency).
+ *
+ * Uses **long polling** (`getUpdates`) so it needs no public webhook — it works in dev and behind a
+ * firewall. Only one consumer may poll a given bot token at a time, so run a single instance per
+ * token (different bots/tokens are fully independent — e.g. auth's linking bot and chat's ops-alert
+ * bot coexist without conflict).
  *
  * The token is a secret: it only ever appears in the request URL built here, never in logs.
  */

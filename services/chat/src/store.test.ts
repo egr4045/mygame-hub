@@ -181,6 +181,28 @@ describe('chat store — edit / delete', () => {
   });
 });
 
+describe('chat store — retention prune', () => {
+  it('drops messages older than the cutoff but keeps each conversation\'s latest', () => {
+    // now() advances 1000 per call; openDm consumes a tick each, so message createdAts start at 3000.
+    let t = 0;
+    const s = createMemoryChatStore({ now: () => (t += 1000) });
+    const c1 = s.openDm('a', 'b'); // create=1000
+    const c2 = s.openDm('a', 'c'); // create=2000
+    s.send(c1.id, 'a', 'old1'); // 3000
+    s.send(c1.id, 'a', 'old2'); // 4000
+    const recent = s.send(c1.id, 'a', 'recent'); // 5000 — c1's latest
+    s.send(c2.id, 'a', 'only'); // 6000 — c2's sole (and latest) message
+
+    // Cutoff above `recent` (5500): old1/old2 go; `recent` predates the cutoff but is kept because
+    // it's c1's latest; c2's lone message is its latest so it's untouched.
+    const removed = s.pruneMessagesBefore(5500);
+    expect(removed).toBe(2);
+    expect(s.history(c1.id, 10).messages.map((m) => m.text)).toEqual(['recent']);
+    expect(s.history(c1.id, 10).messages[0]!.id).toBe(recent!.id);
+    expect(s.history(c2.id, 10).messages.map((m) => m.text)).toEqual(['only']);
+  });
+});
+
 describe('chat store — history pagination', () => {
   it('pages backwards via before with no overlap and a correct hasMore', () => {
     let t = 0;

@@ -30,6 +30,16 @@
 		reverse_proxy chat:8084
 	}
 
+	# Chat image attachments: POST /chat/upload (auth'd, participant-checked) and the public
+	# capability-URL GET /chat/media/<uuid>.<ext>. Without these two routes both fall through to the
+	# SPA static handler below and uploads/image serving silently break in prod.
+	handle /chat/upload* {
+		reverse_proxy chat:8084
+	}
+	handle /chat/media/* {
+		reverse_proxy chat:8084
+	}
+
 	# Changelog + discussions (HTTP).
 	handle /community/* {
 		reverse_proxy community:8085

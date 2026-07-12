@@ -124,6 +124,9 @@ export interface ChatStore {
   /** Most recent `limit` messages older than `before` (exclusive; omit for the newest page), oldest
    *  first, plus whether more remain beyond the page. */
   history(conversationId: string, limit: number, before?: number): HistoryPage;
+  /** Retention: drop messages with `createdAt < cutoff`, but always keep each conversation's most
+   *  recent message so thread previews survive. Returns how many were removed. */
+  pruneMessagesBefore(cutoff: number): number;
   /** `accountId`'s conversations, newest activity first. */
   threads(accountId: string): ChatThread[];
   /** Bulk-load previously persisted state verbatim (ids/timestamps preserved). Hydration only. */
@@ -347,6 +350,20 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       const pool = before !== undefined ? all.filter((m) => m.createdAt < before) : all;
       const page = pool.slice(-limit);
       return { messages: page, hasMore: pool.length > page.length };
+    },
+
+    pruneMessagesBefore(cutoff) {
+      let removed = 0;
+      for (const [convId, arr] of messages) {
+        if (arr.length === 0) continue;
+        // Messages are appended in send order, so the last element is the most recent — keep it
+        // regardless of age so the thread's last-message preview never blanks out.
+        const lastId = arr[arr.length - 1]!.id;
+        const kept = arr.filter((m) => m.createdAt >= cutoff || m.id === lastId);
+        removed += arr.length - kept.length;
+        messages.set(convId, kept);
+      }
+      return removed;
     },
 
     threads(accountId) {
