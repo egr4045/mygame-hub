@@ -1,8 +1,13 @@
 # syntax=docker/dockerfile:1
 # Builds svoyak (Vue SPA + Express/Socket.io server) into one container. The server serves the
 # built SPA, its own auth/api and socket.io on PORT. Native modules (bcrypt, sqlite3) need toolchain.
-# Build with --network=host on this server (IPv6/registry quirk).
-FROM node:22-bookworm-slim
+# Build with `docker build --network=host` on this server (IPv6/registry quirk; the flag doesn't
+# exist on `docker compose build` there).
+#
+# trixie (glibc 2.41), NOT bookworm (2.36): sqlite3's npm prebuilds for current Node ABIs are
+# linked against glibc 2.38+, and neither npm_config_build_from_source nor `npm rebuild
+# --build-from-source` reliably reaches node-pre-gyp — the runtime just has to satisfy the prebuilt.
+FROM node:22-trixie-slim
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git python3 make g++ ca-certificates \
@@ -14,12 +19,9 @@ RUN git clone --depth 1 "$SVOYAK_REPO" .
 
 # Frontend build -> /app/dist (served by the server from ../dist).
 RUN npm ci && npm run build
-# Backend deps. Native modules (sqlite3, bcrypt) MUST be compiled here: the npm prebuilds for
-# recent Node ABIs are linked against glibc 2.38+, newer than bookworm's 2.36 (ERR_DLOPEN_FAILED
-# at runtime). The env var alone doesn't reliably reach node-pre-gyp through npm ci, so an
-# explicit rebuild --build-from-source is the enforcement step.
-RUN cd server && npm ci --omit=dev \
-  && npm rebuild --build-from-source sqlite3 bcrypt
+# Backend deps: prebuilt native bindings are fine on trixie's glibc (see the FROM comment); the
+# toolchain above still covers any package without a prebuild.
+RUN cd server && npm ci --omit=dev
 
 ENV NODE_ENV=production
 ENV PORT=8089
