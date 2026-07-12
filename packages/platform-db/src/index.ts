@@ -48,6 +48,7 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     -- The platform's one privileged tier (apps/admin). A bare boolean, not a role enum -- exactly one
     -- tier was ever asked for; widen into a real role column later if a second tier is ever needed.
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS friendships (
       lo            TEXT NOT NULL,
@@ -115,6 +116,10 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS mentions JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb;
+    -- Edit/delete (epoch ms, matching created_at). Deletes are tombstones -- text/attachments are
+    -- blanked but the row survives so reply chains and ordering stay stable.
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at BIGINT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at BIGINT;
 
     -- Playtime per (account, game), owned by auth. last_played_at is written on game launch;
     -- seconds_played accrues from in-game SDK heartbeats, clamped server-side so a gap or closed

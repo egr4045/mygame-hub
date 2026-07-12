@@ -74,6 +74,19 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       ),
     );
 
+  const persistEdit = (m: ChatMessage): void =>
+    queue.push('chat.message.edit', () =>
+      pool.query(`UPDATE messages SET text = $1, edited_at = $2 WHERE id = $3`, [m.text, m.editedAt ?? null, m.id]),
+    );
+
+  const persistDelete = (m: ChatMessage): void =>
+    queue.push('chat.message.delete', () =>
+      pool.query(`UPDATE messages SET text = '', attachments = '[]'::jsonb, deleted_at = $1 WHERE id = $2`, [
+        m.deletedAt ?? null,
+        m.id,
+      ]),
+    );
+
   return {
     async init() {
       const accounts = await pool.query(`SELECT id, display_name FROM accounts`);
@@ -106,7 +119,8 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       }));
 
       const msgRows = await pool.query(
-        `SELECT id, conversation_id, sender_id, text, created_at, reply_to_id, mentions, attachments FROM messages ORDER BY created_at ASC`,
+        `SELECT id, conversation_id, sender_id, text, created_at, reply_to_id, mentions, attachments, edited_at, deleted_at
+         FROM messages ORDER BY created_at ASC`,
       );
       const messages: ChatMessage[] = msgRows.rows.map((r) => {
         const mentions = r.mentions as string[] | null;
@@ -121,6 +135,8 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
           replyToId: r.reply_to_id as string | null,
           ...(mentions !== null ? { mentions } : {}),
           ...(attachments !== null ? { attachments } : {}),
+          editedAt: r.edited_at !== null ? Number(r.edited_at) : null,
+          deletedAt: r.deleted_at !== null ? Number(r.deleted_at) : null,
         };
       });
 
@@ -203,13 +219,25 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
       return m;
     },
 
+    editMessage(conversationId, messageId, editorId, text) {
+      const result = mem.editMessage(conversationId, messageId, editorId, text);
+      if (typeof result !== 'string') persistEdit(result);
+      return result;
+    },
+
+    deleteMessage(conversationId, messageId, byId, canModerate) {
+      const result = mem.deleteMessage(conversationId, messageId, byId, canModerate);
+      if (typeof result !== 'string') persistDelete(result);
+      return result;
+    },
+
     markRead(conversationId, accountId) {
       const result = mem.markRead(conversationId, accountId);
       if (result) persistMember(conversationId, accountId, result.upTo);
       return result;
     },
 
-    history: (conversationId, limit) => mem.history(conversationId, limit),
+    history: (conversationId, limit, before) => mem.history(conversationId, limit, before),
     threads: (accountId) => mem.threads(accountId),
     hydrate: (data) => mem.hydrate(data),
   };

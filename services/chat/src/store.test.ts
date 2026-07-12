@@ -14,8 +14,8 @@ describe('chat store — DMs', () => {
     const s = createMemoryChatStore();
     const conv = s.openDm('a', 'b');
     s.send(conv.id, 'a', 'hi');
-    expect(s.history(conv.id, 10)).toHaveLength(1);
-    expect(s.history(conv.id, 10)[0]).toMatchObject({ senderId: 'a', text: 'hi' });
+    expect(s.history(conv.id, 10).messages).toHaveLength(1);
+    expect(s.history(conv.id, 10).messages[0]).toMatchObject({ senderId: 'a', text: 'hi' });
 
     const bThreads = s.threads('b');
     expect(bThreads[0]).toMatchObject({ conversationId: conv.id, unreadCount: 1 });
@@ -134,6 +134,74 @@ describe('chat store — group membership', () => {
   });
 });
 
+describe('chat store — edit / delete', () => {
+  it('editMessage updates text and stamps editedAt, sender only, not on tombstones', () => {
+    const s = createMemoryChatStore();
+    const conv = s.openDm('a', 'b');
+    const msg = s.send(conv.id, 'a', 'hi')!;
+    const edited = s.editMessage(conv.id, msg.id, 'a', 'hi (fixed)');
+    expect(edited).toMatchObject({ text: 'hi (fixed)' });
+    expect((edited as { editedAt?: number | null }).editedAt).toBeTypeOf('number');
+
+    expect(s.editMessage(conv.id, msg.id, 'b', 'hacked')).toBe('forbidden');
+    expect(s.editMessage(conv.id, 'nope', 'a', 'x')).toBe('not_found');
+    s.deleteMessage(conv.id, msg.id, 'a', false);
+    expect(s.editMessage(conv.id, msg.id, 'a', 'too late')).toBe('deleted');
+  });
+
+  it('deleteMessage tombstones own messages and blanks content', () => {
+    const s = createMemoryChatStore();
+    const conv = s.openDm('a', 'b');
+    const msg = s.send(conv.id, 'a', 'oops', { attachments: [{ id: 'x', url: '/chat/media/x.png', type: 'image/png', name: 'x.png' }] })!;
+    const deleted = s.deleteMessage(conv.id, msg.id, 'a', false);
+    expect(deleted).toMatchObject({ text: '' });
+    expect((deleted as { deletedAt?: number | null }).deletedAt).toBeTypeOf('number');
+    expect((deleted as { attachments?: unknown[] }).attachments).toBeUndefined();
+    // Idempotent: deleting again is a no-op success, not an error.
+    expect(typeof s.deleteMessage(conv.id, msg.id, 'a', false)).not.toBe('string');
+  });
+
+  it("deleteMessage rejects others' messages without canModerate, allows with it", () => {
+    const s = createMemoryChatStore();
+    const group = s.createGroup('a', 'Squad', ['b']);
+    const msg = s.send(group.id, 'b', 'spam')!;
+    expect(s.deleteMessage(group.id, msg.id, 'a', false)).toBe('forbidden');
+    expect(s.deleteMessage(group.id, msg.id, 'a', true)).toMatchObject({ text: '' });
+  });
+
+  it('send drops a replyToId that points outside the conversation', () => {
+    const s = createMemoryChatStore();
+    const conv1 = s.openDm('a', 'b');
+    const conv2 = s.openDm('a', 'c');
+    const foreign = s.send(conv2.id, 'a', 'elsewhere')!;
+    const msg = s.send(conv1.id, 'a', 'reply', { replyToId: foreign.id })!;
+    expect(msg.replyToId).toBeNull();
+    const real = s.send(conv1.id, 'b', 'target')!;
+    expect(s.send(conv1.id, 'a', 'ok', { replyToId: real.id })!.replyToId).toBe(real.id);
+  });
+});
+
+describe('chat store — history pagination', () => {
+  it('pages backwards via before with no overlap and a correct hasMore', () => {
+    let t = 0;
+    const s = createMemoryChatStore({ now: () => ++t });
+    const conv = s.openDm('a', 'b');
+    for (let i = 1; i <= 5; i++) s.send(conv.id, 'a', `m${i}`);
+
+    const newest = s.history(conv.id, 2);
+    expect(newest.messages.map((m) => m.text)).toEqual(['m4', 'm5']);
+    expect(newest.hasMore).toBe(true);
+
+    const mid = s.history(conv.id, 2, newest.messages[0]!.createdAt);
+    expect(mid.messages.map((m) => m.text)).toEqual(['m2', 'm3']);
+    expect(mid.hasMore).toBe(true);
+
+    const oldest = s.history(conv.id, 2, mid.messages[0]!.createdAt);
+    expect(oldest.messages.map((m) => m.text)).toEqual(['m1']);
+    expect(oldest.hasMore).toBe(false);
+  });
+});
+
 describe('chat store — hydration', () => {
   it('hydrate() reconstructs conversations, membership and messages verbatim', () => {
     const s = createMemoryChatStore();
@@ -147,7 +215,7 @@ describe('chat store — hydration', () => {
       ],
       messages: [{ id: 'm1', conversationId: 'c1', senderId: 'a', senderName: 'Mara', text: 'old', createdAt: 90 }],
     });
-    expect(s.history('c1', 10)).toEqual([
+    expect(s.history('c1', 10).messages).toEqual([
       { id: 'm1', conversationId: 'c1', senderId: 'a', senderName: 'Mara', text: 'old', createdAt: 90 },
     ]);
     // The message is from 'a'. b's lastReadAt (0) is before it (90) -> unread for b.

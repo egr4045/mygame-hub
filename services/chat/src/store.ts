@@ -44,6 +44,10 @@ export interface ChatMessage {
   replyToId?: string | null;
   mentions?: string[];
   attachments?: { id: string; url: string; type: string; name: string }[];
+  /** Set when the sender edited the message. */
+  editedAt?: number | null;
+  /** Tombstone: the row survives (reply chains, ordering) but text/attachments are blanked. */
+  deletedAt?: number | null;
 }
 
 export interface ChatParticipant {
@@ -69,6 +73,17 @@ export interface ChatThread {
 /** Why an `addMembers`/`removeMember` call was rejected by the store (not found or wrong type). */
 export type MembershipChangeError = 'not_found' | 'not_a_group' | 'not_a_member';
 
+/** Why an edit/delete was rejected: unknown message, not allowed for this account, or the message
+ *  is already a tombstone (edit only — deleting twice is a no-op, not an error). */
+export type MessageChangeError = 'not_found' | 'forbidden' | 'deleted';
+
+export interface HistoryPage {
+  /** Oldest-first, like the wire format. */
+  messages: ChatMessage[];
+  /** True when older messages remain before the first one returned. */
+  hasMore: boolean;
+}
+
 export interface ChatStore {
   upsertAccount(id: string, displayName: string): Account;
   getAccount(id: string): Account | undefined;
@@ -91,17 +106,24 @@ export interface ChatStore {
   updateGroupProfile(conversationId: string, name?: string, avatarUrl?: string | null): Conversation | MembershipChangeError;
   /** group only. Admins/owner can pin a message. */
   pinMessage(conversationId: string, messageId: string | null): Conversation | MembershipChangeError;
-  /** Null if `senderId` isn't a participant of `conversationId`. */
+  /** Null if `senderId` isn't a participant of `conversationId`. A `replyToId` pointing outside
+   *  this conversation is silently dropped (stored as null) rather than trusted. */
   send(
     conversationId: string,
     senderId: string,
     text: string,
     opts?: { replyToId?: string | undefined; mentions?: string[] | undefined; attachments?: ChatMessage['attachments'] | undefined },
   ): ChatMessage | null;
+  /** Sender-only, not on tombstones. Returns the updated message. */
+  editMessage(conversationId: string, messageId: string, editorId: string, text: string): ChatMessage | MessageChangeError;
+  /** Own messages always; others' only with `canModerate` (group owner/admin — the server decides).
+   *  Tombstones: sets `deletedAt`, blanks text/attachments. Idempotent on an already-deleted message. */
+  deleteMessage(conversationId: string, messageId: string, byId: string, canModerate: boolean): ChatMessage | MessageChangeError;
   /** Mark everything up to now as read for `accountId`. Null if there was nothing unread. */
   markRead(conversationId: string, accountId: string): { upTo: number } | null;
-  /** Most recent `limit` messages of a conversation, oldest first. */
-  history(conversationId: string, limit: number): ChatMessage[];
+  /** Most recent `limit` messages older than `before` (exclusive; omit for the newest page), oldest
+   *  first, plus whether more remain beyond the page. */
+  history(conversationId: string, limit: number, before?: number): HistoryPage;
   /** `accountId`'s conversations, newest activity first. */
   threads(accountId: string): ChatThread[];
   /** Bulk-load previously persisted state verbatim (ids/timestamps preserved). Hydration only. */
@@ -254,6 +276,9 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
     send(conversationId, senderId, text, opts) {
       const conv = conversations.get(conversationId);
       if (!conv || !conv.participantIds.includes(senderId)) return null;
+      const replyTarget = opts?.replyToId
+        ? ((messages.get(conversationId) ?? []).find((m) => m.id === opts.replyToId) ?? null)
+        : null;
       const msg: ChatMessage = {
         id: randomUUID(),
         conversationId,
@@ -261,13 +286,35 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         senderName: displayNameOf(senderId),
         text,
         createdAt: now(),
-        replyToId: opts?.replyToId ?? null,
+        replyToId: replyTarget?.id ?? null,
         ...(opts?.mentions !== undefined ? { mentions: opts.mentions } : {}),
         ...(opts?.attachments !== undefined ? { attachments: opts.attachments } : {}),
       };
       const arr = messages.get(conversationId) ?? [];
       arr.push(msg);
       messages.set(conversationId, arr);
+      return msg;
+    },
+
+    editMessage(conversationId, messageId, editorId, text) {
+      const msg = (messages.get(conversationId) ?? []).find((m) => m.id === messageId);
+      if (!msg) return 'not_found';
+      if (msg.senderId !== editorId) return 'forbidden';
+      if (msg.deletedAt) return 'deleted';
+      msg.text = text;
+      msg.editedAt = now();
+      return msg;
+    },
+
+    deleteMessage(conversationId, messageId, byId, canModerate) {
+      const msg = (messages.get(conversationId) ?? []).find((m) => m.id === messageId);
+      if (!msg) return 'not_found';
+      if (msg.senderId !== byId && !canModerate) return 'forbidden';
+      if (!msg.deletedAt) {
+        msg.deletedAt = now();
+        msg.text = '';
+        delete msg.attachments;
+      }
       return msg;
     },
 
@@ -283,7 +330,12 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
       return hasUnread ? { upTo: t } : null;
     },
 
-    history: (conversationId, limit) => (messages.get(conversationId) ?? []).slice(-limit),
+    history(conversationId, limit, before) {
+      const all = messages.get(conversationId) ?? [];
+      const pool = before !== undefined ? all.filter((m) => m.createdAt < before) : all;
+      const page = pool.slice(-limit);
+      return { messages: page, hasMore: pool.length > page.length };
+    },
 
     threads(accountId) {
       const out: ChatThread[] = [];

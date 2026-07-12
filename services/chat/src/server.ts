@@ -473,6 +473,55 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       }),
     );
 
+    socket.on(chat.C2S.edit, (raw, ack?: (res: chat.EditAck) => void) =>
+      guard(() => {
+        const { conversationId, messageId, text } = parse(chat.editPayload, raw);
+        if (!deps.store.isParticipant(conversationId, accountId)) {
+          throw new ContractError('forbidden', 'not a participant of this conversation');
+        }
+        const result = deps.store.editMessage(conversationId, messageId, accountId, text);
+        if (typeof result === 'string') {
+          if (result === 'not_found') throw new ContractError('validation', 'message not found');
+          throw new ContractError(
+            'forbidden',
+            result === 'deleted' ? 'message was deleted' : 'only the sender may edit a message',
+          );
+        }
+        if (typeof ack === 'function') ack({ message: result });
+        const participants = deps.store.participantsOf(conversationId);
+        const payload: chat.MessageEditedEvent = { message: result };
+        emitToEveryone(participants, chat.S2C.messageEdited, payload);
+        // The thread preview may show this message — refresh everyone's list.
+        for (const p of participants) emitThreads(p);
+      }),
+    );
+
+    // Own messages always; others' only by the group owner/admins (never in a DM). Tombstone, so
+    // ordering and reply chains survive; the store blanks text/attachments.
+    socket.on(chat.C2S.del, (raw, ack?: (res: chat.DeleteAck) => void) =>
+      guard(() => {
+        const { conversationId, messageId } = parse(chat.deletePayload, raw);
+        const conv = deps.store.threads(accountId).find((t) => t.conversationId === conversationId);
+        if (!conv) throw new ContractError('forbidden', 'not a participant of this conversation');
+        const canModerate =
+          conv.type === 'group' && (conv.ownerId === accountId || (conv.admins?.includes(accountId) ?? false));
+        const result = deps.store.deleteMessage(conversationId, messageId, accountId, canModerate);
+        if (typeof result === 'string') {
+          if (result === 'not_found') throw new ContractError('validation', 'message not found');
+          throw new ContractError('forbidden', 'you may not delete this message');
+        }
+        if (typeof ack === 'function') ack({ ok: true });
+        const participants = deps.store.participantsOf(conversationId);
+        const payload: chat.MessageDeletedEvent = {
+          conversationId,
+          messageId,
+          deletedAt: result.deletedAt ?? Date.now(),
+        };
+        emitToEveryone(participants, chat.S2C.messageDeleted, payload);
+        for (const p of participants) emitThreads(p);
+      }),
+    );
+
     socket.on(chat.C2S.markRead, (raw) =>
       guard(() => {
         const { conversationId } = parse(chat.markReadPayload, raw);
@@ -488,12 +537,12 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
 
     socket.on(chat.C2S.getHistory, (raw, ack?: (res: chat.HistoryAck) => void) =>
       guard(() => {
-        const { conversationId, limit } = parse(chat.getHistoryPayload, raw);
+        const { conversationId, limit, before } = parse(chat.getHistoryPayload, raw);
         if (!deps.store.isParticipant(conversationId, accountId)) {
           throw new ContractError('forbidden', 'not a participant of this conversation');
         }
-        const messages = deps.store.history(conversationId, limit ?? 100);
-        if (typeof ack === 'function') ack({ conversationId, messages });
+        const page = deps.store.history(conversationId, limit ?? 100, before);
+        if (typeof ack === 'function') ack({ conversationId, messages: page.messages, hasMore: page.hasMore });
       }),
     );
 

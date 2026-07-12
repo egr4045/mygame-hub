@@ -11,6 +11,17 @@ import { z } from 'zod';
 export const conversationType = z.enum(['dm', 'group']);
 export type ConversationType = z.infer<typeof conversationType>;
 
+/** Attachments must point at this service's own media store (`POST /chat/upload` returns such a
+ *  URL) — relative, so the client resolves it against its configured chat origin. Rejecting foreign
+ *  URLs closes the stored-link/XSS vector of persisting arbitrary strings. */
+export const chatAttachment = z.object({
+  id: z.string().max(64),
+  url: z.string().max(512).regex(/^\/chat\/media\/[A-Za-z0-9._-]+$/),
+  type: z.string().max(64),
+  name: z.string().max(128),
+});
+export type ChatAttachment = z.infer<typeof chatAttachment>;
+
 export const chatMessage = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -20,12 +31,12 @@ export const chatMessage = z.object({
   createdAt: z.number(), // epoch ms
   replyToId: z.string().nullable().optional(),
   mentions: z.array(z.string()).optional(),
-  attachments: z.array(z.object({
-    id: z.string(),
-    url: z.string(),
-    type: z.string(),
-    name: z.string()
-  })).optional(),
+  attachments: z.array(chatAttachment).optional(),
+  /** Set when the sender edited the message (epoch ms). */
+  editedAt: z.number().nullable().optional(),
+  /** Tombstone: set when the message was deleted — `text`/`attachments` are blanked server-side,
+   *  the row survives so reply chains and ordering stay stable. */
+  deletedAt: z.number().nullable().optional(),
 });
 export type ChatMessage = z.infer<typeof chatMessage>;
 
@@ -65,6 +76,8 @@ export const C2S = {
   updateGroupProfile: 'chat.updateGroupProfile', // group only; admins/owner can change name/avatar
   pinMessage: 'chat.pinMessage', // group only; admins/owner can pin a message
   send: 'chat.send',
+  edit: 'chat.edit', // sender-only; not on deleted messages
+  del: 'chat.delete', // own always; others' only by the group owner/admins (tombstone, not hard delete)
   markRead: 'chat.markRead',
   getHistory: 'chat.getHistory',
   getState: 'chat.getState', // re-request the full thread list (reconnect)
@@ -106,22 +119,33 @@ export const pinMessagePayload = z.object({
   conversationId: z.string().min(1),
   messageId: z.string().nullable(), // null to unpin
 });
-export const sendPayload = z.object({
+export const sendPayload = z
+  .object({
+    conversationId: z.string().min(1),
+    text: z.string().max(2000), // may be empty only when attachments are present
+    replyToId: z.string().optional(),
+    mentions: z.array(z.string()).optional(),
+    attachments: z.array(chatAttachment).max(5).optional(),
+  })
+  .refine((p) => p.text.trim().length > 0 || (p.attachments?.length ?? 0) > 0, {
+    message: 'empty message',
+  });
+export const editPayload = z.object({
   conversationId: z.string().min(1),
-  text: z.string().max(2000), // Can be empty if there are attachments
-  replyToId: z.string().optional(),
-  mentions: z.array(z.string()).optional(),
-  attachments: z.array(z.object({
-    id: z.string(),
-    url: z.string(),
-    type: z.string(),
-    name: z.string()
-  })).optional()
+  messageId: z.string().min(1),
+  text: z.string().min(1).max(2000),
+});
+export const deletePayload = z.object({
+  conversationId: z.string().min(1),
+  messageId: z.string().min(1),
 });
 export const markReadPayload = z.object({ conversationId: z.string().min(1) });
 export const getHistoryPayload = z.object({
   conversationId: z.string().min(1),
   limit: z.number().int().positive().max(200).optional(),
+  /** Exclusive upper bound on `createdAt` — pass the oldest loaded message's `createdAt` to page
+   *  further back. Omit for the newest page. */
+  before: z.number().optional(),
 });
 export const getStatePayload = z.object({}).strict();
 
@@ -163,6 +187,8 @@ export type SetGroupRolePayload = z.infer<typeof setGroupRolePayload>;
 export type UpdateGroupProfilePayload = z.infer<typeof updateGroupProfilePayload>;
 export type PinMessagePayload = z.infer<typeof pinMessagePayload>;
 export type SendPayload = z.infer<typeof sendPayload>;
+export type EditPayload = z.infer<typeof editPayload>;
+export type DeletePayload = z.infer<typeof deletePayload>;
 export type MarkReadPayload = z.infer<typeof markReadPayload>;
 export type GetHistoryPayload = z.infer<typeof getHistoryPayload>;
 export type CallRingPayload = z.infer<typeof callRingPayload>;
@@ -183,7 +209,14 @@ export const setGroupRoleAck = z.object({ ok: z.boolean().optional(), error: z.s
 export const updateGroupProfileAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 export const pinMessageAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 export const sendAck = z.object({ message: chatMessage.optional(), error: z.string().optional() });
-export const historyAck = z.object({ conversationId: z.string(), messages: z.array(chatMessage) });
+export const editAck = z.object({ message: chatMessage.optional(), error: z.string().optional() });
+export const deleteAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
+export const historyAck = z.object({
+  conversationId: z.string(),
+  messages: z.array(chatMessage),
+  /** True when older messages remain before the first one returned (page further with `before`). */
+  hasMore: z.boolean().optional(),
+});
 export const callAck = z.object({ ok: z.boolean(), error: z.string().optional() });
 /** Response body of `POST /chat/call/token` (plain HTTP, not a socket ack — see server.ts). */
 export const callTokenResponse = z.object({ token: z.string(), url: z.string() });
@@ -196,6 +229,8 @@ export type SetGroupRoleAck = z.infer<typeof setGroupRoleAck>;
 export type UpdateGroupProfileAck = z.infer<typeof updateGroupProfileAck>;
 export type PinMessageAck = z.infer<typeof pinMessageAck>;
 export type SendAck = z.infer<typeof sendAck>;
+export type EditAck = z.infer<typeof editAck>;
+export type DeleteAck = z.infer<typeof deleteAck>;
 export type HistoryAck = z.infer<typeof historyAck>;
 export type CallAck = z.infer<typeof callAck>;
 export type CallTokenResponse = z.infer<typeof callTokenResponse>;
@@ -204,6 +239,8 @@ export type CallTokenResponse = z.infer<typeof callTokenResponse>;
 export const S2C = {
   threads: 'chat.threads', // full thread list (pushed on connect + whenever it changes)
   message: 'chat.message', // a new message, pushed to every participant of the conversation
+  messageEdited: 'chat.messageEdited', // full updated message, pushed to every participant
+  messageDeleted: 'chat.messageDeleted', // tombstone notice, pushed to every participant
   read: 'chat.read', // someone read up to `upTo` in a conversation
   error: 'chat.error',
   callRing: 'chat.callRing', // pushed to every other participant when someone starts ringing
@@ -215,6 +252,12 @@ export const S2C = {
 
 export const threadsEvent = z.object({ threads: z.array(chatThread) });
 export const messageEvent = z.object({ message: chatMessage });
+export const messageEditedEvent = z.object({ message: chatMessage });
+export const messageDeletedEvent = z.object({
+  conversationId: z.string(),
+  messageId: z.string(),
+  deletedAt: z.number(),
+});
 export const readEvent = z.object({ conversationId: z.string(), byAccountId: z.string(), upTo: z.number() });
 export const callRingEvent = z.object({
   conversationId: z.string(),
@@ -223,13 +266,20 @@ export const callRingEvent = z.object({
   callType,
 });
 export const callParticipantEvent = z.object({ conversationId: z.string(), accountId: z.string() });
-export const callEndedEvent = z.object({ conversationId: z.string() });
+/** `reason: 'timeout'` = the server's ring sweep gave up on an unanswered ring (no one to blame,
+ *  the caller shows "no answer" and the still-ringing callees just clear their banner). */
+export const callEndedEvent = z.object({
+  conversationId: z.string(),
+  reason: z.enum(['ended', 'timeout']).optional(),
+});
 /** Pushed once per `typing` call — the client debounces/expires these locally (see chatStore.ts),
  *  the server doesn't track or throttle typing state itself. */
 export const typingEvent = z.object({ conversationId: z.string(), accountId: z.string() });
 
 export type ThreadsEvent = z.infer<typeof threadsEvent>;
 export type MessageEvent = z.infer<typeof messageEvent>;
+export type MessageEditedEvent = z.infer<typeof messageEditedEvent>;
+export type MessageDeletedEvent = z.infer<typeof messageDeletedEvent>;
 export type ReadEvent = z.infer<typeof readEvent>;
 export type CallRingEvent = z.infer<typeof callRingEvent>;
 export type CallParticipantEvent = z.infer<typeof callParticipantEvent>;
