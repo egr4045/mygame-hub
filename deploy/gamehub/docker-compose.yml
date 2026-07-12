@@ -152,6 +152,10 @@ services:
       CIVA_GAME_PROJECT: civa-game
       CIVA_ACTIVITY_URL: http://lobby:8082/metrics
       CIVA_IDLE_MS: '600000' # stop the game after 10 min with zero players
+      SVOYAK_GAME_DIR: /root/gamehub/deploy/svoyak
+      SVOYAK_GAME_PROJECT: svoyak
+      SVOYAK_ACTIVITY_URL: http://svoyak:8089/metrics
+      SVOYAK_IDLE_MS: '600000'
       REAPER_MS: '30000'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
       JWT_ISSUER: civa

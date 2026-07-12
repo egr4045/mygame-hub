@@ -18,7 +18,7 @@ const defaultGames = (): GameManifest[] => [
   {
     id: 'civa',
     name: 'CIVA',
-    composeDir: process.env.CIVA_GAME_DIR ?? '/root/civa/deploy/civa-game',
+    composeDir: process.env.CIVA_GAME_DIR ?? '/root/gamehub/deploy/civa-game',
     composeProject: process.env.CIVA_GAME_PROJECT ?? 'civa-game',
     activityUrl: process.env.CIVA_ACTIVITY_URL ?? 'http://lobby:8082/metrics',
     idleMs: Number(process.env.CIVA_IDLE_MS ?? 10 * 60 * 1000),
@@ -26,7 +26,7 @@ const defaultGames = (): GameManifest[] => [
   {
     id: 'svoyak',
     name: 'Своя игра',
-    composeDir: process.env.SVOYAK_GAME_DIR ?? '/root/civa/deploy/svoyak',
+    composeDir: process.env.SVOYAK_GAME_DIR ?? '/root/gamehub/deploy/svoyak',
     composeProject: process.env.SVOYAK_GAME_PROJECT ?? 'svoyak',
     activityUrl: process.env.SVOYAK_ACTIVITY_URL ?? 'http://svoyak:8089/metrics',
     idleMs: Number(process.env.SVOYAK_IDLE_MS ?? 10 * 60 * 1000),
