@@ -275,9 +275,13 @@ export const ChatWidget = (): JSX.Element => {
     };
   }, [isDragging, dragOffset]);
 
-  // A monitor change (or window shrink) must never strand the widget off-screen.
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+
+  // A monitor change (or window shrink) must never strand the widget off-screen; also track the
+  // mobile breakpoint (below it the widget goes full-screen and stacks list↔chat).
   useEffect(() => {
     const onResize = () => {
+      setIsMobile(window.innerWidth < 768);
       setSize((s) => {
         const c = clampSize(s);
         return c.w !== s.w || c.h !== s.h ? c : s;
@@ -400,6 +404,7 @@ export const ChatWidget = (): JSX.Element => {
   /** Start dragging the window from a header bar — but not when the press lands on a button/input
    *  inside that bar (so the call/close/action controls stay clickable). */
   const startDrag = (e: React.MouseEvent) => {
+    if (isMobile) return; // full-screen on mobile — nothing to drag
     if ((e.target as HTMLElement).closest('button, input, a')) return;
     setIsDragging(true);
     setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
@@ -519,30 +524,46 @@ export const ChatWidget = (): JSX.Element => {
   return (
     <div
       className="civa-fade-in"
-      style={{
-        position: 'fixed',
-        left: position.x,
-        top: position.y,
-        width: size.w,
-        height: size.h,
-        minWidth: MIN_W,
-        minHeight: MIN_H,
-        maxWidth: '100vw',
-        maxHeight: '100vh',
-        background: '#1b2838',
-        border: '1px solid #3d4450',
-        borderRadius: 8,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        zIndex: 1000,
-        resize: 'both',
-        pointerEvents: 'auto',
-      }}
+      style={
+        isMobile
+          ? {
+              // Phones: full-screen, no drag/resize — the floating window is unusable at 375px.
+              position: 'fixed',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              background: '#1b2838',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 1000,
+              pointerEvents: 'auto',
+            }
+          : {
+              position: 'fixed',
+              left: position.x,
+              top: position.y,
+              width: size.w,
+              height: size.h,
+              minWidth: MIN_W,
+              minHeight: MIN_H,
+              maxWidth: '100vw',
+              maxHeight: '100vh',
+              background: '#1b2838',
+              border: '1px solid #3d4450',
+              borderRadius: 8,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 1000,
+              resize: 'both',
+              pointerEvents: 'auto',
+            }
+      }
       onMouseUp={(e) => {
-        // Handle resize by storing size on mouseup when not dragging
-        if (!isDragging && e.currentTarget) {
+        // Handle resize by storing size on mouseup when not dragging (desktop only)
+        if (!isMobile && !isDragging && e.currentTarget) {
           const newSize = clampSize({ w: e.currentTarget.offsetWidth, h: e.currentTarget.offsetHeight });
           if (newSize.w !== size.w || newSize.h !== size.h) {
             setSize(newSize);
@@ -557,7 +578,8 @@ export const ChatWidget = (): JSX.Element => {
         </div>
       )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <div style={{ width: 220, flexShrink: 0, background: '#171a21', borderRight: '1px solid #3d4450', display: 'flex', flexDirection: 'column' }}>
+      {/* Mobile stacks list↔chat: the sidebar is full-width when no chat is open and hidden once one is. */}
+      <div style={{ width: isMobile ? '100%' : 220, flexShrink: 0, background: '#171a21', borderRight: isMobile ? 'none' : '1px solid #3d4450', display: isMobile && activeChatId ? 'none' : 'flex', flexDirection: 'column' }}>
         <div
           onMouseDown={startDrag}
           title="Перетащите за эту полосу, чтобы переместить окно"
@@ -610,7 +632,7 @@ export const ChatWidget = (): JSX.Element => {
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#1b2838' }}>
+      <div style={{ flex: 1, minWidth: 0, display: isMobile && !activeChatId && !isCreatingGroup ? 'none' : 'flex', flexDirection: 'column', background: '#1b2838' }}>
         {isCreatingGroup ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Новая группа</div>
@@ -793,6 +815,16 @@ export const ChatWidget = (): JSX.Element => {
               style={{ height: 60, flexShrink: 0, padding: '0 16px', borderBottom: '1px solid #3d4450', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#23262e', cursor: 'grab', userSelect: 'none' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                {isMobile && (
+                  <button
+                    onClick={() => useChatStore.setState({ activeChatId: null })}
+                    title="К списку чатов"
+                    aria-label="Назад к списку чатов"
+                    style={{ background: 'none', border: 'none', color: '#dcdedf', cursor: 'pointer', fontSize: 24, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                  >
+                    ‹
+                  </button>
+                )}
                 {activeSession.type === 'group' ? (
                   <Avatar src={activeSession.avatar} name={activeSession.name} size={32} shape="square" />
                 ) : (

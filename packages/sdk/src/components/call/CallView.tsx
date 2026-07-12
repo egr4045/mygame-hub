@@ -42,8 +42,15 @@ export const CallView = (): JSX.Element | null => {
 
   const [surfaceMode, setSurfaceMode] = useState<'docked' | 'expanded'>('docked');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onR = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onR);
+    return () => window.removeEventListener('resize', onR);
+  }, []);
 
   // Docked-window position: top-right by default (the chat widget owns the bottom-right corner),
   // draggable per-call. Not persisted — a fresh call starts back at the default.
@@ -145,7 +152,7 @@ export const CallView = (): JSX.Element | null => {
     }
   };
 
-  const expanded = isFullscreen || surfaceMode === 'expanded';
+  const expanded = isFullscreen || surfaceMode === 'expanded' || isMobile; // phones: always full-screen
   const dockDefault = { x: Math.max(0, window.innerWidth - DOCK_W - 24), y: 80 };
   const pos = dockPos ?? dockDefault;
   const containerStyle = expanded
