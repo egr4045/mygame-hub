@@ -5,7 +5,7 @@ import { usePlatformStore } from '../platform/platformStore.js';
 const overlay: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(0,0,0,0.8)',
+  background: 'var(--c-overlay)',
   zIndex: 1000,
   display: 'flex',
   alignItems: 'center',
@@ -14,8 +14,8 @@ const overlay: CSSProperties = {
 
 const card: CSSProperties = {
   width: 460,
-  background: '#1b2838',
-  border: '1px solid #3d4450',
+  background: 'var(--c-panel-solid)',
+  border: '1px solid var(--c-panel-border)',
   borderRadius: 8,
   padding: 32,
 };
@@ -25,29 +25,29 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box',
   padding: '10px 14px',
   borderRadius: 4,
-  background: 'rgba(0,0,0,0.4)',
-  color: '#fff',
-  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'var(--c-panel-deep)',
+  color: 'var(--c-text-primary)',
+  border: '1px solid var(--c-panel-border)',
   fontSize: 13,
   outline: 'none',
 };
 
 const errorBox: CSSProperties = {
-  color: '#ff5c5c',
+  color: 'var(--c-negative)',
   fontSize: 13,
   marginTop: 12,
   padding: '10px 12px',
-  background: 'rgba(255,92,92,0.1)',
+  background: 'rgba(224, 82, 74, 0.12)',
   borderRadius: 4,
   textAlign: 'center',
 };
 
-const okBox: CSSProperties = { ...errorBox, color: '#5c9e5c', background: 'rgba(92,158,92,0.1)' };
+const okBox: CSSProperties = { ...errorBox, color: 'var(--c-positive)', background: 'rgba(70, 196, 106, 0.12)' };
 
 const btn: CSSProperties = {
   padding: '10px 18px',
   borderRadius: 4,
-  background: '#1a9fff',
+  background: 'var(--c-accent)',
   color: '#fff',
   fontWeight: 700,
   fontSize: 13,
@@ -55,7 +55,7 @@ const btn: CSSProperties = {
   cursor: 'pointer',
 };
 
-const ghostBtn: CSSProperties = { ...btn, background: '#3d4450' };
+const ghostBtn: CSSProperties = { ...btn, background: 'var(--c-panel-hover)', color: 'var(--c-text-primary)' };
 
 const tabBtn = (active: boolean): CSSProperties => ({
   flex: 1,
@@ -64,12 +64,12 @@ const tabBtn = (active: boolean): CSSProperties => ({
   fontWeight: 700,
   fontSize: 13,
   cursor: 'pointer',
-  color: active ? '#fff' : '#8f98a0',
-  borderBottom: active ? '2px solid #1a9fff' : '2px solid transparent',
+  color: active ? 'var(--c-text-primary)' : 'var(--c-text-muted)',
+  borderBottom: active ? '2px solid var(--c-accent)' : '2px solid transparent',
 });
 
-const label: CSSProperties = { color: '#8f98a0', fontSize: 12, marginBottom: 6, display: 'block' };
-const toggleRow: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #2a3f5a' };
+const label: CSSProperties = { color: 'var(--c-text-muted)', fontSize: 12, marginBottom: 6, display: 'block' };
+const toggleRow: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--c-panel-border)' };
 
 interface Props {
   initialTab: 'notifications' | 'account';
@@ -83,9 +83,9 @@ export const SettingsModal = ({ initialTab, onClose, onGoToProfile }: Props): JS
   return (
     <div style={overlay} onClick={onClose}>
       <div className="civa-fade-in" style={card} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ color: '#fff', margin: '0 0 16px', fontSize: 20 }}>Настройки</h2>
+        <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px', fontSize: 20 }}>Настройки</h2>
 
-        <div style={{ display: 'flex', marginBottom: 20, borderBottom: '1px solid #2a3f5a' }}>
+        <div style={{ display: 'flex', marginBottom: 20, borderBottom: '1px solid var(--c-panel-border)' }}>
           <div style={tabBtn(tab === 'notifications')} onClick={() => setTab('notifications')}>Уведомления</div>
           <div style={tabBtn(tab === 'account')} onClick={() => setTab('account')}>Аккаунт</div>
         </div>
@@ -107,14 +107,14 @@ const NotificationsTab = (): JSX.Element => {
   return (
     <div>
       <div style={toggleRow}>
-        <span style={{ color: '#dcdedf', fontSize: 14 }}>🏆 Тосты о новых достижениях</span>
+        <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>🏆 Тосты о новых достижениях</span>
         <input type="checkbox" checked={achievementToasts} onChange={(e) => setAchievementToasts(e.target.checked)} />
       </div>
       <div style={{ ...toggleRow, borderBottom: 'none' }}>
-        <span style={{ color: '#dcdedf', fontSize: 14 }}>📞 Тосты о входящих звонках</span>
+        <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>📞 Тосты о входящих звонках</span>
         <input type="checkbox" checked={callToasts} onChange={(e) => setCallToasts(e.target.checked)} />
       </div>
-      <p style={{ color: '#6c7784', fontSize: 12, marginTop: 16 }}>
+      <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 16 }}>
         Хранится только в этом браузере. Заявки в друзья и приглашения в игру по-прежнему видны в 🔔 —
         это переключает только всплывающие тосты.
       </p>

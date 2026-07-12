@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { type GameInfo } from '../platform/games.js';
-import { formatLastPlayed, formatPlaytime } from '../platform/statsFormat.js';
+import { formatLastPlayed, formatLastReply, formatPlaytime } from '../platform/statsFormat.js';
 import { routeToRoom } from '../platform/inviteRouting.js';
 import {
   useSocialStore,
+  useToastStore,
   getGameStats,
   getChangelog,
   getThreads,
@@ -18,6 +19,23 @@ const formatPublished = (publishedAt: number): string =>
 
 const formatPostTime = (createdAt: number): string =>
   new Date(createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+const loadErrorToast = (what: string): void =>
+  useToastStore.getState().addToast({
+    type: 'system',
+    title: 'Ошибка загрузки',
+    content: `Не удалось загрузить ${what}. Попробуйте позже.`,
+    icon: '⚠️',
+  });
+
+/** Shimmer placeholder rows shown while a list is still fetching (null state). */
+const SkeletonRows = ({ count = 3, height = 40 }: { count?: number; height?: number }): JSX.Element => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    {Array.from({ length: count }, (_, i) => (
+      <div key={i} className="hub-skeleton" style={{ height }} />
+    ))}
+  </div>
+);
 
 export type GameDetailsTab = 'changelog' | 'groups' | 'discussions';
 
@@ -34,14 +52,16 @@ export const GameDetailsView = ({
 }): JSX.Element => {
   const [viewDiscussion, setViewDiscussion] = useState<string | null>(null);
   const [isCreatingDiscussion, setIsCreatingDiscussion] = useState(false);
-  const [stat, setStat] = useState<GameStat | null>(null);
-  const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
-  const [threads, setThreads] = useState<DiscussionThread[]>([]);
+  // undefined = still loading, null = loaded but no stat recorded for this game.
+  const [stat, setStat] = useState<GameStat | null | undefined>(undefined);
+  // For the lists: null = loading (render skeletons), [] = resolved empty (render empty copy).
+  const [changelog, setChangelog] = useState<ChangelogEntry[] | null>(null);
+  const [threads, setThreads] = useState<DiscussionThread[] | null>(null);
   const [threadDetail, setThreadDetail] = useState<{ thread: DiscussionThread; posts: DiscussionPost[] } | null>(null);
   const [newThreadTitle, setNewThreadTitle] = useState('');
   const [newThreadBody, setNewThreadBody] = useState('');
   const [replyText, setReplyText] = useState('');
-  const [lobbies, setLobbies] = useState<social.Lobby[]>([]);
+  const [lobbies, setLobbies] = useState<social.Lobby[] | null>(null);
   const [newRoomName, setNewRoomName] = useState('');
 
   const resetSubViews = () => {
@@ -51,27 +71,37 @@ export const GameDetailsView = ({
 
   // Real per-game playtime/last-played, refreshed whenever the viewed game changes.
   useEffect(() => {
-    setStat(null);
+    setStat(undefined);
     if (!game) return;
     const gameId = game.id;
-    void getGameStats().then((res) => {
-      setStat(res?.stats.find((s) => s.gameId === gameId) ?? null);
-    });
+    getGameStats()
+      .then((res) => setStat(res?.stats.find((s) => s.gameId === gameId) ?? null))
+      .catch(() => setStat(null));
   }, [game?.id]);
 
   // Real changelog, refreshed whenever the viewed game changes.
   useEffect(() => {
-    setChangelog([]);
+    setChangelog(null);
     if (!game) return;
-    void getChangelog(game.id).then(setChangelog);
+    getChangelog(game.id)
+      .then(setChangelog)
+      .catch(() => {
+        setChangelog([]);
+        loadErrorToast('обновления');
+      });
   }, [game?.id]);
 
   // Real discussion threads; reset any open thread/create-form when the viewed game changes.
   useEffect(() => {
-    setThreads([]);
+    setThreads(null);
     resetSubViews();
     if (!game) return;
-    void getThreads(game.id).then(setThreads);
+    getThreads(game.id)
+      .then(setThreads)
+      .catch(() => {
+        setThreads([]);
+        loadErrorToast('обсуждения');
+      });
   }, [game?.id]);
 
   // Real thread detail, refreshed whenever the open thread changes.
@@ -84,7 +114,15 @@ export const GameDetailsView = ({
   // Live lobbies: fetched fresh whenever the tab is opened (presence isn't pushed, only queried).
   useEffect(() => {
     if (activeTab !== 'groups' || !game) return;
-    void useSocialStore.getState().getLobbies(game.id).then(setLobbies);
+    setLobbies(null);
+    useSocialStore
+      .getState()
+      .getLobbies(game.id)
+      .then(setLobbies)
+      .catch(() => {
+        setLobbies([]);
+        loadErrorToast('лобби');
+      });
   }, [activeTab, game?.id]);
 
   const handleJoinLobby = (room: string) => {
@@ -121,7 +159,7 @@ export const GameDetailsView = ({
 
   if (!game) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1b2838', color: '#6c7784' }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--c-panel-solid)', color: 'var(--c-text-muted)' }}>
         Выберите игру из библиотеки
       </div>
     );
@@ -130,13 +168,13 @@ export const GameDetailsView = ({
   const playable = game.status === 'playable';
 
   return (
-    <div style={{ flex: 1, background: '#1b2838', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-      
+    <div style={{ flex: 1, background: 'var(--c-panel-solid)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+
       {/* Hero Banner */}
-      <div style={{ 
-        height: 350, 
-        position: 'relative', 
-        background: `linear-gradient(to bottom, transparent 0%, #1b2838 100%), linear-gradient(135deg, ${game.accent}44 0%, #1b2838 100%)`,
+      <div style={{
+        height: 350,
+        position: 'relative',
+        background: `linear-gradient(to bottom, transparent 0%, var(--c-panel-solid) 100%), linear-gradient(135deg, ${game.accent}44 0%, var(--c-panel-solid) 100%)`,
         display: 'flex',
         alignItems: 'flex-end',
         padding: 40
@@ -144,24 +182,24 @@ export const GameDetailsView = ({
         {/* Fake Logo */}
         <div style={{ fontSize: 72, marginRight: 24, textShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>{game.emoji}</div>
         <div>
-          <h1 style={{ fontSize: 48, fontWeight: 800, margin: 0, color: '#fff', textShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>{game.name}</h1>
+          <h1 style={{ fontSize: 48, fontWeight: 800, margin: 0, color: 'var(--c-text-primary)', textShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>{game.name}</h1>
         </div>
       </div>
 
       {/* Action Bar */}
       <div style={{ padding: '0 40px', marginTop: -20, display: 'flex', gap: 24, alignItems: 'center', position: 'relative', zIndex: 10 }}>
-        
+
         {playable ? (
-          <button 
+          <button
             onClick={() => onPlay(game)}
-            style={{ 
-              background: 'linear-gradient(to right, #47bfff 0%, #1a44c2 60%)', 
-              border: 'none', 
-              borderRadius: 4, 
-              padding: '12px 48px', 
-              color: '#fff', 
-              fontSize: '20px', 
-              fontWeight: 600, 
+            style={{
+              background: 'linear-gradient(to right, var(--c-accent) 0%, var(--c-accent-muted) 60%)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '12px 48px',
+              color: '#fff',
+              fontSize: '20px',
+              fontWeight: 600,
               cursor: 'pointer',
               boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
               transition: 'transform 0.1s'
@@ -176,37 +214,38 @@ export const GameDetailsView = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <button
               disabled
-              style={{
-                background: '#3d4450',
-                border: 'none',
-                borderRadius: 4,
-                padding: '12px 32px',
-                color: '#6c7784',
-                fontSize: '20px',
-                fontWeight: 600,
-              }}
+              className="hub-btn"
+              style={{ padding: '12px 32px', fontSize: '20px' }}
             >
               {game.status === 'maintenance' ? 'НЕДОСТУПНО' : 'СКОРО ВЫЙДЕТ'}
             </button>
             {game.note && (
-              <div style={{ fontSize: '12px', color: '#8f98a0', maxWidth: 280 }}>{game.note}</div>
+              <div style={{ fontSize: '12px', color: 'var(--c-text-muted)', maxWidth: 280 }}>{game.note}</div>
             )}
           </div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: '11px', color: '#8f98a0', textTransform: 'uppercase' }}>ПОСЛЕДНИЙ ЗАПУСК</div>
-          <div style={{ fontSize: '13px', color: '#dcdedf' }}>{formatLastPlayed(stat?.lastPlayedAt ?? null)}</div>
+          <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase' }}>ПОСЛЕДНИЙ ЗАПУСК</div>
+          {stat === undefined ? (
+            <div className="hub-skeleton" style={{ height: 14, width: 90 }} />
+          ) : (
+            <div style={{ fontSize: '13px', color: 'var(--c-text-primary)' }}>{formatLastPlayed(stat?.lastPlayedAt ?? null)}</div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: '11px', color: '#8f98a0', textTransform: 'uppercase' }}>ВРЕМЯ В ИГРЕ</div>
-          <div style={{ fontSize: '13px', color: '#dcdedf' }}>{formatPlaytime(stat?.secondsPlayed ?? 0)}</div>
+          <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase' }}>ВРЕМЯ В ИГРЕ</div>
+          {stat === undefined ? (
+            <div className="hub-skeleton" style={{ height: 14, width: 60 }} />
+          ) : (
+            <div style={{ fontSize: '13px', color: 'var(--c-text-primary)' }}>{formatPlaytime(stat?.secondsPlayed ?? 0)}</div>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 32, padding: '24px 40px 0 40px', borderBottom: '1px solid #2a3f5a' }}>
+      <div style={{ display: 'flex', gap: 32, padding: '24px 40px 0 40px', borderBottom: '1px solid var(--c-panel-border)' }}>
         {(
           [
             { id: 'changelog', label: 'Ченжлог' },
@@ -220,11 +259,11 @@ export const GameDetailsView = ({
               onTabChange(tab.id);
               resetSubViews();
             }}
-            style={{ 
-              fontSize: '13px', 
-              color: activeTab === tab.id ? '#fff' : '#8f98a0', 
-              paddingBottom: 8, 
-              borderBottom: activeTab === tab.id ? '3px solid #66c0f4' : '3px solid transparent', 
+            style={{
+              fontSize: '13px',
+              color: activeTab === tab.id ? 'var(--c-text-primary)' : 'var(--c-text-muted)',
+              paddingBottom: 8,
+              borderBottom: activeTab === tab.id ? '3px solid var(--c-accent)' : '3px solid transparent',
               cursor: 'pointer',
               fontWeight: activeTab === tab.id ? 600 : 400
             }}
@@ -236,24 +275,26 @@ export const GameDetailsView = ({
 
       {/* Content Body */}
       <div style={{ padding: 40, display: 'flex', gap: 40, flex: 1, flexDirection: 'column' }}>
-        
+
         {activeTab === 'changelog' && (
           <div style={{ display: 'flex', gap: 40 }}>
             <div style={{ flex: 2 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>АКТИВНОСТЬ И ОБНОВЛЕНИЯ</h2>
-              {changelog.length === 0 ? (
-                <div style={{ background: 'rgba(0,0,0,0.2)', padding: 24, borderRadius: 4, color: '#8f98a0', fontSize: '13px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: 16 }}>АКТИВНОСТЬ И ОБНОВЛЕНИЯ</h2>
+              {changelog === null ? (
+                <SkeletonRows count={3} height={40} />
+              ) : changelog.length === 0 ? (
+                <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
                   Пока нет опубликованных обновлений.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   {changelog.map((entry, i) => (
-                    <div key={entry.id} style={{ background: 'rgba(0,0,0,0.2)', padding: 24, borderRadius: 4, borderLeft: `4px solid ${i === 0 ? '#66c0f4' : '#3d4450'}` }}>
-                      <div style={{ color: i === 0 ? '#66c0f4' : '#fff', fontWeight: 700, marginBottom: 8, fontSize: '18px' }}>
+                    <div key={entry.id} className="hub-card" style={{ padding: 24, borderLeft: `4px solid ${i === 0 ? 'var(--c-accent)' : 'var(--c-panel-border)'}` }}>
+                      <div style={{ color: i === 0 ? 'var(--c-accent)' : 'var(--c-text-primary)', fontWeight: 700, marginBottom: 8, fontSize: '18px' }}>
                         {entry.version}: {entry.title}
                       </div>
-                      <div style={{ color: '#8f98a0', fontSize: '12px', marginBottom: 16 }}>Опубликовано {formatPublished(entry.publishedAt)}</div>
-                      <p style={{ color: '#dcdedf', fontSize: '14px', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{entry.body}</p>
+                      <div style={{ color: 'var(--c-text-muted)', fontSize: '12px', marginBottom: 16 }}>Опубликовано {formatPublished(entry.publishedAt)}</div>
+                      <p style={{ color: 'var(--c-text-primary)', fontSize: '14px', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{entry.body}</p>
                     </div>
                   ))}
                 </div>
@@ -261,8 +302,8 @@ export const GameDetailsView = ({
             </div>
 
             <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>ДОСТИЖЕНИЯ</h2>
-              <div style={{ background: 'rgba(0,0,0,0.2)', padding: 24, borderRadius: 4, color: '#8f98a0', fontSize: '13px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: 16 }}>ДОСТИЖЕНИЯ</h2>
+              <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
                 Достижения пока недоступны.
               </div>
             </div>
@@ -271,20 +312,22 @@ export const GameDetailsView = ({
 
         {activeTab === 'groups' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>АКТИВНЫЕ ЛОББИ</h2>
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>АКТИВНЫЕ ЛОББИ</h2>
 
-            {lobbies.length === 0 ? (
-              <div style={{ background: 'rgba(0,0,0,0.2)', padding: 24, borderRadius: 4, color: '#8f98a0', fontSize: '13px' }}>
+            {lobbies === null ? (
+              <SkeletonRows count={2} height={56} />
+            ) : lobbies.length === 0 ? (
+              <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
                 Сейчас нет открытых лобби.
               </div>
             ) : (
               lobbies.map((lobby) => (
-                <div key={lobby.room} style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 4, border: '1px solid #3d4450', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={lobby.room} className="hub-card" style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style={{ color: '#fff', fontWeight: 600, fontSize: '15px' }}>{lobby.room}</div>
-                    <div style={{ color: '#8f98a0', fontSize: '12px', marginTop: 4 }}>Хост: {lobby.hostName} • {lobby.memberCount} {lobby.memberCount === 1 ? 'игрок' : 'игроков'}</div>
+                    <div style={{ color: 'var(--c-text-primary)', fontWeight: 600, fontSize: '15px' }}>{lobby.room}</div>
+                    <div style={{ color: 'var(--c-text-muted)', fontSize: '12px', marginTop: 4 }}>Хост: {lobby.hostName} • {lobby.memberCount} {lobby.memberCount === 1 ? 'игрок' : 'игроков'}</div>
                   </div>
-                  <button onClick={() => handleJoinLobby(lobby.room)} style={{ background: '#5c7e10', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, fontWeight: 600, cursor: 'pointer' }}>Присоединиться</button>
+                  <button onClick={() => handleJoinLobby(lobby.room)} style={{ background: 'var(--c-positive)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, fontWeight: 600, cursor: 'pointer' }}>Присоединиться</button>
                 </div>
               ))
             )}
@@ -294,12 +337,14 @@ export const GameDetailsView = ({
                 placeholder="Название лобби"
                 value={newRoomName}
                 onChange={(e) => setNewRoomName(e.target.value)}
-                style={{ background: '#171a21', border: '1px solid #3d4450', borderRadius: 4, padding: '10px 16px', color: '#fff', fontSize: '14px', outline: 'none' }}
+                className="hub-input"
+                style={{ padding: '10px 16px' }}
               />
               <button
                 onClick={() => void handleCreateLobby()}
                 disabled={!newRoomName.trim()}
-                style={{ background: '#3d4450', color: '#fff', border: 'none', padding: '12px', borderRadius: 4, fontWeight: 600, cursor: newRoomName.trim() ? 'pointer' : 'not-allowed', opacity: newRoomName.trim() ? 1 : 0.5 }}
+                className="hub-btn"
+                style={{ padding: '12px 16px' }}
               >
                 + Создать лобби
               </button>
@@ -314,23 +359,23 @@ export const GameDetailsView = ({
             {viewDiscussion && (
               <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <button onClick={() => setViewDiscussion(null)} style={{ background: '#3d4450', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>← Назад</button>
-                  <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', margin: 0 }}>{threadDetail?.thread.title ?? 'Загрузка…'}</h2>
+                  <button onClick={() => setViewDiscussion(null)} className="hub-btn">← Назад</button>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--c-text-primary)', margin: 0 }}>{threadDetail?.thread.title ?? 'Загрузка…'}</h2>
                 </div>
 
                 {threadDetail && (
                   <>
-                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: 24, borderRadius: 4, border: '1px solid #3d4450' }}>
-                      <div style={{ display: 'flex', gap: 16, borderBottom: '1px solid #3d4450', paddingBottom: 16, marginBottom: 16 }}>
-                        <div style={{ width: 48, height: 48, background: '#66c0f4', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '20px', color: '#fff' }}>
+                    <div className="hub-card" style={{ padding: 24 }}>
+                      <div style={{ display: 'flex', gap: 16, borderBottom: '1px solid var(--c-panel-border)', paddingBottom: 16, marginBottom: 16 }}>
+                        <div style={{ width: 48, height: 48, background: 'var(--c-accent)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '20px', color: '#fff' }}>
                           {threadDetail.thread.authorName[0]?.toUpperCase() ?? '?'}
                         </div>
                         <div>
-                          <div style={{ color: '#fff', fontWeight: 600, fontSize: '16px' }}>{threadDetail.thread.authorName}</div>
-                          <div style={{ color: '#8f98a0', fontSize: '12px' }}>Опубликовано {formatPostTime(threadDetail.posts[0]?.createdAt ?? threadDetail.thread.createdAt)}</div>
+                          <div style={{ color: 'var(--c-text-primary)', fontWeight: 600, fontSize: '16px' }}>{threadDetail.thread.authorName}</div>
+                          <div style={{ color: 'var(--c-text-muted)', fontSize: '12px' }}>Опубликовано {formatPostTime(threadDetail.posts[0]?.createdAt ?? threadDetail.thread.createdAt)}</div>
                         </div>
                       </div>
-                      <div style={{ color: '#dcdedf', fontSize: '15px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                      <div style={{ color: 'var(--c-text-primary)', fontSize: '15px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                         {threadDetail.posts[0]?.body}
                       </div>
                     </div>
@@ -338,11 +383,11 @@ export const GameDetailsView = ({
                     {threadDetail.posts.length > 1 && (
                       <div style={{ paddingLeft: 32, display: 'flex', flexDirection: 'column', gap: 16 }}>
                         {threadDetail.posts.slice(1).map((p) => (
-                          <div key={p.id} style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 4, borderLeft: '2px solid #5c7e10' }}>
-                            <div style={{ color: '#fff', fontWeight: 600, fontSize: '14px', marginBottom: 8 }}>
-                              {p.authorName} <span style={{ color: '#8f98a0', fontSize: '12px', fontWeight: 400 }}>• {formatPostTime(p.createdAt)}</span>
+                          <div key={p.id} className="hub-card" style={{ padding: 16, borderLeft: '2px solid var(--c-positive)' }}>
+                            <div style={{ color: 'var(--c-text-primary)', fontWeight: 600, fontSize: '14px', marginBottom: 8 }}>
+                              {p.authorName} <span style={{ color: 'var(--c-text-muted)', fontSize: '12px', fontWeight: 400 }}>• {formatPostTime(p.createdAt)}</span>
                             </div>
-                            <div style={{ color: '#dcdedf', fontSize: '14px', whiteSpace: 'pre-wrap' }}>{p.body}</div>
+                            <div style={{ color: 'var(--c-text-primary)', fontSize: '14px', whiteSpace: 'pre-wrap' }}>{p.body}</div>
                           </div>
                         ))}
                       </div>
@@ -353,12 +398,14 @@ export const GameDetailsView = ({
                         placeholder="Написать комментарий..."
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
-                        style={{ width: '100%', height: 100, background: '#171a21', border: '1px solid #3d4450', borderRadius: 4, padding: 12, color: '#fff', resize: 'vertical' }}
+                        className="hub-input"
+                        style={{ width: '100%', height: 100, padding: 12, resize: 'vertical' }}
                       />
                       <button
                         onClick={() => void handleReply()}
                         disabled={!replyText.trim()}
-                        style={{ alignSelf: 'flex-end', background: '#1a9fff', border: 'none', color: '#fff', padding: '10px 24px', borderRadius: 4, fontWeight: 600, cursor: replyText.trim() ? 'pointer' : 'not-allowed', opacity: replyText.trim() ? 1 : 0.5 }}
+                        className="hub-btn hub-btn-primary"
+                        style={{ alignSelf: 'flex-end', padding: '10px 24px' }}
                       >
                         Отправить
                       </button>
@@ -372,8 +419,8 @@ export const GameDetailsView = ({
             {isCreatingDiscussion && (
               <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <button onClick={() => setIsCreatingDiscussion(false)} style={{ background: '#3d4450', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>← Отмена</button>
-                  <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', margin: 0 }}>Создать новую тему</h2>
+                  <button onClick={() => setIsCreatingDiscussion(false)} className="hub-btn">← Отмена</button>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--c-text-primary)', margin: 0 }}>Создать новую тему</h2>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -381,20 +428,22 @@ export const GameDetailsView = ({
                     placeholder="Заголовок темы (например: Как пройти уровень 4?)"
                     value={newThreadTitle}
                     onChange={(e) => setNewThreadTitle(e.target.value)}
-                    style={{ width: '100%', background: '#171a21', border: '1px solid #3d4450', borderRadius: 4, padding: '12px 16px', color: '#fff', fontSize: '16px', outline: 'none' }}
+                    className="hub-input"
+                    style={{ width: '100%', padding: '12px 16px', fontSize: '16px' }}
                   />
                   <textarea
                     placeholder="Опишите вашу проблему, идею или вопрос в деталях..."
                     value={newThreadBody}
                     onChange={(e) => setNewThreadBody(e.target.value)}
-                    style={{ width: '100%', height: 200, background: '#171a21', border: '1px solid #3d4450', borderRadius: 4, padding: '12px 16px', color: '#fff', fontSize: '15px', resize: 'vertical', outline: 'none' }}
+                    className="hub-input"
+                    style={{ width: '100%', height: 200, padding: '12px 16px', fontSize: '15px', resize: 'vertical' }}
                   />
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16 }}>
                     <button
                       onClick={() => void handleCreateThread()}
                       disabled={!newThreadTitle.trim() || !newThreadBody.trim()}
-                      style={{ background: '#5c7e10', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: 4, fontWeight: 600, cursor: newThreadTitle.trim() && newThreadBody.trim() ? 'pointer' : 'not-allowed', fontSize: '16px', opacity: newThreadTitle.trim() && newThreadBody.trim() ? 1 : 0.5 }}
+                      style={{ background: 'var(--c-positive)', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: 4, fontWeight: 600, cursor: newThreadTitle.trim() && newThreadBody.trim() ? 'pointer' : 'not-allowed', fontSize: '16px', opacity: newThreadTitle.trim() && newThreadBody.trim() ? 1 : 0.5 }}
                     >
                       Опубликовать
                     </button>
@@ -407,12 +456,14 @@ export const GameDetailsView = ({
             {!viewDiscussion && !isCreatingDiscussion && (
               <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>ОБСУЖДЕНИЯ</h2>
-                  <button onClick={() => setIsCreatingDiscussion(true)} style={{ background: '#1a9fff', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, fontWeight: 600, cursor: 'pointer' }}>Новая тема</button>
+                  <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ОБСУЖДЕНИЯ</h2>
+                  <button onClick={() => setIsCreatingDiscussion(true)} className="hub-btn hub-btn-primary">Новая тема</button>
                 </div>
 
-                {threads.length === 0 ? (
-                  <div style={{ background: 'rgba(0,0,0,0.2)', padding: 24, borderRadius: 4, color: '#8f98a0', fontSize: '13px' }}>
+                {threads === null ? (
+                  <SkeletonRows count={3} height={64} />
+                ) : threads.length === 0 ? (
+                  <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
                     Пока нет обсуждений. Начните первое!
                   </div>
                 ) : (
@@ -421,15 +472,16 @@ export const GameDetailsView = ({
                       <div
                         key={thread.id}
                         onClick={() => setViewDiscussion(thread.id)}
-                        style={{ background: 'rgba(0,0,0,0.3)', padding: '16px 24px', borderRadius: 4, borderLeft: `4px solid ${i === 0 ? '#1a9fff' : '#3d4450'}`, cursor: 'pointer', transition: 'background 0.2s' }}
-                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                        onMouseOut={(e) => e.currentTarget.style.background = 'rgba(0,0,0,0.3)'}
+                        className="hub-card hub-row-hover"
+                        style={{ padding: '16px 24px', borderLeft: `4px solid ${i === 0 ? 'var(--c-accent)' : 'var(--c-panel-border)'}`, cursor: 'pointer' }}
                       >
-                        <div style={{ color: '#fff', fontWeight: 600, fontSize: '16px', marginBottom: 8 }}>{thread.title}</div>
-                        <div style={{ display: 'flex', gap: 16, fontSize: '12px', color: '#8f98a0' }}>
+                        <div style={{ color: 'var(--c-text-primary)', fontWeight: 600, fontSize: '16px', marginBottom: 8 }}>{thread.title}</div>
+                        <div style={{ display: 'flex', gap: 16, fontSize: '12px', color: 'var(--c-text-muted)' }}>
                           <span>Автор: {thread.authorName}</span>
                           <span>💬 {thread.replyCount} {thread.replyCount === 1 ? 'ответ' : 'ответов'}</span>
-                          <span>Последний ответ: {formatLastPlayed(thread.lastReplyAt).toLowerCase()}</span>
+                          {thread.replyCount > 0 && (
+                            <span>Последний ответ: {formatLastReply(thread.lastReplyAt)}</span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -442,7 +494,7 @@ export const GameDetailsView = ({
         )}
 
       </div>
-      
+
     </div>
   );
 };

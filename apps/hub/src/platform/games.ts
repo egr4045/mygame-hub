@@ -88,4 +88,16 @@ export const GAMES: GameInfo[] = [
     path: 'example-game',
     externalPort: 5190,
   },
+  {
+    id: 'cards',
+    name: 'Spellforge',
+    tagline: 'Коллекционная карточная игра · дуэли',
+    status: 'playable',
+    accent: '#d97b29',
+    emoji: '🃏',
+    // Lives in its own repo (D:\dev\cards). path: prod route behind the gateway
+    // (deploy/gamehub/Caddyfile strips /cards/); externalPort: its Vite dev server.
+    path: 'cards',
+    externalPort: 5210,
+  },
 ];

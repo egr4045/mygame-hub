@@ -11,8 +11,12 @@ export const color = {
   // Translucent panel surfaces over the map (Paradox-style).
   panel: 'rgba(14, 20, 30, 0.82)',
   panelSolid: '#0e141e',
+  /** The darkest chrome layer: nav bars, page headers, input wells (below panelSolid). */
+  panelDeep: '#0a0f16',
   panelBorder: 'rgba(120, 150, 190, 0.25)',
   panelHover: 'rgba(26, 36, 52, 0.9)',
+  /** Modal scrims. */
+  overlay: 'rgba(0, 0, 0, 0.65)',
 
   // Text.
   textPrimary: '#e8eef6',

@@ -9,6 +9,22 @@ export const formatPlaytime = (secondsPlayed: number): string => {
   return `${minutes} мин.`;
 };
 
+/** Relative time for a discussion thread's last reply: «только что», «N мин назад», «N ч назад»,
+ *  «N дн назад», then a plain date. Null/undefined (no replies yet) → empty string — callers should
+ *  hide the «Последний ответ» line entirely for threads with zero replies. */
+export const formatLastReply = (ms: number | null | undefined): string => {
+  if (ms === null || ms === undefined) return '';
+  const minuteMs = 60_000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+  const diffMs = Date.now() - ms;
+  if (diffMs < minuteMs) return 'только что';
+  if (diffMs < hourMs) return `${Math.floor(diffMs / minuteMs)} мин назад`;
+  if (diffMs < dayMs) return `${Math.floor(diffMs / hourMs)} ч назад`;
+  if (diffMs < 7 * dayMs) return `${Math.floor(diffMs / dayMs)} дн назад`;
+  return new Date(ms).toLocaleDateString('ru-RU');
+};
+
 /** "Сегодня" / "Вчера" / "3 дня назад" / a short date further back. Null → "Ещё не играли". */
 export const formatLastPlayed = (lastPlayedAt: number | null): string => {
   if (lastPlayedAt === null) return 'Ещё не играли';

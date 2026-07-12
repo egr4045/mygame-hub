@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useState } from 'react';
 import { GAMES, type GameInfo } from '../platform/games.js';
 import { usePlatformStore } from '../platform/platformStore.js';
 import { useMenuStore } from '@mygame/sdk';
@@ -14,7 +14,6 @@ export const LibrarySidebar = ({
   onPlay: (game: GameInfo) => void;
   onOpenDiscussions: (game: GameInfo) => void;
 }): JSX.Element => {
-  const openMenu = useMenuStore((s) => s.openMenu);
   const favoriteGameIds = usePlatformStore((s) => s.favoriteGameIds);
   const toggleFavorite = usePlatformStore((s) => s.toggleFavorite);
   const [search, setSearch] = useState('');
@@ -27,21 +26,19 @@ export const LibrarySidebar = ({
   const soonCategory = filteredGames.filter(g => g.status === 'soon');
 
   return (
-    <div className="library-sidebar" style={{ width: 280, background: '#171a21', display: 'flex', flexDirection: 'column', borderRight: '1px solid #000' }}>
-      
+    <div className="library-sidebar" style={{ width: 280, background: 'var(--c-panel-deep)', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--c-panel-border)' }}>
+
       {/* Search Bar */}
-      <div style={{ padding: '12px 16px', background: '#1a1f29' }}>
-        <input 
-          placeholder="Поиск" 
+      <div style={{ padding: '12px 16px', background: 'var(--c-panel-deep)' }}>
+        <input
+          placeholder="Поиск"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="hub-input"
           style={{
             width: '100%',
-            background: '#23262e',
-            border: 'none',
+            boxSizing: 'border-box',
             padding: '6px 12px',
-            color: '#dcdedf',
-            borderRadius: 2,
             fontSize: '13px'
           }}
         />
@@ -50,7 +47,7 @@ export const LibrarySidebar = ({
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
         {favoriteCategory.length > 0 && (
           <>
-            <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+            <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase', padding: '4px 16px', fontWeight: 700, letterSpacing: 1 }}>
               ИЗБРАННОЕ ({favoriteCategory.length})
             </div>
             {favoriteCategory.map(g => (
@@ -68,7 +65,7 @@ export const LibrarySidebar = ({
           </>
         )}
 
-        <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+        <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
           ИГРЫ ({inCategory.length})
         </div>
         {inCategory.map(g => (
@@ -86,7 +83,7 @@ export const LibrarySidebar = ({
 
         {maintenanceCategory.length > 0 && (
           <>
-            <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+            <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
               НА ОБСЛУЖИВАНИИ
             </div>
             {maintenanceCategory.map(g => (
@@ -106,7 +103,7 @@ export const LibrarySidebar = ({
 
         {soonCategory.length > 0 && (
           <>
-            <div style={{ fontSize: '11px', color: '#6c7784', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
+            <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', textTransform: 'uppercase', padding: '16px 16px 4px 16px', fontWeight: 700, letterSpacing: 1 }}>
               СКОРО ВЫЙДУТ
             </div>
             {soonCategory.map(g => (
@@ -151,17 +148,16 @@ const GameListItem = ({
   return (
     <div
       onClick={onClick}
+      className="hub-row-hover"
       style={{
         padding: '6px 16px',
         display: 'flex',
         alignItems: 'center',
         gap: 12,
         cursor: 'pointer',
-        background: selected ? '#3d4450' : 'transparent',
-        color: selected ? '#fff' : (playable ? '#dcdedf' : '#6c7784'),
+        background: selected ? 'var(--c-panel-hover)' : undefined,
+        color: selected || playable ? 'var(--c-text-primary)' : 'var(--c-text-muted)',
       }}
-      onMouseOver={(e) => { if(!selected) e.currentTarget.style.background = '#23262e'; }}
-      onMouseOut={(e) => { if(!selected) e.currentTarget.style.background = 'transparent'; }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

@@ -3,6 +3,7 @@ import { usePlatformStore } from '../platform/platformStore.js';
 import {
   useMenuStore,
   useSocialStore,
+  useToastStore,
   createTelegramLinkCode,
   getTelegramStatus,
   getAchievements,
@@ -29,10 +30,13 @@ const readAsDataUrl = (file: File): Promise<string> =>
 /** Matches the server's per-route body cap (4MB) with headroom for base64 + JSON overhead. */
 const MAX_IMAGE_BYTES = 2_500_000;
 
+const errorToast = (content: string): void =>
+  useToastStore.getState().addToast({ type: 'system', title: 'Профиль', content, icon: '⚠️' });
+
 export const ProfileView = (): JSX.Element => {
   const me = usePlatformStore((s) => s.account);
   const openMenu = useMenuStore((s) => s.openMenu);
-  
+
   const [avatar, setAvatar] = useState<string | null>(null);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const [titleAchievement, setTitleAchievement] = useState<string | null>(null);
@@ -40,11 +44,17 @@ export const ProfileView = (): JSX.Element => {
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
 
   // Real per-game playtime, joined against the game registry for name/icon.
-  const [gameStats, setGameStats] = useState<GameStat[]>([]);
+  // null = still loading (render skeletons), [] = resolved empty (render the empty copy).
+  const [gameStats, setGameStats] = useState<GameStat[] | null>(null);
   useEffect(() => {
-    void getGameStats().then((res) => setGameStats((res?.stats ?? []).filter((s) => s.lastPlayedAt !== null)));
+    getGameStats()
+      .then((res) => setGameStats((res?.stats ?? []).filter((s) => s.lastPlayedAt !== null)))
+      .catch(() => {
+        setGameStats([]);
+        errorToast('Не удалось загрузить статистику игр.');
+      });
   }, []);
-  const recentActivity = [...gameStats]
+  const recentActivity = [...(gameStats ?? [])]
     .sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
     .map((s) => ({ stat: s, game: GAMES.find((g) => g.id === s.gameId) }))
     .filter((r): r is { stat: GameStat; game: NonNullable<typeof r.game> } => !!r.game);
@@ -114,7 +124,7 @@ export const ProfileView = (): JSX.Element => {
   const startTelegramLink = async () => {
     const r = await createTelegramLinkCode();
     if (!r) {
-      alert('Не удалось создать код привязки. Попробуйте позже.');
+      errorToast('Не удалось создать код привязки. Попробуйте позже.');
       return;
     }
     if (r.url) window.open(r.url, '_blank', 'noopener');
@@ -128,13 +138,13 @@ export const ProfileView = (): JSX.Element => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_IMAGE_BYTES) {
-      alert(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
+      errorToast(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
       return;
     }
     const dataUrl = await readAsDataUrl(file);
     const saved = await apiSetAvatar(dataUrl);
     if (saved === null) {
-      alert('Не удалось сохранить аватар. Попробуйте позже.');
+      errorToast('Не удалось сохранить аватар. Попробуйте позже.');
       return;
     }
     setAvatar(saved);
@@ -144,13 +154,13 @@ export const ProfileView = (): JSX.Element => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_IMAGE_BYTES) {
-      alert(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
+      errorToast(`Файл слишком большой (макс. ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} МБ).`);
       return;
     }
     const dataUrl = await readAsDataUrl(file);
     const saved = await apiSetWallpaper(dataUrl);
     if (saved === null) {
-      alert('Не удалось сохранить фон. Попробуйте позже.');
+      errorToast('Не удалось сохранить фон. Попробуйте позже.');
       return;
     }
     setWallpaper(saved);
@@ -162,7 +172,7 @@ export const ProfileView = (): JSX.Element => {
       achievementId ? { gameId: CIVA_GAME_ID, achievementId } : null,
     );
     if (!ok) {
-      alert('Не удалось сохранить титул. Попробуйте позже.');
+      errorToast('Не удалось сохранить титул. Попробуйте позже.');
       return;
     }
     setTitleAchievement(achievementId);
@@ -171,53 +181,53 @@ export const ProfileView = (): JSX.Element => {
   const selectedAchiev = ACHIEVEMENTS.find(a => a.id === titleAchievement);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: '#1b2838' }}>
-      
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--c-panel-solid)' }}>
+
       {/* Hidden file inputs */}
       <input type="file" ref={avatarInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleAvatarChange} />
       <input type="file" ref={wallpaperInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleWallpaperChange} />
 
       {/* Hero Section */}
-      <div style={{ 
-        position: 'relative', 
-        minHeight: 300, 
-        background: wallpaper ? `url(${wallpaper}) center/cover no-repeat` : 'linear-gradient(to bottom, #2a475e, #1b2838)',
+      <div style={{
+        position: 'relative',
+        minHeight: 300,
+        background: wallpaper ? `url(${wallpaper}) center/cover no-repeat` : 'linear-gradient(to bottom, var(--c-panel-hover), var(--c-panel-solid))',
         padding: '40px 10%',
         display: 'flex',
         alignItems: 'flex-end',
         gap: 32
       }}>
         {/* Dark overlay if wallpaper exists */}
-        {wallpaper && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 0%, #1b2838 100%)' }} />}
+        {wallpaper && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 0%, var(--c-panel-solid) 100%)' }} />}
 
         {/* Avatar Container */}
         <div style={{ position: 'relative', zIndex: 10, cursor: 'pointer' }} onClick={() => avatarInputRef.current?.click()}>
-          <div style={{ 
-            width: 160, 
-            height: 160, 
-            background: avatar ? `url(${avatar}) center/cover` : '#3d4450', 
+          <div style={{
+            width: 160,
+            height: 160,
+            background: avatar ? `url(${avatar}) center/cover` : 'var(--c-panel-hover)',
             borderRadius: 8,
-            border: selectedAchiev ? `4px solid ${selectedAchiev.color}` : '2px solid #5c7e10',
+            border: selectedAchiev ? `4px solid ${selectedAchiev.color}` : '2px solid var(--c-positive)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: avatar ? 0 : 48,
-            color: '#fff'
+            color: 'var(--c-text-primary)'
           }}>
             {!avatar && (me?.displayName?.[0]?.toUpperCase() || '?')}
           </div>
-          
+
           {/* Title Achievement Badge */}
           {selectedAchiev && (
-            <div style={{ 
-              position: 'absolute', 
-              bottom: -16, 
-              left: '50%', 
-              transform: 'translateX(-50%)', 
-              background: '#171a21',
+            <div style={{
+              position: 'absolute',
+              bottom: -16,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'var(--c-panel-deep)',
               border: `2px solid ${selectedAchiev.color}`,
-              color: '#fff',
+              color: 'var(--c-text-primary)',
               padding: '4px 12px',
               borderRadius: 16,
               fontSize: '12px',
@@ -231,8 +241,8 @@ export const ProfileView = (): JSX.Element => {
               <span style={{ fontSize: '16px' }}>{selectedAchiev.icon}</span> {selectedAchiev.name}
             </div>
           )}
-          
-          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', opacity: 0, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'opacity 0.2s', fontWeight: 600 }}
+
+          <div style={{ position: 'absolute', inset: 0, background: 'var(--c-overlay)', opacity: 0, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'opacity 0.2s', fontWeight: 600 }}
                onMouseOver={(e) => e.currentTarget.style.opacity = '1'}
                onMouseOut={(e) => e.currentTarget.style.opacity = '0'}>
             Изменить
@@ -241,37 +251,39 @@ export const ProfileView = (): JSX.Element => {
 
         {/* User Info */}
         <div style={{ position: 'relative', zIndex: 10, paddingBottom: selectedAchiev ? 16 : 0 }}>
-          <h1 style={{ fontSize: 36, fontWeight: 800, color: '#fff', margin: 0, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
+          <h1 style={{ fontSize: 36, fontWeight: 800, color: 'var(--c-text-primary)', margin: 0, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
             {me?.displayName || 'Гость'}
           </h1>
-          <div style={{ color: '#5c7e10', fontSize: '14px', fontWeight: 600, marginTop: 8, textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
+          <div style={{ color: 'var(--c-positive)', fontSize: '14px', fontWeight: 600, marginTop: 8, textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
             В сети
           </div>
-          
+
           <div style={{ display: 'flex', gap: 16, marginTop: 24 }}>
-            <button 
+            <button
               onClick={() => wallpaperInputRef.current?.click()}
-              style={{ background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid #3d4450', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+              className="hub-btn"
+              style={{ backdropFilter: 'blur(4px)' }}
             >
               Загрузить фон
             </button>
-            <button 
+            <button
               onClick={() => setIsChoosingAchievement(true)}
-              style={{ background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid #3d4450', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+              className="hub-btn"
+              style={{ backdropFilter: 'blur(4px)' }}
             >
               Выбрать титул
             </button>
             {tgLinked ? (
               <div
                 title={tgId ? `Telegram chat ${tgId}` : undefined}
-                style={{ background: 'rgba(92,126,16,0.25)', color: '#a3d928', border: '1px solid #5c7e10', padding: '8px 16px', borderRadius: 4, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+                style={{ background: 'rgba(70, 196, 106, 0.15)', color: 'var(--c-positive)', border: '1px solid var(--c-positive)', padding: '8px 16px', borderRadius: 4, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
               >
                 <span>✈</span> Telegram привязан ✓
               </div>
             ) : (
               <button
                 onClick={() => void startTelegramLink()}
-                style={{ background: '#2AABEE', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+                style={{ background: 'var(--c-accent)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
               >
                 <span>✈</span> Привязать TG
               </button>
@@ -279,7 +291,7 @@ export const ProfileView = (): JSX.Element => {
             <button
               disabled
               title="Скоро"
-              style={{ background: '#4C75A3', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'not-allowed', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.5 }}
+              style={{ background: 'var(--c-accent-muted)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'not-allowed', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.5 }}
             >
               <span>K</span> Привязать VK (скоро)
             </button>
@@ -289,40 +301,48 @@ export const ProfileView = (): JSX.Element => {
 
       {/* Content */}
       <div style={{ display: 'flex', gap: 32, padding: '40px 10%', flex: 1 }}>
-        
+
         {/* Left Column (Activity) */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 24 }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>НЕДАВНЯЯ АКТИВНОСТЬ</h2>
-            
+          <div className="hub-card" style={{ padding: 24 }}>
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: 16 }}>НЕДАВНЯЯ АКТИВНОСТЬ</h2>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {recentActivity.length === 0 && (
-                <div style={{ color: '#8f98a0', fontSize: '13px' }}>Ещё не играли ни в одну игру</div>
-              )}
-              {recentActivity.map(({ stat, game }) => (
-                <div key={game.id} style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                  <div style={{ width: 64, height: 64, background: '#2a475e', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>{game.emoji}</div>
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 600 }}>{game.name}</div>
-                    <div style={{ color: '#8f98a0', fontSize: '12px' }}>
-                      Сыграно {formatPlaytime(stat.secondsPlayed)} • Последний запуск: {formatLastPlayed(stat.lastPlayedAt).toLowerCase()}
+              {gameStats === null ? (
+                <>
+                  <div className="hub-skeleton" style={{ height: 64 }} />
+                  <div className="hub-skeleton" style={{ height: 64 }} />
+                  <div className="hub-skeleton" style={{ height: 64 }} />
+                </>
+              ) : recentActivity.length === 0 ? (
+                <div style={{ color: 'var(--c-text-muted)', fontSize: '13px' }}>Ещё не играли ни в одну игру</div>
+              ) : (
+                recentActivity.map(({ stat, game }) => (
+                  <div key={game.id} style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <div style={{ width: 64, height: 64, background: 'var(--c-panel-hover)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>{game.emoji}</div>
+                    <div>
+                      <div style={{ color: 'var(--c-text-primary)', fontWeight: 600 }}>{game.name}</div>
+                      <div style={{ color: 'var(--c-text-muted)', fontSize: '12px' }}>
+                        Сыграно {formatPlaytime(stat.secondsPlayed)} • Последний запуск: {formatLastPlayed(stat.lastPlayedAt).toLowerCase()}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
           {blocked.length > 0 && (
-            <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 24 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: 16 }}>ЗАБЛОКИРОВАННЫЕ</h2>
+            <div className="hub-card" style={{ padding: 24 }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: 16 }}>ЗАБЛОКИРОВАННЫЕ</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {blocked.map((b) => (
                   <div key={b.accountId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <span style={{ color: '#dcdedf', fontSize: '13px' }}>{b.displayName}</span>
+                    <span style={{ color: 'var(--c-text-primary)', fontSize: '13px' }}>{b.displayName}</span>
                     <button
                       onClick={() => void unblockAccount(b.accountId)}
-                      style={{ background: '#3d4450', color: '#dcdedf', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: '12px', cursor: 'pointer' }}
+                      className="hub-btn"
+                      style={{ padding: '4px 12px', fontSize: '12px' }}
                     >
                       Разблокировать
                     </button>
@@ -335,10 +355,10 @@ export const ProfileView = (): JSX.Element => {
 
         {/* Right Column (Achievements Showcase) */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 24 }}>
+          <div className="hub-card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>ВИТРИНА ДОСТИЖЕНИЙ</h2>
-              <span style={{ color: '#8f98a0', fontSize: '14px' }}>{unlockedIds.size} из {ACHIEVEMENTS.length}</span>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА ДОСТИЖЕНИЙ</h2>
+              <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{unlockedIds.size} из {ACHIEVEMENTS.length}</span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 16 }}>
@@ -347,9 +367,9 @@ export const ProfileView = (): JSX.Element => {
                 return (
                 <div key={ach.id} style={{
                   aspectRatio: '1/1',
-                  background: '#171a21',
+                  background: 'var(--c-panel-deep)',
                   borderRadius: 8,
-                  border: `2px solid ${unlocked ? ach.color : '#3d4450'}${unlocked ? '40' : ''}`,
+                  border: `2px solid ${unlocked ? `${ach.color}40` : 'var(--c-panel-border)'}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -383,17 +403,17 @@ export const ProfileView = (): JSX.Element => {
 
       {/* Title Achievement Modal */}
       {isChoosingAchievement && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="civa-fade-in" style={{ width: 500, background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 24 }}>
-            <h2 style={{ color: '#fff', margin: '0 0 24px 0', fontSize: 20 }}>Выберите титульную ачивку</h2>
-            <p style={{ color: '#8f98a0', marginBottom: 24, fontSize: 14 }}>
+        <div className="hub-modal-scrim">
+          <div className="civa-fade-in" style={{ width: 500, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 24 }}>
+            <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 24px 0', fontSize: 20 }}>Выберите титульную ачивку</h2>
+            <p style={{ color: 'var(--c-text-muted)', marginBottom: 24, fontSize: 14 }}>
               Выбранная ачивка будет отображаться в виде специальной рамки и значка поверх вашей аватарки во всех играх.
             </p>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 400, overflowY: 'auto' }}>
               <div
                 onClick={() => { void chooseTitle(null); setIsChoosingAchievement(false); }}
-                style={{ background: !titleAchievement ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 4, cursor: 'pointer', color: '#fff' }}
+                style={{ background: !titleAchievement ? 'var(--c-panel-hover)' : 'var(--c-panel-deep)', padding: 16, borderRadius: 4, cursor: 'pointer', color: 'var(--c-text-primary)' }}
               >
                 Без титула
               </div>
@@ -404,7 +424,7 @@ export const ProfileView = (): JSX.Element => {
                   onClick={() => { void chooseTitle(ach.id); setIsChoosingAchievement(false); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 16,
-                    background: titleAchievement === ach.id ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.3)',
+                    background: titleAchievement === ach.id ? 'var(--c-panel-hover)' : 'var(--c-panel-deep)',
                     padding: 16, borderRadius: 4, cursor: 'pointer',
                     border: titleAchievement === ach.id ? `1px solid ${ach.color}` : '1px solid transparent'
                   }}
@@ -412,15 +432,16 @@ export const ProfileView = (): JSX.Element => {
                   <div style={{ fontSize: 24 }}>{ach.icon}</div>
                   <div>
                     <div style={{ color: ach.color, fontWeight: 700 }}>{ach.name}</div>
-                    <div style={{ color: '#8f98a0', fontSize: 12 }}>{ach.desc}</div>
+                    <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{ach.desc}</div>
                   </div>
                 </div>
               ))}
             </div>
 
-            <button 
+            <button
               onClick={() => setIsChoosingAchievement(false)}
-              style={{ marginTop: 24, width: '100%', background: '#3d4450', color: '#fff', border: 'none', padding: '12px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+              className="hub-btn"
+              style={{ marginTop: 24, width: '100%', padding: '12px' }}
             >
               Закрыть
             </button>
@@ -430,24 +451,24 @@ export const ProfileView = (): JSX.Element => {
 
       {/* Telegram link modal */}
       {tgModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="civa-fade-in" style={{ width: 460, background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 32, textAlign: 'center' }}>
-            <h2 style={{ color: '#fff', margin: '0 0 12px 0', fontSize: 22 }}>Привязка Telegram</h2>
-            <p style={{ color: '#8f98a0', marginBottom: 20, fontSize: 14, lineHeight: 1.5 }}>
+        <div className="hub-modal-scrim">
+          <div className="civa-fade-in" style={{ width: 460, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
+            <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 12px 0', fontSize: 22 }}>Привязка Telegram</h2>
+            <p style={{ color: 'var(--c-text-muted)', marginBottom: 20, fontSize: 14, lineHeight: 1.5 }}>
               Открой бота в Telegram и нажми <b>Start</b> — аккаунт привяжется автоматически.
               Если бот не открылся, отправь ему команду:
             </p>
-            <div style={{ background: '#171a21', border: '1px dashed #3d4450', padding: 16, borderRadius: 4, color: '#fff', letterSpacing: 1, fontSize: 18, marginBottom: 20, fontFamily: 'monospace' }}>
+            <div style={{ background: 'var(--c-panel-deep)', border: '1px dashed var(--c-panel-border)', padding: 16, borderRadius: 4, color: 'var(--c-text-primary)', letterSpacing: 1, fontSize: 18, marginBottom: 20, fontFamily: 'var(--font-mono)' }}>
               /start {tgModal.code}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {tgModal.url && (
-                <a href={tgModal.url} target="_blank" rel="noreferrer" style={{ background: '#2AABEE', color: '#fff', padding: '12px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 }}>
+                <a href={tgModal.url} target="_blank" rel="noreferrer" style={{ background: 'var(--c-accent)', color: '#fff', padding: '12px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 }}>
                   ✈ Открыть Telegram
                 </a>
               )}
-              <div style={{ color: '#8f98a0', fontSize: 13 }}>Ожидаем подтверждения от бота…</div>
-              <button onClick={() => setTgModal(null)} style={{ background: 'transparent', color: '#8f98a0', border: 'none', padding: '8px', cursor: 'pointer', fontWeight: 600 }}>
+              <div style={{ color: 'var(--c-text-muted)', fontSize: 13 }}>Ожидаем подтверждения от бота…</div>
+              <button onClick={() => setTgModal(null)} style={{ background: 'transparent', color: 'var(--c-text-muted)', border: 'none', padding: '8px', cursor: 'pointer', fontWeight: 600 }}>
                 Отмена
               </button>
             </div>

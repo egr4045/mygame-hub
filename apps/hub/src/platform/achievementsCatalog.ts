@@ -2,8 +2,8 @@
  * Display catalog for CIVA's achievements — name/description/icon/color are presentation details the
  * platform's achievements API doesn't (and can't, being cross-game) know about; only the fact that
  * `gameId + achievementId` is unlocked is real (`mygame.achievements.list()`). A game with its own
- * achievements would keep its own such catalog. Hoisted here so both ProfileView (the full showcase)
- * and ProfileWidget (the compact summary) render from one source of truth.
+ * achievements would keep its own such catalog. Hoisted here so ProfileView (the full showcase)
+ * renders from one source of truth.
  */
 export interface AchievementDef {
   id: string;
