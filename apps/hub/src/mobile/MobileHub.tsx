@@ -6,7 +6,7 @@
  * registries — this file only lays them out for a phone.
  */
 import { useState } from 'react';
-import { useSocialStore, useMenuStore, ChatWidget, CallView, ContextMenu, ToastContainer, SocialDndProvider } from '@mygame/sdk';
+import { useSocialStore, useMenuStore, useChatStore, ChatWidget, CallView, ContextMenu, ToastContainer, SocialDndProvider } from '@mygame/sdk';
 import { routeToInvite } from '../platform/inviteRouting.js';
 import { MobileGamesTab } from './MobileGamesTab.js';
 import { MobileFriendsTab } from './MobileFriendsTab.js';
@@ -31,6 +31,7 @@ export const MobileHub = (): JSX.Element => {
 
   const incomingRequests = friends.filter((f) => f.status === 'incoming');
   const notificationCount = incomingRequests.length + invites.length;
+  const totalUnread = useChatStore((s) => s.sessions.reduce((n, x) => n + (x.unreadCount ?? 0), 0));
 
   const openBell = (e: React.MouseEvent): void => {
     const items =
@@ -61,6 +62,10 @@ export const MobileHub = (): JSX.Element => {
         <div className="mhub-appbar">
           <span className="mhub-wordmark">GAMEHUB</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button className="mhub-iconbtn" aria-label="Мессенджер" onClick={() => useChatStore.getState().toggleChat()}>
+              💬
+              {totalUnread > 0 && <span className="mhub-badge">{totalUnread}</span>}
+            </button>
             <button className="mhub-iconbtn" aria-label="Уведомления" onClick={openBell}>
               🔔
               {notificationCount > 0 && <span className="mhub-badge">{notificationCount}</span>}
@@ -94,7 +99,7 @@ export const MobileHub = (): JSX.Element => {
 
         {/* Global overlays (chat, calls, menus, toasts) — the floating desktop FriendsWidget is
             intentionally omitted; the Друзья tab is its mobile replacement. */}
-        <ChatWidget />
+        <ChatWidget hideLauncher />
         <CallView />
         <ContextMenu />
         <ToastContainer />

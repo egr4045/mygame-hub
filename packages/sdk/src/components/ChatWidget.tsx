@@ -184,7 +184,7 @@ const DroppableNewChatArea = (): JSX.Element => {
   );
 };
 
-export const ChatWidget = (): JSX.Element => {
+export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } = {}): JSX.Element => {
   const isOpen = useChatStore((s) => s.isOpen);
   const sessions = useChatStore((s) => s.sessions);
   const activeChatId = useChatStore((s) => s.activeChatId);
@@ -342,6 +342,9 @@ export const ChatWidget = (): JSX.Element => {
   }, [activeMessages]);
 
   if (!isOpen) {
+    // When an external launcher owns the entry point (the unified "Друзья и чат" button / the mobile
+    // app-bar chat icon), render nothing while collapsed instead of a second bottom button.
+    if (hideLauncher) return <></>;
     const totalUnread = sessions.reduce((n, s) => n + (s.unreadCount ?? 0), 0);
     return (
       <button

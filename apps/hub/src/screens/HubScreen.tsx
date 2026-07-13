@@ -310,7 +310,7 @@ const DesktopHubScreen = (): JSX.Element => {
       )}
 
       <FriendsWidget onJoinActivity={handleJoinActivity} />
-      <ChatWidget />
+      <ChatWidget hideLauncher />
       <CallView />
       <ContextMenu />
       <ToastContainer />

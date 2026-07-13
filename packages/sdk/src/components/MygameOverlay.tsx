@@ -16,7 +16,8 @@ export const MygameOverlay = (): JSX.Element => (
   <SocialDndProvider>
     <ToastContainer />
     <ContextMenu />
-    <ChatWidget />
+    {/* FriendsWidget is the single launcher; ChatWidget opens from it (its own launcher is hidden). */}
+    <ChatWidget hideLauncher />
     <CallView />
     <FriendsWidget />
   </SocialDndProvider>
