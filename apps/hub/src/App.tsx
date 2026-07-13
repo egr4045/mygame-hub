@@ -10,6 +10,21 @@ import { HubScreen } from './screens/HubScreen.js';
 /** Reads `?invite=CODE` once on load (before any navigation strips it) — null if absent. */
 const readInviteCodeFromUrl = (): string | null => new URLSearchParams(window.location.search).get('invite');
 
+const PLATFORM_SETTINGS_CACHE_KEY = 'mygame:platformSettings';
+
+/** Apply admin-controlled platform settings (game-status overrides + custom notification sounds).
+ *  Used for both the instantly-applied cached copy and the fresh network copy. */
+const applyPlatformSettings = (s: Record<string, string>): void => {
+  try {
+    if (s.game_status_overrides) applyGameStatusOverrides(JSON.parse(s.game_status_overrides) as Record<string, string>);
+  } catch {
+    /* malformed override JSON — ignore */
+  }
+  setCustomSound('message', s.sound_message || null);
+  setCustomSound('call', s.sound_call || null);
+  setCustomSound('achievement', s.sound_achievement || null);
+};
+
 /**
  * Top-level router for the mygame hub:
  *   not logged in  -> AuthScreen
@@ -30,18 +45,33 @@ export const App = (): JSX.Element => {
     usePlatformStore.getState().restore();
   }, []);
 
-  // Public platform settings (admin-controlled): apply game-status overrides onto the registry and
-  // register any custom notification sounds, then re-render so the new statuses show.
+  // Drop the instant boot skeleton (index.html) once React has mounted and painted the real shell —
+  // this effect runs after the first commit, so there's no white flash between them.
   useEffect(() => {
+    const el = document.getElementById('boot-splash');
+    if (!el) return;
+    el.classList.add('bs-hide');
+    const t = window.setTimeout(() => el.remove(), 400);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Public platform settings (admin-controlled): game-status overrides + custom notification sounds.
+  // Apply a cached copy immediately (so game statuses/sounds are right on the first paint after a
+  // reload, with no network wait), then revalidate from the network and cache the fresh copy.
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(PLATFORM_SETTINGS_CACHE_KEY);
+      if (cached) applyPlatformSettings(JSON.parse(cached) as Record<string, string>);
+    } catch {
+      /* no/!parseable cache — the network fetch below fills it */
+    }
     void getPlatformSettings().then((s) => {
+      applyPlatformSettings(s);
       try {
-        if (s.game_status_overrides) applyGameStatusOverrides(JSON.parse(s.game_status_overrides) as Record<string, string>);
+        localStorage.setItem(PLATFORM_SETTINGS_CACHE_KEY, JSON.stringify(s));
       } catch {
-        /* malformed override JSON — ignore */
+        /* storage full/blocked — cache just won't warm */
       }
-      setCustomSound('message', s.sound_message || null);
-      setCustomSound('call', s.sound_call || null);
-      setCustomSound('achievement', s.sound_achievement || null);
       forceRender();
     });
   }, []);

@@ -4,9 +4,169 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>GAMEHUB</title>
+    <!-- Boot skeleton: paints instantly (before the JS bundle parses) so returning from a game — a
+         full page reload — never shows a white screen. Removed by App.tsx once React has mounted;
+         an 8s safety timeout hides it even if the app fails to boot. Colours are hard-coded from the
+         ui-kit tokens (injectTheme() runs later, in JS). -->
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: linear-gradient(180deg, #0a0f16 0%, #0e141e 60%);
+        color: #e8eef6;
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        display: flex;
+        flex-direction: column;
+        opacity: 1;
+        transition: opacity 0.35s ease;
+      }
+      #boot-splash.bs-hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .bs-top {
+        flex: 0 0 auto;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        background: #0a0f16;
+        border-bottom: 1px solid rgba(120, 150, 190, 0.15);
+      }
+      .bs-logo {
+        font-weight: 800;
+        letter-spacing: 2px;
+        font-size: 18px;
+        background: linear-gradient(90deg, #3da9fc, #e8eef6);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .bs-top-actions {
+        display: flex;
+        gap: 10px;
+      }
+      .bs-pill {
+        width: 56px;
+        height: 14px;
+        border-radius: 999px;
+      }
+      .bs-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        gap: 24px;
+        padding: 24px;
+      }
+      .bs-rail {
+        width: 230px;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .bs-rail .bs-row {
+        height: 44px;
+        border-radius: 8px;
+      }
+      .bs-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .bs-hero {
+        height: 230px;
+        border-radius: 12px;
+      }
+      .bs-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 16px;
+      }
+      .bs-card {
+        height: 120px;
+        border-radius: 10px;
+      }
+      /* Shimmer skeleton block. */
+      .bs-sk {
+        position: relative;
+        overflow: hidden;
+        background: rgba(120, 150, 190, 0.08);
+      }
+      .bs-sk::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(120, 150, 190, 0.14), transparent);
+        animation: bs-shimmer 1.3s ease-in-out infinite;
+      }
+      @keyframes bs-shimmer {
+        100% {
+          transform: translateX(100%);
+        }
+      }
+      @media (max-width: 768px) {
+        .bs-rail {
+          display: none;
+        }
+        .bs-hero {
+          height: 150px;
+        }
+        .bs-body {
+          padding: 16px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bs-sk::after {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-splash" aria-hidden="true">
+      <div class="bs-top">
+        <div class="bs-logo">GAMEHUB</div>
+        <div class="bs-top-actions">
+          <span class="bs-pill bs-sk"></span>
+          <span class="bs-pill bs-sk"></span>
+        </div>
+      </div>
+      <div class="bs-body">
+        <div class="bs-rail">
+          <div class="bs-row bs-sk"></div>
+          <div class="bs-row bs-sk"></div>
+          <div class="bs-row bs-sk"></div>
+          <div class="bs-row bs-sk"></div>
+          <div class="bs-row bs-sk"></div>
+          <div class="bs-row bs-sk"></div>
+        </div>
+        <div class="bs-main">
+          <div class="bs-hero bs-sk"></div>
+          <div class="bs-cards">
+            <div class="bs-card bs-sk"></div>
+            <div class="bs-card bs-sk"></div>
+            <div class="bs-card bs-sk"></div>
+            <div class="bs-card bs-sk"></div>
+            <div class="bs-card bs-sk"></div>
+            <div class="bs-card bs-sk"></div>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
+    <script>
+      // Safety net: if the app never mounts (a JS error), don't leave the skeleton up forever.
+      setTimeout(function () {
+        var el = document.getElementById('boot-splash');
+        if (el) el.classList.add('bs-hide');
+      }, 8000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

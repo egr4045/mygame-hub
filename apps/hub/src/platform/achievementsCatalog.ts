@@ -11,18 +11,43 @@ import type { AchievementDefinition } from '@mygame/protocol';
 
 export type { AchievementDefinition };
 
-let cache: AchievementDefinition[] | null = null;
+const LS_KEY = 'mygame:achievementCatalogs';
+
+const readLsCache = (): AchievementDefinition[] | null => {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? (JSON.parse(raw) as AchievementDefinition[]) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Seed from localStorage so the showcase paints instantly on a reload (stale-while-revalidate): the
+// cached catalog renders immediately, then the network copy replaces it. Catalogs are game-global and
+// rarely change, so a briefly-stale copy is harmless.
+let cache: AchievementDefinition[] | null = readLsCache();
+let revalidated = false;
 let inflight: Promise<AchievementDefinition[]> | null = null;
 const listeners = new Set<(defs: AchievementDefinition[]) => void>();
 
-const load = (): Promise<AchievementDefinition[]> => {
-  if (cache) return Promise.resolve(cache);
-  inflight ??= getAchievementCatalog().then((defs) => {
-    cache = defs;
-    inflight = null;
-    for (const l of listeners) l(defs);
-    return defs;
-  });
+const revalidate = (): Promise<AchievementDefinition[]> => {
+  inflight ??= getAchievementCatalog()
+    .then((defs) => {
+      cache = defs;
+      revalidated = true;
+      inflight = null;
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify(defs));
+      } catch {
+        /* storage blocked — cache just won't warm */
+      }
+      for (const l of listeners) l(defs);
+      return defs;
+    })
+    .catch(() => {
+      inflight = null;
+      return cache ?? [];
+    });
   return inflight;
 };
 
@@ -34,14 +59,14 @@ export interface Catalogs {
   loading: boolean;
 }
 
-/** All achievement catalogs, grouped by game. Fetched once and shared across every consumer. */
+/** All achievement catalogs, grouped by game. Renders instantly from the localStorage cache and
+ *  revalidates from the network once per session; shared across every consumer. */
 export const useAchievementCatalogs = (): Catalogs => {
   const [defs, setDefs] = useState<AchievementDefinition[] | null>(cache);
   useEffect(() => {
-    if (cache) return;
     const l = (d: AchievementDefinition[]): void => setDefs(d);
     listeners.add(l);
-    void load();
+    if (!revalidated) void revalidate(); // stale-while-revalidate: refresh once even if cache seeded us
     return () => {
       listeners.delete(l);
     };

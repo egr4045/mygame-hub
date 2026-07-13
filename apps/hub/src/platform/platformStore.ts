@@ -56,10 +56,21 @@ const hydrateFavorites = (set: (partial: Partial<PlatformState>) => void): void 
   });
 };
 
+// Read the persisted session synchronously at store-creation time so the very first render already
+// knows we're logged in — returning from a game (a full page reload) then renders the hub directly
+// instead of flashing the AuthScreen for a frame while an effect-driven `restore()` catches up.
+const bootSession = (() => {
+  try {
+    return loadSession();
+  } catch {
+    return null;
+  }
+})();
+
 export const usePlatformStore = create<PlatformState>((set, get) => ({
-  account: null,
-  selectedGame: null,
-  status: 'idle',
+  account: bootSession ? { accountId: bootSession.accountId, displayName: bootSession.displayName } : null,
+  selectedGame: bootSession ? readGame() : null,
+  status: bootSession ? 'ready' : 'idle',
   error: null,
   favoriteGameIds: [],
 
@@ -125,14 +136,17 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
 
   restore: () => {
     const prev = loadSession();
-    if (prev && !get().account) {
+    if (!prev) return;
+    // account is usually already set synchronously at store creation (bootSession); only set it here
+    // if something cleared it. Either way, (re)hydrate favorites from the server.
+    if (!get().account) {
       set({
         account: { accountId: prev.accountId, displayName: prev.displayName },
         selectedGame: readGame(),
         status: 'ready',
       });
-      hydrateFavorites(set);
     }
+    hydrateFavorites(set);
   },
 
   toggleFavorite: (gameId) => {
