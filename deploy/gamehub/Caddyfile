@@ -74,6 +74,19 @@
 		reverse_proxy admin:5200
 	}
 
+	# Spellforge (cards) game socket — Socket.io on its own path, same escape hatch as
+	# /social.io/ и /chat.io/: the default /socket.io/ below belongs to CIVA's lobby. The game's
+	# stack is on-demand — 502s until the orchestrator brings it up.
+	handle /cards-io/* {
+		reverse_proxy cards-server:8091
+	}
+
+	# Spellforge SPA, path-routed like /example-game/* (prefix stripped; the game's build bakes
+	# VITE_BASE_PATH=/cards/ — see the cards repo, deploy/build-images.sh).
+	handle_path /cards/* {
+		reverse_proxy cards-web:5210
+	}
+
 	# Game lobby (Socket.io, default path). Started on demand — 502s until the orchestrator brings
 	# it up. Does not collide with /social.io/ or /chat.io/ above.
 	handle /socket.io/* {

@@ -31,6 +31,15 @@ const defaultGames = (): GameManifest[] => [
     activityUrl: process.env.SVOYAK_ACTIVITY_URL ?? 'http://svoyak:8089/metrics',
     idleMs: Number(process.env.SVOYAK_IDLE_MS ?? 10 * 60 * 1000),
   },
+  {
+    // Spellforge — карточная игра из отдельного репозитория (клонируется в /root/cards).
+    id: 'cards',
+    name: 'Spellforge',
+    composeDir: process.env.CARDS_GAME_DIR ?? '/root/cards/deploy',
+    composeProject: process.env.CARDS_GAME_PROJECT ?? 'cards-game',
+    activityUrl: process.env.CARDS_ACTIVITY_URL ?? 'http://cards-server:8091/metrics',
+    idleMs: Number(process.env.CARDS_IDLE_MS ?? 10 * 60 * 1000),
+  },
 ];
 
 export const loadConfig = (): ServiceConfig => ({
