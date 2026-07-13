@@ -16,7 +16,8 @@
     "@mygame/auth-core": "workspace:*",
     "@mygame/platform-db": "workspace:*",
     "@mygame/protocol": "workspace:*",
-    "@mygame/shared-types": "workspace:*"
+    "@mygame/shared-types": "workspace:*",
+    "@mygame/telegram": "workspace:*"
   },
   "devDependencies": {
     "@mygame/test-harness": "workspace:*",

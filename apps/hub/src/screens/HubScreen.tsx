@@ -16,7 +16,7 @@ import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
-import { createTelegramLinkCode, getTelegramStatus, createThread } from '@mygame/sdk';
+import { createTelegramLinkCode, getTelegramStatus, createSuggestion } from '@mygame/sdk';
 import { useIsMobile } from '../platform/useIsMobile.js';
 import { MobileHub } from '../mobile/MobileHub.js';
 
@@ -347,11 +347,10 @@ const ContactAuthorView = (): JSX.Element => {
     if (!text || sending) return;
     setSending(true);
     try {
-      const title = text.length > 60 ? `${text.slice(0, 60)}…` : text;
-      const created = await createThread('hub', title, text);
+      const created = await createSuggestion(text);
       if (created) {
         setIdea('');
-        addToast({ type: 'system', title: 'Идея отправлена', content: 'Спасибо! Автор прочитает её в обсуждениях хаба.', icon: '💡' });
+        addToast({ type: 'system', title: 'Идея отправлена', content: 'Спасибо! Автор увидит её и ответит.', icon: '💡' });
       } else {
         addToast({ type: 'system', title: 'Не удалось отправить идею', content: 'Попробуйте ещё раз позже.', icon: '⚠️' });
       }
@@ -388,7 +387,7 @@ const ContactAuthorView = (): JSX.Element => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div className="hub-card" style={{ padding: 24 }}>
             <h2 style={{ fontSize: 24, color: 'var(--c-text-primary)', marginBottom: 12 }}>Telegram автора</h2>
-            <p style={{ color: 'var(--c-text-muted)', marginBottom: 16 }}>Следи за новостями, багами и разработкой:</p>
+            <p style={{ color: 'var(--c-text-muted)', marginBottom: 16 }}>Предложения и вопросы пишите сюда:</p>
             <a href="https://t.me/egr4045" target="_blank" rel="noreferrer" style={{ display: 'inline-block', background: 'var(--c-accent)', color: '#fff', padding: '16px 24px', borderRadius: 8, textDecoration: 'none', fontWeight: 800, fontSize: 18, width: '100%', textAlign: 'center' }}>ПЕРЕЙТИ В TELEGRAM</a>
           </div>
 

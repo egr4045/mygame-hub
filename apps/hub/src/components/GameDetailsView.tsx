@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
 import { type GameInfo } from '../platform/games.js';
 import { formatLastPlayed, formatLastReply, formatPlaytime } from '../platform/statsFormat.js';
-import { routeToRoom } from '../platform/inviteRouting.js';
+import { useAchievementCatalogs } from '../platform/achievementsCatalog.js';
+import { AchievementShowcase } from './AchievementShowcase.js';
 import {
-  useSocialStore,
   useToastStore,
   getGameStats,
+  getAchievements,
   getChangelog,
   getThreads,
   getThread as fetchThread,
   createThread,
   createPost,
 } from '@mygame/sdk';
-import type { ChangelogEntry, DiscussionPost, DiscussionThread, GameStat, social } from '@mygame/protocol';
+import type { ChangelogEntry, DiscussionPost, DiscussionThread, GameStat } from '@mygame/protocol';
 
 const formatPublished = (publishedAt: number): string =>
   new Date(publishedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -37,7 +38,7 @@ const SkeletonRows = ({ count = 3, height = 40 }: { count?: number; height?: num
   </div>
 );
 
-export type GameDetailsTab = 'changelog' | 'groups' | 'discussions';
+export type GameDetailsTab = 'changelog' | 'discussions';
 
 export const GameDetailsView = ({
   game,
@@ -61,8 +62,10 @@ export const GameDetailsView = ({
   const [newThreadTitle, setNewThreadTitle] = useState('');
   const [newThreadBody, setNewThreadBody] = useState('');
   const [replyText, setReplyText] = useState('');
-  const [lobbies, setLobbies] = useState<social.Lobby[] | null>(null);
-  const [newRoomName, setNewRoomName] = useState('');
+  // Unlocked achievementIds for THIS game (null = still loading).
+  const [unlockedIds, setUnlockedIds] = useState<Set<string> | null>(null);
+  const { byGame: catalogsByGame, loading: catalogsLoading } = useAchievementCatalogs();
+  const gameDefs = game ? (catalogsByGame.get(game.id) ?? []) : [];
 
   const resetSubViews = () => {
     setViewDiscussion(null);
@@ -111,31 +114,15 @@ export const GameDetailsView = ({
     void fetchThread(game.id, viewDiscussion).then(setThreadDetail);
   }, [viewDiscussion, game?.id]);
 
-  // Live lobbies: fetched fresh whenever the tab is opened (presence isn't pushed, only queried).
+  // The caller's unlocked achievements, narrowed to this game — drives the showcase's colour/lock.
   useEffect(() => {
-    if (activeTab !== 'groups' || !game) return;
-    setLobbies(null);
-    useSocialStore
-      .getState()
-      .getLobbies(game.id)
-      .then(setLobbies)
-      .catch(() => {
-        setLobbies([]);
-        loadErrorToast('лобби');
-      });
-  }, [activeTab, game?.id]);
-
-  const handleJoinLobby = (room: string) => {
-    if (game) void routeToRoom(game, room);
-  };
-
-  const handleCreateLobby = async () => {
-    if (!game || !newRoomName.trim()) return;
-    const room = newRoomName.trim();
-    useSocialStore.getState().setActivity({ game: game.id, gameName: game.name, room, joinable: true });
-    setNewRoomName('');
-    await routeToRoom(game, room);
-  };
+    setUnlockedIds(null);
+    if (!game) return;
+    const gameId = game.id;
+    getAchievements()
+      .then((res) => setUnlockedIds(new Set((res?.achievements ?? []).filter((a) => a.gameId === gameId).map((a) => a.achievementId))))
+      .catch(() => setUnlockedIds(new Set()));
+  }, [game?.id]);
 
   const handleCreateThread = async () => {
     if (!game || !newThreadTitle.trim() || !newThreadBody.trim()) return;
@@ -249,7 +236,6 @@ export const GameDetailsView = ({
         {(
           [
             { id: 'changelog', label: 'Ченжлог' },
-            { id: 'groups', label: 'Найти группы' },
             { id: 'discussions', label: 'Обсуждения' },
           ] satisfies { id: GameDetailsTab; label: string }[]
         ).map((tab) => (
@@ -302,55 +288,29 @@ export const GameDetailsView = ({
             </div>
 
             <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: 16 }}>ДОСТИЖЕНИЯ</h2>
-              <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
-                Достижения пока недоступны.
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ДОСТИЖЕНИЯ</h2>
+                {gameDefs.length > 0 && unlockedIds && (
+                  <span style={{ color: 'var(--c-text-muted)', fontSize: '13px' }}>
+                    {gameDefs.filter((d) => unlockedIds.has(d.achievementId)).length} из {gameDefs.length}
+                  </span>
+                )}
               </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'groups' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>АКТИВНЫЕ ЛОББИ</h2>
-
-            {lobbies === null ? (
-              <SkeletonRows count={2} height={56} />
-            ) : lobbies.length === 0 ? (
-              <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: '13px' }}>
-                Сейчас нет открытых лобби.
-              </div>
-            ) : (
-              lobbies.map((lobby) => (
-                <div key={lobby.room} className="hub-card" style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ color: 'var(--c-text-primary)', fontWeight: 600, fontSize: '15px' }}>{lobby.room}</div>
-                    <div style={{ color: 'var(--c-text-muted)', fontSize: '12px', marginTop: 4 }}>Хост: {lobby.hostName} • {lobby.memberCount} {lobby.memberCount === 1 ? 'игрок' : 'игроков'}</div>
+              <div className="hub-card" style={{ padding: 24 }}>
+                {catalogsLoading || unlockedIds === null ? (
+                  <SkeletonRows count={2} height={48} />
+                ) : gameDefs.length === 0 ? (
+                  <div style={{ color: 'var(--c-text-muted)', fontSize: '13px' }}>
+                    У этой игры пока нет достижений.
                   </div>
-                  <button onClick={() => handleJoinLobby(lobby.room)} style={{ background: 'var(--c-positive)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, fontWeight: 600, cursor: 'pointer' }}>Присоединиться</button>
-                </div>
-              ))
-            )}
-
-            <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-              <input
-                placeholder="Название лобби"
-                value={newRoomName}
-                onChange={(e) => setNewRoomName(e.target.value)}
-                className="hub-input"
-                style={{ padding: '10px 16px' }}
-              />
-              <button
-                onClick={() => void handleCreateLobby()}
-                disabled={!newRoomName.trim()}
-                className="hub-btn"
-                style={{ padding: '12px 16px' }}
-              >
-                + Создать лобби
-              </button>
+                ) : (
+                  <AchievementShowcase defs={gameDefs} unlocked={unlockedIds} />
+                )}
+              </div>
             </div>
           </div>
         )}
+
 
         {activeTab === 'discussions' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

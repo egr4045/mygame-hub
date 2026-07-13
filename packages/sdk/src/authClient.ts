@@ -3,8 +3,11 @@
  * re-hydrates the token without a login screen.
  */
 import type {
+  AchievementDefinition,
   AchievementsResponse,
+  CatalogResponse,
   GrantAchievementResponse,
+  RegisterCatalogRequest,
   HandoffResponse,
   LoginResponse,
   ProfileResponse,
@@ -162,6 +165,38 @@ export const getAchievements = async (): Promise<AchievementsResponse | null> =>
     return (await res.json()) as AchievementsResponse;
   } catch {
     return null;
+  }
+};
+
+/** Register (replace) a game's achievement display catalog so the hub can render its showcase. A game
+ *  calls this once on boot; idempotent. Resolves to the stored definitions, or null on failure. */
+export const registerAchievementCatalog = async (
+  gameId: string,
+  achievements: RegisterCatalogRequest['achievements'],
+): Promise<AchievementDefinition[] | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.authUrl}/auth/achievements/catalog`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ gameId, achievements }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as CatalogResponse).definitions;
+  } catch {
+    return null;
+  }
+};
+
+/** Every registered achievement definition across all games (public — no token). Empty on failure. */
+export const getAchievementCatalog = async (): Promise<AchievementDefinition[]> => {
+  try {
+    const res = await fetch(`${config.authUrl}/auth/achievements/catalog`);
+    if (!res.ok) return [];
+    return ((await res.json()) as CatalogResponse).definitions;
+  } catch {
+    return [];
   }
 };
 

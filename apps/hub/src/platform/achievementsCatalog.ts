@@ -1,24 +1,63 @@
 /**
- * Display catalog for CIVA's achievements — name/description/icon/color are presentation details the
- * platform's achievements API doesn't (and can't, being cross-game) know about; only the fact that
- * `gameId + achievementId` is unlocked is real (`mygame.achievements.list()`). A game with its own
- * achievements would keep its own such catalog. Hoisted here so ProfileView (the full showcase)
- * renders from one source of truth.
+ * Achievement display catalogs, fetched from the platform (auth's `/auth/achievements/catalog`).
+ * Games register their own definitions (name/description/icon/colour) via `mygame.achievements
+ * .registerCatalog(...)`; the hub reads them here so the showcase, the game page and the title
+ * picker render a real catalog for EVERY game — not a hard-coded CIVA one. One shared fetch, cached
+ * at module scope and reused by every surface.
  */
-export interface AchievementDef {
-  id: string;
-  name: string;
-  desc: string;
-  icon: string;
-  color: string;
+import { useEffect, useState } from 'react';
+import { getAchievementCatalog } from '@mygame/sdk';
+import type { AchievementDefinition } from '@mygame/protocol';
+
+export type { AchievementDefinition };
+
+let cache: AchievementDefinition[] | null = null;
+let inflight: Promise<AchievementDefinition[]> | null = null;
+const listeners = new Set<(defs: AchievementDefinition[]) => void>();
+
+const load = (): Promise<AchievementDefinition[]> => {
+  if (cache) return Promise.resolve(cache);
+  inflight ??= getAchievementCatalog().then((defs) => {
+    cache = defs;
+    inflight = null;
+    for (const l of listeners) l(defs);
+    return defs;
+  });
+  return inflight;
+};
+
+export interface Catalogs {
+  /** Definitions grouped by gameId, each already sorted by sortOrder. */
+  byGame: Map<string, AchievementDefinition[]>;
+  /** Look up one definition (undefined if the game never registered it). */
+  defOf: (gameId: string, achievementId: string) => AchievementDefinition | undefined;
+  loading: boolean;
 }
 
-export const CIVA_GAME_ID = 'civa';
+/** All achievement catalogs, grouped by game. Fetched once and shared across every consumer. */
+export const useAchievementCatalogs = (): Catalogs => {
+  const [defs, setDefs] = useState<AchievementDefinition[] | null>(cache);
+  useEffect(() => {
+    if (cache) return;
+    const l = (d: AchievementDefinition[]): void => setDefs(d);
+    listeners.add(l);
+    void load();
+    return () => {
+      listeners.delete(l);
+    };
+  }, []);
 
-export const ACHIEVEMENTS: AchievementDef[] = [
-  { id: 'first_blood', name: 'Первая кровь', desc: 'Одержите свою первую победу.', icon: '🏆', color: '#ffd700' },
-  { id: 'veteran', name: 'Ветеран', desc: 'Сыграйте 100 матчей.', icon: '⚔', color: '#c0c0c0' },
-  { id: 'rich', name: 'Богач', desc: 'Соберите 10 000 золота.', icon: '💰', color: '#ffb347' },
-  { id: 'social', name: 'Душа компании', desc: 'Добавьте 10 друзей.', icon: '🤝', color: '#66c0f4' },
-  { id: 'night_owl', name: 'Сова', desc: 'Сыграйте матч после полуночи.', icon: '🦉', color: '#a020f0' },
-];
+  const byGame = new Map<string, AchievementDefinition[]>();
+  for (const d of defs ?? []) {
+    const arr = byGame.get(d.gameId);
+    if (arr) arr.push(d);
+    else byGame.set(d.gameId, [d]);
+  }
+  for (const arr of byGame.values()) arr.sort((a, b) => a.sortOrder - b.sortOrder);
+
+  return {
+    byGame,
+    defOf: (gameId, achievementId) => (defs ?? []).find((d) => d.gameId === gameId && d.achievementId === achievementId),
+    loading: defs === null,
+  };
+};

@@ -15,14 +15,14 @@ import {
   getTelegramStatus,
   createTelegramLinkCode,
   changeDisplayName,
-  createThread,
+  createSuggestion,
   useSocialStore,
   useChatStore,
   useToastStore,
   loadSession,
 } from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { ACHIEVEMENTS, CIVA_GAME_ID } from '../platform/achievementsCatalog.js';
+import { useAchievementCatalogs } from '../platform/achievementsCatalog.js';
 import { formatPlaytime } from '../platform/statsFormat.js';
 
 /** Server body cap headroom (matches ProfileView) — reject oversized images before the round-trip. */
@@ -82,11 +82,10 @@ const ContactAuthorSection = (): JSX.Element => {
     if (!text || sending) return;
     setSending(true);
     try {
-      const title = text.length > 60 ? `${text.slice(0, 60)}…` : text;
-      const created = await createThread('hub', title, text);
+      const created = await createSuggestion(text);
       addToast(
         created
-          ? { type: 'system', title: 'Идея отправлена', content: 'Спасибо! Автор увидит её в обсуждениях хаба.', icon: '💡' }
+          ? { type: 'system', title: 'Идея отправлена', content: 'Спасибо! Автор увидит её и ответит.', icon: '💡' }
           : { type: 'system', title: 'Не удалось отправить', content: 'Попробуйте ещё раз позже.', icon: '⚠️' },
       );
       if (created) setIdea('');
@@ -147,12 +146,14 @@ export const MobileProfileTab = (): JSX.Element => {
 
   const myCode = loadSession()?.friendCode ?? account?.accountId?.slice(0, 8) ?? '…';
 
+  // Total catalog size across every game, for the "N/total" achievements tile.
+  const { byGame: catalogsByGame } = useAchievementCatalogs();
+  const totalAchievements = [...catalogsByGame.values()].reduce((n, defs) => n + defs.length, 0);
+
   useEffect(() => {
     void getProfile().then((p) => p && setAvatar(p.avatarIcon));
     void getGameStats().then((res) => setGameStats(res?.stats ?? []));
-    void getAchievements().then((res) =>
-      setUnlockedCount((res?.achievements ?? []).filter((a) => a.gameId === CIVA_GAME_ID).length),
-    );
+    void getAchievements().then((res) => setUnlockedCount((res?.achievements ?? []).length));
     void getTelegramStatus().then((s) => s && setTgLinked(s.linked));
   }, []);
 
@@ -251,7 +252,10 @@ export const MobileProfileTab = (): JSX.Element => {
       <div style={{ display: 'flex', gap: 10 }}>
         <StatTile value={gameStats === null ? '…' : formatPlaytime(totalSeconds)} label="В играх" />
         <StatTile value={gameStats === null ? '…' : String(gamesPlayed)} label="Игр" />
-        <StatTile value={unlockedCount === null ? '…' : `${unlockedCount}/${ACHIEVEMENTS.length}`} label="Ачивки" />
+        <StatTile
+          value={unlockedCount === null ? '…' : totalAchievements > 0 ? `${unlockedCount}/${totalAchievements}` : String(unlockedCount)}
+          label="Ачивки"
+        />
       </div>
 
       {/* Settings */}

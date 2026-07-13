@@ -83,6 +83,14 @@ export const App = (): JSX.Element => {
     void mygame.community.getChangelog().then(setChangelog);
     void mygame.community.getThreads().then(setThreads);
 
+    // Register this game's achievement catalog so the hub renders a real showcase for it (locked +
+    // unlocked, with descriptions). Idempotent — safe to call on every boot.
+    void mygame.achievements.registerCatalog([
+      { achievementId: 'first_win', name: 'Первая победа', description: 'Выиграйте свой первый раунд в Example Game.', icon: '🥇', color: '#ffd700' },
+      { achievementId: 'explorer', name: 'Исследователь', description: 'Загляните во все разделы демо-игры.', icon: '🧭', color: '#66c0f4' },
+      { achievementId: 'persistent', name: 'Упорство', description: 'Зайдите в игру пять дней подряд.', icon: '🔥', color: '#ff8c42' },
+    ]);
+
     mygame.social.setActivity({
       game: GAME_ID,
       gameName: 'Example Game',

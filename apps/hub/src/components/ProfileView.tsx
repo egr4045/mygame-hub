@@ -14,9 +14,13 @@ import {
   setTitleAchievement as apiSetTitleAchievement,
 } from '@mygame/sdk';
 import type { GameStat, social } from '@mygame/protocol';
-import { ACHIEVEMENTS, CIVA_GAME_ID } from '../platform/achievementsCatalog.js';
+import { useAchievementCatalogs } from '../platform/achievementsCatalog.js';
+import { AchievementShowcase } from './AchievementShowcase.js';
 import { GAMES } from '../platform/games.js';
 import { formatLastPlayed, formatPlaytime } from '../platform/statsFormat.js';
+
+/** Human game name for a gameId, falling back to the id for games not in the local registry. */
+const gameLabel = (gameId: string): string => GAMES.find((g) => g.id === gameId)?.name ?? gameId;
 
 /** Reads a File as a data URL (what the profile API stores/serves). */
 const readAsDataUrl = (file: File): Promise<string> =>
@@ -39,7 +43,9 @@ export const ProfileView = (): JSX.Element => {
 
   const [avatar, setAvatar] = useState<string | null>(null);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
-  const [titleAchievement, setTitleAchievement] = useState<string | null>(null);
+  // The equipped title, now a full cross-game reference (was CIVA-only) so any game's achievement works.
+  const [titleAchievement, setTitleAchievement] = useState<{ gameId: string; achievementId: string } | null>(null);
+  const { byGame: catalogsByGame, defOf, loading: catalogsLoading } = useAchievementCatalogs();
 
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
 
@@ -65,7 +71,7 @@ export const ProfileView = (): JSX.Element => {
       if (!p) return;
       setAvatar(p.avatarIcon);
       setWallpaper(p.wallpaper);
-      setTitleAchievement(p.titleAchievement?.gameId === CIVA_GAME_ID ? p.titleAchievement.achievementId : null);
+      setTitleAchievement(p.titleAchievement ?? null);
     });
   }, []);
 
@@ -84,12 +90,18 @@ export const ProfileView = (): JSX.Element => {
   const [tgId, setTgId] = useState<string | undefined>(undefined);
   const [tgModal, setTgModal] = useState<{ code: string; url: string } | null>(null);
 
-  // Real unlocked achievements across EVERY game (the CIVA catalog only decorates the CIVA ones).
+  // Real unlocked achievements across EVERY game; the catalogs decorate them with name/icon/desc.
   const [unlocked, setUnlocked] = useState<{ gameId: string; achievementId: string }[]>([]);
   const refreshAchievements = () =>
     void getAchievements().then((res) => setUnlocked(res?.achievements ?? []));
   useEffect(refreshAchievements, []);
-  const unlockedIds = new Set(unlocked.filter((a) => a.gameId === CIVA_GAME_ID).map((a) => a.achievementId));
+  // gameId -> set of unlocked achievementIds, for the per-game showcases.
+  const unlockedByGame = new Map<string, Set<string>>();
+  for (const a of unlocked) {
+    const s = unlockedByGame.get(a.gameId);
+    if (s) s.add(a.achievementId);
+    else unlockedByGame.set(a.gameId, new Set([a.achievementId]));
+  }
 
   useEffect(() => {
     void getTelegramStatus().then((s) => {
@@ -165,18 +177,20 @@ export const ProfileView = (): JSX.Element => {
   };
 
   /** Persist the title choice, then reflect it locally once the server confirms it. */
-  const chooseTitle = async (achievementId: string | null) => {
-    const ok = await apiSetTitleAchievement(
-      achievementId ? { gameId: CIVA_GAME_ID, achievementId } : null,
-    );
+  const chooseTitle = async (ref: { gameId: string; achievementId: string } | null) => {
+    const ok = await apiSetTitleAchievement(ref);
     if (!ok) {
       errorToast('Не удалось сохранить титул. Попробуйте позже.');
       return;
     }
-    setTitleAchievement(achievementId);
+    setTitleAchievement(ref);
   };
 
-  const selectedAchiev = ACHIEVEMENTS.find(a => a.id === titleAchievement);
+  const selectedAchiev = titleAchievement ? defOf(titleAchievement.gameId, titleAchievement.achievementId) : undefined;
+  // Everything the player has unlocked that we have a catalog entry for — the title picker options.
+  const unlockedDefs = unlocked
+    .map((a) => defOf(a.gameId, a.achievementId))
+    .filter((d): d is NonNullable<typeof d> => !!d);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--c-panel-solid)' }}>
@@ -364,16 +378,15 @@ export const ProfileView = (): JSX.Element => {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {unlocked.map((a) => {
-                  const def = a.gameId === CIVA_GAME_ID ? ACHIEVEMENTS.find((d) => d.id === a.achievementId) : undefined;
-                  const gameName = GAMES.find((g) => g.id === a.gameId)?.name ?? a.gameId;
+                  const def = defOf(a.gameId, a.achievementId);
                   return (
-                    <div key={`${a.gameId}:${a.achievementId}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--c-panel-deep)', borderRadius: 8 }}>
+                    <div key={`${a.gameId}:${a.achievementId}`} title={def?.description} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--c-panel-deep)', borderRadius: 8 }}>
                       <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--c-panel-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
                         {def?.icon ?? '🏅'}
                       </div>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ color: 'var(--c-text-primary)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def?.name ?? a.achievementId}</div>
-                        <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{gameName}</div>
+                        <div style={{ color: def?.color ?? 'var(--c-text-primary)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def?.name ?? a.achievementId}</div>
+                        <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{gameLabel(a.gameId)}</div>
                       </div>
                     </div>
                   );
@@ -382,49 +395,38 @@ export const ProfileView = (): JSX.Element => {
             )}
           </div>
 
-          {/* CIVA showcase catalog (locked + unlocked) — decorative, CIVA-specific. */}
-          <div className="hub-card" style={{ padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА CIVA</h2>
-              <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{unlockedIds.size} из {ACHIEVEMENTS.length}</span>
+          {/* Showcase (locked + unlocked, hover = description) — one section per game that registered a
+              catalog, not just CIVA. Right-click an unlocked tile to make it your title. */}
+          {catalogsLoading ? (
+            <div className="hub-card" style={{ padding: 24 }}>
+              <div className="hub-skeleton" style={{ height: 80 }} />
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 16 }}>
-              {ACHIEVEMENTS.map(ach => {
-                const unlocked = unlockedIds.has(ach.id);
-                return (
-                <div key={ach.id} style={{
-                  aspectRatio: '1/1',
-                  background: 'var(--c-panel-deep)',
-                  borderRadius: 8,
-                  border: `2px solid ${unlocked ? `${ach.color}40` : 'var(--c-panel-border)'}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 28,
-                  cursor: 'pointer',
-                  opacity: unlocked ? 1 : 0.35,
-                  filter: unlocked ? 'none' : 'grayscale(1)',
-                  transition: 'transform 0.2s'
-                }}
-                title={unlocked ? `${ach.name} - ${ach.desc}` : `${ach.name} (не получено) - ${ach.desc}`}
-                onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-                onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (!unlocked) return;
-                  openMenu(e.clientX, e.clientY, [
-                    { label: '👑 Сделать титульной', action: () => void chooseTitle(ach.id) },
-                  ]);
-                }}
-                >
-                  {ach.icon}
+          ) : catalogsByGame.size === 0 ? (
+            <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: 13 }}>
+              Витрина достижений появится, когда игры зарегистрируют свои достижения.
+            </div>
+          ) : (
+            [...catalogsByGame.entries()].map(([gameId, defs]) => {
+              const gameUnlocked = unlockedByGame.get(gameId) ?? new Set<string>();
+              return (
+                <div key={gameId} className="hub-card" style={{ padding: 24 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА · {gameLabel(gameId).toUpperCase()}</h2>
+                    <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{gameUnlocked.size} из {defs.length}</span>
+                  </div>
+                  <AchievementShowcase
+                    defs={defs}
+                    unlocked={gameUnlocked}
+                    onPick={(def, e) =>
+                      openMenu(e.clientX, e.clientY, [
+                        { label: '👑 Сделать титульной', action: () => void chooseTitle({ gameId: def.gameId, achievementId: def.achievementId }) },
+                      ])
+                    }
+                  />
                 </div>
-                );
-              })}
-            </div>
-          </div>
+              );
+            })
+          )}
         </div>
 
       </div>
@@ -446,24 +448,33 @@ export const ProfileView = (): JSX.Element => {
                 Без титула
               </div>
 
-              {ACHIEVEMENTS.filter(ach => unlockedIds.has(ach.id)).map(ach => (
-                <div
-                  key={ach.id}
-                  onClick={() => { void chooseTitle(ach.id); setIsChoosingAchievement(false); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 16,
-                    background: titleAchievement === ach.id ? 'var(--c-panel-hover)' : 'var(--c-panel-deep)',
-                    padding: 16, borderRadius: 4, cursor: 'pointer',
-                    border: titleAchievement === ach.id ? `1px solid ${ach.color}` : '1px solid transparent'
-                  }}
-                >
-                  <div style={{ fontSize: 24 }}>{ach.icon}</div>
-                  <div>
-                    <div style={{ color: ach.color, fontWeight: 700 }}>{ach.name}</div>
-                    <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{ach.desc}</div>
-                  </div>
+              {unlockedDefs.length === 0 && (
+                <div style={{ color: 'var(--c-text-muted)', fontSize: 13, padding: '8px 4px' }}>
+                  У вас пока нет разблокированных достижений для титула.
                 </div>
-              ))}
+              )}
+
+              {unlockedDefs.map((def) => {
+                const active = titleAchievement?.gameId === def.gameId && titleAchievement?.achievementId === def.achievementId;
+                return (
+                  <div
+                    key={`${def.gameId}:${def.achievementId}`}
+                    onClick={() => { void chooseTitle({ gameId: def.gameId, achievementId: def.achievementId }); setIsChoosingAchievement(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 16,
+                      background: active ? 'var(--c-panel-hover)' : 'var(--c-panel-deep)',
+                      padding: 16, borderRadius: 4, cursor: 'pointer',
+                      border: active ? `1px solid ${def.color}` : '1px solid transparent',
+                    }}
+                  >
+                    <div style={{ fontSize: 24 }}>{def.icon}</div>
+                    <div>
+                      <div style={{ color: def.color, fontWeight: 700 }}>{def.name}</div>
+                      <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{def.description} · {gameLabel(def.gameId)}</div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <button

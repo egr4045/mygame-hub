@@ -173,7 +173,15 @@ services:
       JWT_ISSUER: civa
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
+      # New-suggestion Telegram alerts (send-only; auth owns the single poller of this token). The
+      # deep link in the alert points at the admin panel's Предложения tab.
+      OPS_ALERT_BOT_TOKEN: ${OPS_ALERT_BOT_TOKEN:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://mygame-quiz.ru}
       NODE_ENV: production
+    # Same Telegram-reachability workaround as auth/chat (see the note on the auth service): the DNS
+    # answer for api.telegram.org is a blocked IPv4; pin the routable one so suggestion alerts send.
+    extra_hosts:
+      - 'api.telegram.org:149.154.167.220'
     depends_on:
       - postgres
     networks:

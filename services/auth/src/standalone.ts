@@ -9,6 +9,7 @@ import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
 import { createMemoryAccountStore } from './store.js';
 import { createMemoryGameStatsStore } from './statsStore.js';
+import { createMemoryCatalogStore } from './catalogStore.js';
 
 const config = loadConfig();
 const logger = createConsoleLogger({ svc: config.service, mode: 'standalone' });
@@ -25,6 +26,7 @@ const app = createApp({
   auth,
   accounts: createMemoryAccountStore(),
   stats: createMemoryGameStatsStore(),
+  catalog: createMemoryCatalogStore(),
 });
 
 app.listen(config.port, () => logger.info('listening (standalone)', { port: config.port }));

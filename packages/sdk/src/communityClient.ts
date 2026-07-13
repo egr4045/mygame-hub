@@ -9,9 +9,28 @@ import type {
   CreateChangelogRequest,
   DiscussionPost,
   DiscussionThread,
+  Suggestion,
 } from '@mygame/protocol';
 import { config } from './config.js';
 import { freshAccessToken } from './authClient.js';
+
+/** Submit a player suggestion ("предложить идею"). Requires a session. Null on failure/not logged in.
+ *  The community service also pings the author's admin on Telegram with a link. */
+export const createSuggestion = async (body: string): Promise<Suggestion | null> => {
+  const token = await freshAccessToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${config.communityUrl}/community/suggestions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Suggestion;
+  } catch {
+    return null;
+  }
+};
 
 /** Newest-first changelog entries for `gameId`. Empty array on failure (never throws). */
 export const getChangelog = async (gameId: string): Promise<ChangelogEntry[]> => {

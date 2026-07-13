@@ -10,6 +10,9 @@ import type {
   DiscussionPost,
   DiscussionThread,
   PlatformSettingsKey,
+  Suggestion,
+  SuggestionListResponse,
+  SuggestionStatus,
 } from '@mygame/protocol';
 import { config, freshAccessToken } from '@mygame/sdk';
 
@@ -176,6 +179,26 @@ export const deleteThread = async (threadId: string): Promise<boolean> => {
 export const deletePost = async (postId: string): Promise<boolean> => {
   const res = await authed(`/community/posts/${postId}`, config.communityUrl, { method: 'DELETE' });
   return res?.ok ?? false;
+};
+
+// --- Suggestions (player ideas) --------------------------------------------------------------
+
+/** Every player suggestion, newest first. Null on failure. */
+export const listSuggestions = async (): Promise<Suggestion[] | null> => {
+  const res = await authed('/community/admin/suggestions', config.communityUrl);
+  if (!res?.ok) return null;
+  return ((await res.json()) as SuggestionListResponse).suggestions;
+};
+
+/** Move a suggestion through the triage pipeline (new → accepted/rejected/implemented). Null on failure. */
+export const updateSuggestionStatus = async (id: string, status: SuggestionStatus): Promise<Suggestion | null> => {
+  const res = await authed(`/community/admin/suggestions/${id}`, config.communityUrl, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (!res?.ok) return null;
+  return (await res.json()) as Suggestion;
 };
 
 // --- Live lobby (orchestrator) ---------------------------------------------------------------

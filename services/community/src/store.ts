@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import type { Suggestion, SuggestionStatus } from '@mygame/protocol';
 
 /**
- * Community store port: per-game changelog + discussion forum. In-memory adapter for standalone/dev
- * and tests; a Postgres adapter (`pgStore.ts`) swaps in for durable history without touching the
- * service logic (ports & adapters, same shape as chat/social).
+ * Community store port: per-game changelog + discussion forum + the suggestions queue. In-memory
+ * adapter for standalone/dev and tests; a Postgres adapter (`pgStore.ts`) swaps in for durable
+ * history without touching the service logic (ports & adapters, same shape as chat/social).
  */
 export interface ChangelogEntry {
   id: string;
@@ -84,11 +85,18 @@ export interface CommunityStore {
   /** Soft-delete (moderation). `false` if `postId` doesn't exist or is already deleted. */
   deletePost(postId: string): boolean;
 
+  /** Player suggestions ("предложить идею"), newest first. */
+  listSuggestions(): Suggestion[];
+  createSuggestion(authorId: string, authorName: string, body: string): Suggestion;
+  /** Move a suggestion through the triage pipeline. `undefined` if the id doesn't exist. */
+  setSuggestionStatus(id: string, status: SuggestionStatus): Suggestion | undefined;
+
   /** Bulk-load previously persisted rows verbatim (ids/timestamps preserved). Hydration only. */
   hydrate(data: {
     changelog: ChangelogEntry[];
     threads: DiscussionThreadRow[];
     posts: DiscussionPostRow[];
+    suggestions?: Suggestion[];
     settings?: Record<string, string>;
   }): void;
 
@@ -108,6 +116,7 @@ export const createMemoryCommunityStore = (opts: CommunityStoreOptions = {}): Co
   const changelog: ChangelogEntry[] = [];
   const threads = new Map<string, DiscussionThreadRow>();
   const posts = new Map<string, DiscussionPostRow[]>(); // threadId -> posts, oldest first
+  const suggestions = new Map<string, Suggestion>();
   const settings = new Map<string, string>();
 
   const viewOf = (thread: DiscussionThreadRow): DiscussionThreadView => {
@@ -216,6 +225,23 @@ export const createMemoryCommunityStore = (opts: CommunityStoreOptions = {}): Co
       return false;
     },
 
+    listSuggestions: () => [...suggestions.values()].sort((a, b) => b.createdAt - a.createdAt),
+
+    createSuggestion(authorId, authorName, body) {
+      const t = now();
+      const s: Suggestion = { id: randomUUID(), authorId, authorName, body, status: 'new', createdAt: t, updatedAt: t };
+      suggestions.set(s.id, s);
+      return s;
+    },
+
+    setSuggestionStatus(id, status) {
+      const s = suggestions.get(id);
+      if (!s) return undefined;
+      s.status = status;
+      s.updatedAt = now();
+      return s;
+    },
+
     hydrate(data) {
       changelog.push(...data.changelog);
       for (const t of data.threads) threads.set(t.id, t);
@@ -224,6 +250,7 @@ export const createMemoryCommunityStore = (opts: CommunityStoreOptions = {}): Co
         arr.push(p);
         posts.set(p.threadId, arr);
       }
+      for (const s of data.suggestions ?? []) suggestions.set(s.id, s);
       for (const [k, v] of Object.entries(data.settings ?? {})) settings.set(k, v);
     },
 

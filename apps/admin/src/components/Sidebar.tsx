@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 
-type Tab = 'dashboard' | 'games' | 'users' | 'settings';
+type Tab = 'dashboard' | 'games' | 'users' | 'suggestions' | 'settings';
 
 interface SidebarProps {
   currentTab: Tab;
@@ -67,6 +67,7 @@ export const Sidebar = ({ currentTab, onChangeTab, onLogout, adminName }: Sideba
         {navItem('dashboard', 'Дашборд', '📊')}
         {navItem('games', 'Игры и Лобби', '🎮')}
         {navItem('users', 'Пользователи', '👥')}
+        {navItem('suggestions', 'Предложения', '💡')}
         {navItem('settings', 'Настройки', '⚙️')}
       </nav>
 

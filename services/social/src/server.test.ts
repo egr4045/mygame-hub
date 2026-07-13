@@ -206,58 +206,6 @@ describe('social server — profile fields', () => {
   });
 });
 
-describe('social server — lobbies (find groups)', () => {
-  const getLobbies = (c: ClientSocket, game: string): Promise<social.Lobby[]> =>
-    new Promise((res) => c.emit(social.C2S.getLobbies, { game }, (ack: social.GetLobbiesAck) => res(ack.lobbies)));
-
-  const setActivity = (c: ClientSocket, activity: social.Activity) =>
-    c.emit(social.C2S.setActivity, { activity });
-
-  it('groups two joinable accounts in the same room into one lobby with memberCount 2', async () => {
-    const port = await startServer();
-    const c1 = await connect(port, 'a1', 'Mara');
-    const c2 = await connect(port, 'a2', 'Wei');
-    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
-    setActivity(c2, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
-    // setActivity has no ack; give the server a beat to apply both before asking.
-    await new Promise((r) => setTimeout(r, 50));
-
-    const lobbies = await getLobbies(c1, 'civa');
-    expect(lobbies).toHaveLength(1);
-    expect(lobbies[0]).toMatchObject({ room: 'room-7', joinable: true, memberCount: 2 });
-  });
-
-  it('excludes non-joinable activity', async () => {
-    const port = await startServer();
-    const c1 = await connect(port, 'a1', 'Mara');
-    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: false });
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(await getLobbies(c1, 'civa')).toEqual([]);
-  });
-
-  it('excludes an account after it goes offline', async () => {
-    const port = await startServer();
-    const c1 = await connect(port, 'a1', 'Mara');
-    const c2 = await connect(port, 'a2', 'Wei');
-    setActivity(c1, { game: 'civa', gameName: 'CIVA', room: 'room-7', joinable: true });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(await getLobbies(c2, 'civa')).toHaveLength(1);
-
-    c1.close();
-    await new Promise((r) => setTimeout(r, 50));
-    expect(await getLobbies(c2, 'civa')).toEqual([]);
-  });
-
-  it('excludes activity reported for a different game', async () => {
-    const port = await startServer();
-    const c1 = await connect(port, 'a1', 'Mara');
-    setActivity(c1, { game: 'svoyak', gameName: 'Своя игра', room: 'room-7', joinable: true });
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(await getLobbies(c1, 'civa')).toEqual([]);
-  });
-});
 
 describe('social server — blocking', () => {
   const block = (c: ClientSocket, accountId: string) =>

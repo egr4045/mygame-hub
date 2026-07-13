@@ -85,3 +85,31 @@ export type ThreadListResponse = z.infer<typeof threadListResponse>;
 
 export const threadDetailResponse = z.object({ thread: discussionThread, posts: z.array(discussionPost) });
 export type ThreadDetailResponse = z.infer<typeof threadDetailResponse>;
+
+// --- Suggestions ("предложить идею") ------------------------------------------------------------
+// A lightweight, triaged idea queue (distinct from the discussion forum: no replies). Anyone logged in
+// can submit; the author's admin moves the status through the pipeline in apps/admin. Submitting also
+// pings the ops Telegram recipient with a deep link so ideas aren't missed.
+
+export const suggestionStatus = z.enum(['new', 'accepted', 'rejected', 'implemented']);
+export type SuggestionStatus = z.infer<typeof suggestionStatus>;
+
+export const suggestion = z.object({
+  id: z.string(),
+  authorId: z.string(),
+  authorName: z.string(),
+  body: z.string(),
+  status: suggestionStatus,
+  createdAt: z.number(), // epoch ms
+  updatedAt: z.number(), // epoch ms
+});
+export type Suggestion = z.infer<typeof suggestion>;
+
+export const createSuggestionRequest = z.object({ body: z.string().min(1).max(4000) });
+export type CreateSuggestionRequest = z.infer<typeof createSuggestionRequest>;
+
+export const suggestionListResponse = z.object({ suggestions: z.array(suggestion) });
+export type SuggestionListResponse = z.infer<typeof suggestionListResponse>;
+
+export const updateSuggestionStatusRequest = z.object({ status: suggestionStatus });
+export type UpdateSuggestionStatusRequest = z.infer<typeof updateSuggestionStatusRequest>;

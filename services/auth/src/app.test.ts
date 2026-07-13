@@ -15,6 +15,7 @@ import { createCapturingLogger, createFakeClock } from '@mygame/test-harness';
 import { createApp } from './app.js';
 import { createMemoryAccountStore } from './store.js';
 import { createMemoryGameStatsStore } from './statsStore.js';
+import { createMemoryCatalogStore } from './catalogStore.js';
 
 const json = <T>(res: Response): Promise<T> => res.json() as Promise<T>;
 
@@ -30,6 +31,7 @@ const start = async () => {
     auth,
     accounts,
     stats: createMemoryGameStatsStore(),
+    catalog: createMemoryCatalogStore(),
     // Effectively disabled here — the per-IP damping is exercised by its own test below and would
     // otherwise starve suites that register many accounts from one 127.0.0.1.
     credRateLimit: { capacity: 10_000, refillPerSec: 10_000 },
@@ -212,6 +214,7 @@ describe('auth service — credential rate limiting', () => {
       auth,
       accounts: createMemoryAccountStore(),
       stats: createMemoryGameStatsStore(),
+      catalog: createMemoryCatalogStore(),
       credRateLimit: { capacity: 3, refillPerSec: 0.0001 },
     });
     const port = await new Promise<number>((r) => server!.listen(0, () => r((server!.address() as AddressInfo).port)));
@@ -629,5 +632,48 @@ describe('auth service — admin', () => {
 
     expect((await del(base, `/auth/admin/accounts/no-such-id/avatar`, undefined, mara.accessToken)).status).toBe(404);
     expect((await del(base, `/auth/admin/accounts/${mara.accountId}/avatar`, undefined, zed.accessToken)).status).toBe(403);
+  });
+});
+
+describe('auth service — achievement catalog', () => {
+  it('registers a game catalog (auth required) and serves it publicly', async () => {
+    const { base } = await start();
+    const { accessToken } = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Dev', password: 'pw' }));
+
+    // Registration needs a session.
+    expect(
+      (await put(base, '/auth/achievements/catalog', { gameId: 'g1', achievements: [{ achievementId: 'a', name: 'A' }] })).status,
+    ).toBe(401);
+
+    const reg = await put(base, '/auth/achievements/catalog', {
+      gameId: 'g1',
+      achievements: [
+        { achievementId: 'first', name: 'Первый', description: 'desc', icon: '🥇', color: '#ffd700' },
+        { achievementId: 'second', name: 'Второй' },
+      ],
+    }, accessToken);
+    expect(reg.status).toBe(200);
+
+    // Public read (no token) returns the definitions with defaults + resolved sortOrder.
+    const all = await json<{ definitions: { gameId: string; achievementId: string; sortOrder: number; icon: string }[] }>(
+      await get(base, '/auth/achievements/catalog'),
+    );
+    expect(all.definitions).toHaveLength(2);
+    expect(all.definitions.map((d) => d.achievementId)).toEqual(['first', 'second']);
+    expect(all.definitions[1]).toMatchObject({ icon: '🏅', sortOrder: 1 }); // defaults applied
+
+    // Per-game read.
+    const one = await json<{ definitions: unknown[] }>(await get(base, '/auth/achievements/catalog/g1'));
+    expect(one.definitions).toHaveLength(2);
+    expect((await json<{ definitions: unknown[] }>(await get(base, '/auth/achievements/catalog/nope'))).definitions).toEqual([]);
+  });
+
+  it('re-registering replaces the whole catalog', async () => {
+    const { base } = await start();
+    const { accessToken } = await json<LoginResponse>(await post(base, '/auth/register', { displayName: 'Dev2', password: 'pw' }));
+    await put(base, '/auth/achievements/catalog', { gameId: 'g2', achievements: [{ achievementId: 'x', name: 'X' }, { achievementId: 'y', name: 'Y' }] }, accessToken);
+    await put(base, '/auth/achievements/catalog', { gameId: 'g2', achievements: [{ achievementId: 'z', name: 'Z' }] }, accessToken);
+    const one = await json<{ definitions: { achievementId: string }[] }>(await get(base, '/auth/achievements/catalog/g2'));
+    expect(one.definitions.map((d) => d.achievementId)).toEqual(['z']);
   });
 });

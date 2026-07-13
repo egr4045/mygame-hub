@@ -12,6 +12,8 @@ import { createMemoryAccountStore, type AccountStore } from './store.js';
 import { createPgAccountStore } from './pgStore.js';
 import { createMemoryGameStatsStore, type GameStatsStore } from './statsStore.js';
 import { createPgGameStatsStore } from './pgStatsStore.js';
+import { createMemoryCatalogStore, type CatalogStore } from './catalogStore.js';
+import { createPgCatalogStore } from './pgCatalogStore.js';
 import { createTelegramClient } from '@mygame/telegram';
 import { createTelegramLinking, type TelegramLinking } from './telegramLinking.js';
 
@@ -26,10 +28,14 @@ const auth = createAuthCore({
 });
 
 let pool: Pool | undefined;
-const { accounts, stats } = await (async (): Promise<{ accounts: AccountStore; stats: GameStatsStore }> => {
+const { accounts, stats, catalog } = await (async (): Promise<{
+  accounts: AccountStore;
+  stats: GameStatsStore;
+  catalog: CatalogStore;
+}> => {
   if (!config.databaseUrl) {
     logger.warn('DATABASE_URL not set — accounts + playtime are in-memory and will not survive a restart');
-    return { accounts: createMemoryAccountStore(), stats: createMemoryGameStatsStore() };
+    return { accounts: createMemoryAccountStore(), stats: createMemoryGameStatsStore(), catalog: createMemoryCatalogStore() };
   }
   pool = createPool(config.databaseUrl);
   await runMigrations(pool);
@@ -37,8 +43,10 @@ const { accounts, stats } = await (async (): Promise<{ accounts: AccountStore; s
   await accountStore.init();
   const statsStore = createPgGameStatsStore(pool, logger);
   await statsStore.init();
+  const catalogStore = createPgCatalogStore(pool, logger);
+  await catalogStore.init();
   logger.info('accounts + playtime persisted to postgres');
-  return { accounts: accountStore, stats: statsStore };
+  return { accounts: accountStore, stats: statsStore, catalog: catalogStore };
 })();
 
 // One-time admin bootstrap: promotes each configured accountId if the account already exists (log in
@@ -102,7 +110,7 @@ if (config.telegramBotToken) {
   logger.info('TELEGRAM_BOT_TOKEN not set — telegram linking disabled');
 }
 
-const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, stats, telegram });
+const app = createApp({ clock: { now: () => Date.now() }, logger, auth, accounts, stats, catalog, telegram });
 
 app.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));
 
@@ -116,6 +124,7 @@ const shutdown = (signal: string): void => {
       app.close();
       await (accounts as Partial<import('./pgStore.js').PgAccountStore>).drain?.();
       await (stats as Partial<import('./pgStatsStore.js').PgGameStatsStore>).drain?.();
+      await (catalog as Partial<import('./pgCatalogStore.js').PgCatalogStore>).drain?.();
     } finally {
       process.exit(0);
     }

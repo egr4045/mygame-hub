@@ -11,6 +11,8 @@ import { createConsoleLogger } from './logger.js';
 import { createMemoryCommunityStore, type CommunityStore } from './store.js';
 import { createPgCommunityStore } from './pgStore.js';
 import { createAdminCheck } from './adminCheck.js';
+import { createTelegramClient } from '@mygame/telegram';
+import type { Suggestion } from '@mygame/protocol';
 
 const config = loadConfig();
 const logger = createConsoleLogger({ svc: config.service });
@@ -39,6 +41,35 @@ const store: CommunityStore = await (async () => {
   return pgStore;
 })();
 
-const app = createApp({ clock: { now: () => Date.now() }, logger, auth, store, isAdmin: createAdminCheck(pool) });
+// New-suggestion Telegram ping (send-only — auth owns the single poller of this token). Pings the
+// registered ops recipient (whoever DM'd the bot `admin`) with the idea + a deep link into apps/admin.
+const notifySuggestion = ((): ((s: Suggestion) => void) | undefined => {
+  if (!config.opsAlertBotToken) {
+    logger.info('OPS_ALERT_BOT_TOKEN not set — new-suggestion Telegram alerts disabled');
+    return undefined;
+  }
+  const bot = createTelegramClient(config.opsAlertBotToken, logger);
+  const link = `${config.publicBaseUrl.replace(/\/$/, '')}/admin/#suggestions`;
+  return (s: Suggestion): void => {
+    void (async () => {
+      if (!pool) return;
+      try {
+        await pool.query(
+          `CREATE TABLE IF NOT EXISTS ops_alert_recipient (
+             singleton BOOLEAN PRIMARY KEY DEFAULT true, chat_id TEXT NOT NULL, registered_at BIGINT NOT NULL)`,
+        );
+        const r = await pool.query(`SELECT chat_id FROM ops_alert_recipient WHERE singleton = true`);
+        const chatId = r.rows[0]?.chat_id as string | undefined;
+        if (!chatId) return;
+        const preview = s.body.length > 600 ? `${s.body.slice(0, 600)}…` : s.body;
+        await bot.sendMessage(chatId, `💡 Новое предложение от ${s.authorName}:\n\n${preview}\n\nОткрыть в админке: ${link}`);
+      } catch (err) {
+        logger.error('suggestion notify failed', { err: String(err) });
+      }
+    })();
+  };
+})();
+
+const app = createApp({ clock: { now: () => Date.now() }, logger, auth, store, isAdmin: createAdminCheck(pool), notifySuggestion });
 
 app.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));

@@ -11,6 +11,7 @@ import type {
   DiscussionThread,
   GameStat,
   ProfileResponse,
+  RegisterCatalogRequest,
   TitleAchievementRef,
 } from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
@@ -25,6 +26,7 @@ import {
   exchangeHandoff,
   grantAchievement,
   getAchievements,
+  registerAchievementCatalog,
   getProfile,
   setAvatar,
   setWallpaper,
@@ -162,11 +164,6 @@ class MygameClient {
     /** Friend by short code (or raw accountId); resolves with the server ack ({ ok } / { error }). */
     addByCode: (code: string): Promise<social.RequestAck> => useSocialStore.getState().addByCode(code),
     setActivity: (activity: social.Activity): void => useSocialStore.getState().setActivity(activity),
-    /** Currently-joinable rooms for `gameId` (defaults to the current game), from live presence. */
-    getLobbies: (gameId?: string): Promise<social.Lobby[]> => {
-      const id = gameId ?? this.gameId;
-      return id ? useSocialStore.getState().getLobbies(id) : Promise.resolve([]);
-    },
     /** Subscribe to social-store changes; returns an unsubscribe. */
     subscribe: (cb: () => void): (() => void) => useSocialStore.subscribe(cb),
   };
@@ -276,6 +273,12 @@ class MygameClient {
     },
     /** The player's unlocked achievements across every game. Empty on failure/not logged in. */
     list: async (): Promise<Achievement[]> => (await getAchievements())?.achievements ?? [],
+    /** Register this game's achievement display catalog (name/description/icon/colour) so the hub can
+     *  render a real showcase for it. Idempotent — call once on boot. No-op with no gameId. */
+    registerCatalog: async (achievements: RegisterCatalogRequest['achievements']): Promise<boolean> => {
+      if (!this.gameId) return false;
+      return (await registerAchievementCatalog(this.gameId, achievements)) !== null;
+    },
   };
 
   readonly profile = {

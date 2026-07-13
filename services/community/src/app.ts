@@ -3,11 +3,13 @@ import type { Clock, Logger } from '@mygame/shared-types';
 import {
   createChangelogRequest,
   createPostRequest,
+  createSuggestionRequest,
   createThreadRequest,
   setPlatformSettingRequest,
   updateChangelogRequest,
+  updateSuggestionStatusRequest,
 } from '@mygame/protocol';
-import type { AuthClaims } from '@mygame/protocol';
+import type { AuthClaims, Suggestion } from '@mygame/protocol';
 import type { AuthCore } from '@mygame/auth-core';
 import type { CommunityStore } from './store.js';
 
@@ -24,6 +26,9 @@ export interface AppDeps {
    *  `adminCheck.ts`'s `createAdminCheck` for the real Postgres-backed implementation). A plain port,
    *  same shape as `auth`/`store`, so tests can fake it without a real database. */
   readonly isAdmin: (accountId: string) => Promise<boolean>;
+  /** Fire-and-forget notification when a new suggestion arrives (production wires this to a Telegram
+   *  ping with a deep link). Absent in tests/dev → suggestions are just stored silently. */
+  readonly notifySuggestion?: ((s: Suggestion) => void) | undefined;
 }
 
 const CORS = {
@@ -267,6 +272,48 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
     }
     deps.logger.info('post removed', { postId });
     send(res, 200, { deleted: true });
+    return;
+  }
+
+  // --- Suggestions: any logged-in account submits; admin lists + moves status --------------------
+  if (method === 'POST' && url === '/community/suggestions') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = createSuggestionRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid suggestion' });
+      return;
+    }
+    const s = deps.store.createSuggestion(claims.sub, claims.name, parsed.data.body);
+    deps.logger.info('suggestion submitted', { id: s.id, by: claims.sub });
+    deps.notifySuggestion?.(s);
+    send(res, 201, s);
+    return;
+  }
+
+  if (method === 'GET' && url === '/community/admin/suggestions') {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    send(res, 200, { suggestions: deps.store.listSuggestions() });
+    return;
+  }
+
+  const suggestionStatusMatch = method === 'PATCH' && url?.match(/^\/community\/admin\/suggestions\/([^/?]+)$/);
+  if (suggestionStatusMatch) {
+    const claims = await requireAdmin(req, res, deps);
+    if (!claims) return;
+    const parsed = updateSuggestionStatusRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid status' });
+      return;
+    }
+    const updated = deps.store.setSuggestionStatus(decodeURIComponent(suggestionStatusMatch[1]!), parsed.data.status);
+    if (!updated) {
+      send(res, 404, { code: 'not_found', message: 'suggestion not found' });
+      return;
+    }
+    deps.logger.info('suggestion status changed', { id: updated.id, status: updated.status, by: claims.sub });
+    send(res, 200, updated);
     return;
   }
 

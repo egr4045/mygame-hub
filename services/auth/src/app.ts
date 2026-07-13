@@ -12,6 +12,7 @@ import {
   registerRequest,
   recordEnterRequest,
   refreshRequest,
+  registerCatalogRequest,
   setAdminRoleRequest,
   setAccountBanRequest,
   adminSetDisplayNameRequest,
@@ -26,6 +27,7 @@ import type { AuthCore } from '@mygame/auth-core';
 import { TokenError } from '@mygame/auth-core';
 import type { AccountStore } from './store.js';
 import type { GameStatsStore } from './statsStore.js';
+import type { CatalogStore } from './catalogStore.js';
 import type { TelegramLinking } from './telegramLinking.js';
 
 /**
@@ -39,6 +41,7 @@ export interface AppDeps {
   readonly auth: AuthCore;
   readonly accounts: AccountStore;
   readonly stats: GameStatsStore;
+  readonly catalog: CatalogStore;
   readonly telegram?: TelegramLinking | undefined;
   /** Override the per-IP register/login limiter (tests raise it; production uses the default). */
   readonly credRateLimit?: { capacity: number; refillPerSec: number };
@@ -451,6 +454,45 @@ async function handle(
     if (!claims) return;
     const account = deps.accounts.get(claims.sub);
     send(res, 200, { achievements: account?.achievements ?? [] });
+    return;
+  }
+
+  // --- Achievement catalog (display definitions, game-global) ----------------------------------
+  // A game registers its FULL catalog (name/description/icon/colour) so the hub can render a real
+  // showcase for it. Same client-trust model as granting. Reads are public — the hub shows the
+  // showcase to everyone.
+  if (method === 'PUT' && url === '/auth/achievements/catalog') {
+    const claims = await requireAccount(req, res, deps);
+    if (!claims) return;
+    const parsed = registerCatalogRequest.safeParse(await readJson(req));
+    if (!parsed.success) {
+      send(res, 400, { code: 'validation', message: 'invalid catalog' });
+      return;
+    }
+    const entries = parsed.data.achievements.map((a, i) => ({
+      achievementId: a.achievementId,
+      name: a.name,
+      description: a.description,
+      icon: a.icon,
+      color: a.color,
+      sortOrder: a.sortOrder ?? i,
+    }));
+    deps.catalog.registerCatalog(parsed.data.gameId, entries);
+    deps.logger.info('achievement catalog registered', { gameId: parsed.data.gameId, count: entries.length });
+    send(res, 200, { definitions: deps.catalog.definitionsFor(parsed.data.gameId) });
+    return;
+  }
+
+  // Every registered definition, across every game (public — the hub groups them by gameId).
+  if (method === 'GET' && url === '/auth/achievements/catalog') {
+    send(res, 200, { definitions: deps.catalog.allDefinitions() });
+    return;
+  }
+
+  // One game's definitions (public).
+  const catalogGameMatch = method === 'GET' && url?.match(/^\/auth\/achievements\/catalog\/([^/?]+)$/);
+  if (catalogGameMatch) {
+    send(res, 200, { definitions: deps.catalog.definitionsFor(decodeURIComponent(catalogGameMatch[1]!)) });
     return;
   }
 

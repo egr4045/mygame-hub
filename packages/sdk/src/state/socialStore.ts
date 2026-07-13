@@ -48,8 +48,6 @@ interface SocialUIState {
   /** Push an invite into a friend's presence channel. */
   inviteFriend: (accountId: string, target: social.InviteTarget) => void;
   dismissInvite: (code: string) => void;
-  /** Currently-joinable rooms for `game`, derived from live presence. Empty on failure/timeout. */
-  getLobbies: (game: string) => Promise<social.Lobby[]>;
   /** Hides presence/activity from `accountId` both ways and rejects new requests from them — doesn't
    *  touch the friendship, so `unblock` alone restores visibility. */
   block: (accountId: string) => Promise<boolean>;
@@ -149,16 +147,6 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     }),
   inviteFriend: (accountId, target) => emit(social.C2S.inviteFriend, { accountId, ...target }),
   dismissInvite: (code) => set((s) => ({ invites: s.invites.filter((i) => i.code !== code) })),
-
-  getLobbies: (game) =>
-    new Promise<social.Lobby[]>((resolve) => {
-      if (!socket?.connected) {
-        resolve([]);
-        return;
-      }
-      socket.emit(social.C2S.getLobbies, { game }, (ack: social.GetLobbiesAck) => resolve(ack?.lobbies ?? []));
-      window.setTimeout(() => resolve([]), 5000); // don't hang the UI if the ack is lost
-    }),
 
   block: (accountId) =>
     new Promise<boolean>((resolve) => {

@@ -388,6 +388,9 @@ importers:
       '@mygame/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@mygame/telegram':
+        specifier: workspace:*
+        version: link:../../packages/telegram
     devDependencies:
       '@mygame/test-harness':
         specifier: workspace:*

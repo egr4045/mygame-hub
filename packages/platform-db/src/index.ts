@@ -183,6 +183,45 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
       value         TEXT NOT NULL,
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Achievement DISPLAY catalog (name/description/icon/color), owned by auth. Separate from the
+    -- per-account unlocks (accounts.achievements): unlocks are just (game_id, achievement_id) facts,
+    -- and only the game knows what those ids mean. A game registers its catalog via the platform so
+    -- the hub can render a real showcase (locked+unlocked, with descriptions) for every game, not just
+    -- CIVA. Same client-trust model as granting (v1) — a valid session may register a game's catalog.
+    CREATE TABLE IF NOT EXISTS achievement_definitions (
+      game_id        TEXT NOT NULL,
+      achievement_id TEXT NOT NULL,
+      name           TEXT NOT NULL,
+      description    TEXT NOT NULL DEFAULT '',
+      icon           TEXT NOT NULL DEFAULT '🏅',
+      color          TEXT NOT NULL DEFAULT '#66c0f4',
+      sort_order     INT  NOT NULL DEFAULT 0,
+      PRIMARY KEY (game_id, achievement_id)
+    );
+    -- Seed CIVA's catalog (its game repo isn't in this monorepo, so it can't self-register yet). Idempotent:
+    -- ON CONFLICT DO NOTHING leaves any later edit/registration untouched.
+    INSERT INTO achievement_definitions (game_id, achievement_id, name, description, icon, color, sort_order) VALUES
+      ('civa', 'first_blood', 'Первая кровь',  'Одержите свою первую победу.',  '🏆', '#ffd700', 0),
+      ('civa', 'veteran',     'Ветеран',       'Сыграйте 100 матчей.',          '⚔',  '#c0c0c0', 1),
+      ('civa', 'rich',        'Богач',         'Соберите 10 000 золота.',       '💰', '#ffb347', 2),
+      ('civa', 'social',      'Душа компании', 'Добавьте 10 друзей.',           '🤝', '#66c0f4', 3),
+      ('civa', 'night_owl',   'Сова',          'Сыграйте матч после полуночи.', '🦉', '#a020f0', 4)
+    ON CONFLICT (game_id, achievement_id) DO NOTHING;
+
+    -- Player suggestions ("предложить идею"), owned by community. A lightweight moderation queue with a
+    -- status the author's admin moves through (new → accepted/rejected/implemented). Distinct from the
+    -- discussion forum: no replies, just a triaged idea list surfaced in apps/admin.
+    CREATE TABLE IF NOT EXISTS suggestions (
+      id            TEXT PRIMARY KEY,
+      author_id     TEXT NOT NULL,
+      author_name   TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'new',
+      created_at    BIGINT NOT NULL,
+      updated_at    BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS suggestions_created_idx ON suggestions (created_at DESC);
   `);
 };
 

@@ -3,12 +3,20 @@ import { loadSession, login, register, clearSession, freshAccessToken, config } 
 import { DashboardScreen } from './screens/DashboardScreen.js';
 import { GamesScreen } from './screens/GamesScreen.js';
 import { UsersScreen } from './screens/UsersScreen.js';
+import { SuggestionsScreen } from './screens/SuggestionsScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
 import { Sidebar } from './components/Sidebar.js';
 import { ToastProvider } from './components/ToastProvider.js';
 
-type Tab = 'dashboard' | 'games' | 'users' | 'settings';
+type Tab = 'dashboard' | 'games' | 'users' | 'suggestions' | 'settings';
+const TABS: Tab[] = ['dashboard', 'games', 'users', 'suggestions', 'settings'];
 type AccessStatus = 'checking' | 'forbidden' | 'ok' | 'error';
+
+/** Initial tab from the URL hash (the suggestion Telegram alert links to `/admin/#suggestions`). */
+const tabFromHash = (): Tab => {
+  const h = window.location.hash.replace(/^#/, '') as Tab;
+  return TABS.includes(h) ? h : 'dashboard';
+};
 
 const AppContent = (): JSX.Element => {
   const [account, setAccount] = useState<{ accountId: string; displayName: string } | null>(() => {
@@ -19,7 +27,7 @@ const AppContent = (): JSX.Element => {
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessStatus>('checking');
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = useState<Tab>(tabFromHash);
 
   const [accessAttempt, setAccessAttempt] = useState(0);
 
@@ -148,12 +156,22 @@ const AppContent = (): JSX.Element => {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar currentTab={tab} onChangeTab={setTab} onLogout={handleLogout} adminName={account.displayName} />
+      <Sidebar
+        currentTab={tab}
+        onChangeTab={(t) => {
+          setTab(t);
+          // Reflect the tab in the URL hash so a refresh (and the suggestion deep link) lands here.
+          window.location.hash = t;
+        }}
+        onLogout={handleLogout}
+        adminName={account.displayName}
+      />
       <div style={{ flex: 1, padding: '32px 40px', overflowY: 'auto' }}>
         <div className="animate-fade-in" key={tab}>
           {tab === 'dashboard' && <DashboardScreen />}
           {tab === 'games' && <GamesScreen />}
           {tab === 'users' && <UsersScreen />}
+          {tab === 'suggestions' && <SuggestionsScreen />}
           {tab === 'settings' && <SettingsScreen />}
         </div>
       </div>

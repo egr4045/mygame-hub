@@ -5,6 +5,7 @@
  */
 import { type Pool, WriteQueue } from '@mygame/platform-db';
 import type { Logger } from '@mygame/shared-types';
+import type { Suggestion } from '@mygame/protocol';
 import {
   createMemoryCommunityStore,
   type ChangelogEntry,
@@ -49,12 +50,13 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
 
   return {
     async init() {
-      const [changelogRes, threadsRes, postsRes, settingsRes] = await Promise.all([
+      const [changelogRes, threadsRes, postsRes, suggestionsRes, settingsRes] = await Promise.all([
         pool.query(`SELECT id, game_id, version, title, body, published_at FROM changelog`),
         pool.query(`SELECT id, game_id, author_id, author_name, title, created_at, deleted_at FROM discussion_threads`),
         pool.query(
           `SELECT id, thread_id, author_id, author_name, body, created_at, deleted_at FROM discussion_posts ORDER BY created_at ASC`,
         ),
+        pool.query(`SELECT id, author_id, author_name, body, status, created_at, updated_at FROM suggestions`),
         pool.query(`SELECT key, value FROM platform_settings`),
       ]);
       mem.hydrate({
@@ -84,12 +86,22 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
           createdAt: Number(r.created_at),
           deletedAt: r.deleted_at ? new Date(r.deleted_at as string | Date).getTime() : null,
         })),
+        suggestions: suggestionsRes.rows.map((r) => ({
+          id: r.id as string,
+          authorId: r.author_id as string,
+          authorName: r.author_name as string,
+          body: r.body as string,
+          status: r.status as Suggestion['status'],
+          createdAt: Number(r.created_at),
+          updatedAt: Number(r.updated_at),
+        })),
         settings: Object.fromEntries(settingsRes.rows.map((r) => [r.key as string, r.value as string])),
       });
       logger.info('community hydrated', {
         changelog: changelogRes.rows.length,
         threads: threadsRes.rows.length,
         posts: postsRes.rows.length,
+        suggestions: suggestionsRes.rows.length,
         settings: settingsRes.rows.length,
       });
     },
@@ -156,6 +168,28 @@ export const createPgCommunityStore = (pool: Pool, logger: Logger): PgCommunityS
         );
       }
       return deleted;
+    },
+
+    listSuggestions: () => mem.listSuggestions(),
+    createSuggestion(authorId, authorName, body) {
+      const s = mem.createSuggestion(authorId, authorName, body);
+      queue.push('suggestions.insert', () =>
+        pool.query(
+          `INSERT INTO suggestions (id, author_id, author_name, body, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [s.id, s.authorId, s.authorName, s.body, s.status, s.createdAt, s.updatedAt],
+        ),
+      );
+      return s;
+    },
+    setSuggestionStatus(id, status) {
+      const updated = mem.setSuggestionStatus(id, status);
+      if (updated) {
+        queue.push('suggestions.update', () =>
+          pool.query(`UPDATE suggestions SET status = $2, updated_at = $3 WHERE id = $1`, [updated.id, updated.status, updated.updatedAt]),
+        );
+      }
+      return updated;
     },
 
     hydrate: (data) => mem.hydrate(data),

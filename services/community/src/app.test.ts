@@ -49,6 +49,13 @@ const put = (base: string, path: string, body: unknown, token?: string) =>
 const del = (base: string, path: string, token?: string) =>
   fetch(base + path, { method: 'DELETE', headers: token ? { authorization: `Bearer ${token}` } : {} });
 
+const patch = (base: string, path: string, body: unknown, token?: string) =>
+  fetch(base + path, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+
 describe('community app — changelog', () => {
   it('lists changelog entries newest-first', async () => {
     const { base, auth } = await start();
@@ -308,5 +315,49 @@ describe('community app — platform settings', () => {
     expect((await put(base, '/community/admin/settings', { key: 'brand_name', value: 'X' }, token)).status).toBe(403);
     expect((await put(base, '/community/admin/settings', { key: 'brand_name', value: 'X' })).status).toBe(401);
     expect((await put(base, '/community/admin/settings', { key: 'not_a_real_key', value: 'X' }, adminToken)).status).toBe(400);
+  });
+});
+
+describe('community app — suggestions', () => {
+  it('accepts a suggestion from any logged-in user, lists + triages it as admin, notifies once', async () => {
+    let notified = 0;
+    const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+    server = createApp({
+      clock: createFakeClock(1000),
+      logger: createCapturingLogger(),
+      auth,
+      store: createMemoryCommunityStore(),
+      isAdmin: async (id) => id === ADMIN,
+      notifySuggestion: () => {
+        notified += 1;
+      },
+    });
+    const port = await new Promise<number>((r) => server!.listen(0, () => r((server!.address() as AddressInfo).port)));
+    const base = `http://127.0.0.1:${port}`;
+
+    const userToken = await auth.signAccess('user-1', 'Игрок');
+    const adminToken = await auth.signAccess(ADMIN, 'Admin');
+
+    // Anonymous can't submit; a logged-in user can, and it fires the notification once.
+    expect((await post(base, '/community/suggestions', { body: 'idea' })).status).toBe(401);
+    const created = await json<{ id: string; status: string; authorName: string }>(
+      await post(base, '/community/suggestions', { body: 'Добавьте тёмную тему' }, userToken),
+    );
+    expect(created).toMatchObject({ status: 'new', authorName: 'Игрок' });
+    expect(notified).toBe(1);
+
+    // Listing is admin-only.
+    expect((await get(base, '/community/admin/suggestions')).status).toBe(401);
+    expect((await fetch(`${base}/community/admin/suggestions`, { headers: { authorization: `Bearer ${userToken}` } })).status).toBe(403);
+    const list = await json<{ suggestions: { id: string; status: string }[] }>(
+      await fetch(`${base}/community/admin/suggestions`, { headers: { authorization: `Bearer ${adminToken}` } }),
+    );
+    expect(list.suggestions).toHaveLength(1);
+
+    // Admin moves the status; a bad status 400s; an unknown id 404s.
+    const patched = await json<{ status: string }>(await patch(base, `/community/admin/suggestions/${created.id}`, { status: 'implemented' }, adminToken));
+    expect(patched.status).toBe('implemented');
+    expect((await patch(base, `/community/admin/suggestions/${created.id}`, { status: 'nope' }, adminToken)).status).toBe(400);
+    expect((await patch(base, `/community/admin/suggestions/does-not-exist`, { status: 'accepted' }, adminToken)).status).toBe(404);
   });
 });

@@ -153,27 +153,6 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
     };
   };
 
-  /**
-   * Joinable rooms for `game`, derived live from who's currently online with `activity.joinable`
-   * set — not persisted, so this is honestly empty until games actually report joinable activity.
-   * "Host" is just the first online account found in a room; Activity carries no host flag.
-   */
-  const lobbiesFor = (game: string): social.Lobby[] => {
-    const byRoom = new Map<string, { hostAccountId: string; members: number }>();
-    for (const [accountId, act] of activityOf) {
-      if (!act || act.game !== game || !act.joinable || !act.room || !isOnline(accountId)) continue;
-      const existing = byRoom.get(act.room);
-      if (existing) existing.members += 1;
-      else byRoom.set(act.room, { hostAccountId: accountId, members: 1 });
-    }
-    return [...byRoom.entries()].map(([room, { hostAccountId, members }]) => ({
-      room,
-      hostAccountId,
-      hostName: deps.store.getAccount(hostAccountId)?.displayName ?? shortCode(hostAccountId),
-      joinable: true,
-      memberCount: members,
-    }));
-  };
 
   const emitFriendsTo = (account: string): void => {
     const sockets = socketsOf.get(account);
@@ -337,14 +316,6 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
         const rec = deps.invites.create({ ...t, inviter: accountId, inviterName: displayName });
         const sockets = socketsOf.get(friendId);
         if (sockets) for (const id of sockets) io.to(id).emit(social.S2C.invite, { invite: toWireInvite(rec) });
-      }),
-    );
-
-    // List currently-joinable rooms for a game (Find Groups), derived from live presence.
-    socket.on(social.C2S.getLobbies, (raw, ack?: (res: social.GetLobbiesAck) => void) =>
-      guard(() => {
-        const { game } = parse(social.getLobbiesPayload, raw);
-        if (typeof ack === 'function') ack({ lobbies: lobbiesFor(game) });
       }),
     );
 
