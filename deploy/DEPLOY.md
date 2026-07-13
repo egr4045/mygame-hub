@@ -134,3 +134,31 @@ means that domain 502s until GAMEHUB is brought back up.
 - JWT issuer (`civa`) and the SDK's `localStorage` keys (`civa.session`) are unchanged by the
   GAMEHUB rename — deliberately: renaming those would invalidate every existing session/token
   cross-game, which wasn't asked for. Only the deploy path/repo/image names moved.
+
+## Spellforge (cards) — карточная игра
+
+Отдельный репозиторий (не в этом монорепо), on-demand стек по образцу `deploy/civa-game`. Первый
+деплой:
+
+```sh
+# 1) Код игры на сервер (путь /root/cards зашит в манифест оркестратора и его volume-маунт).
+git clone <cards-repo-url> /root/cards
+
+# 2) Секреты и образы игры.
+cd /root/cards/deploy && cp .env.example .env   # выставить CARDS_JWT_SECRET и CARDS_PG_PASSWORD
+bash build-images.sh
+
+# 3) Обновлённая платформа (Caddyfile получил /cards-io/* и /cards/*; оркестратор — манифест cards).
+git -C /root/gamehub pull
+cd /root/gamehub/deploy/gamehub && docker compose up -d --build web orchestrator
+
+# 4) Smoke.
+curl -s -X POST localhost:8088/orchestrator/games/cards/enter   # {"ready":true} — стек поднялся
+docker ps | grep cards-                                         # cards-postgres/server/web живы
+curl -s localhost:8088/cards/ | head -c 60                      # SPA отдаётся
+```
+
+Обновление игры: `git -C /root/cards pull && bash /root/cards/deploy/build-images.sh && cd
+/root/cards/deploy && docker compose up -d`. Оркестратор гасит стек после 10 минут без игроков
+(`/cards-io/`-сокеты считаются через `GET /metrics` на `cards-server:8091`); данные Postgres
+переживают stop/start на named volume `cards-postgres-data`.
