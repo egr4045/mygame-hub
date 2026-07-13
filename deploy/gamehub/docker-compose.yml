@@ -62,6 +62,12 @@ services:
       # registration). Same token the chat disk-monitor uses to SEND — one token, one poller.
       TELEGRAM_BOT_TOKEN: ${OPS_ALERT_BOT_TOKEN:-}
       NODE_ENV: production
+    # This host resolves api.telegram.org to a single IPv4 (149.154.166.110) that is blocked here;
+    # Telegram is only reachable over IPv6 from the host, but the docker bridge is IPv4-only, so the
+    # container is stranded. Pin the resolvable name to a Telegram IPv4 that IS routable (149.154.167.220,
+    # Telegram's long-stable primary api endpoint). TLS SNI/cert stay api.telegram.org, so validation holds.
+    extra_hosts:
+      - 'api.telegram.org:149.154.167.220'
     depends_on:
       - postgres
     networks:
@@ -116,6 +122,10 @@ services:
       CHAT_DISK_ALERT_PCT: ${CHAT_DISK_ALERT_PCT:-15}
       CHAT_DISK_ALERT_MIN_GB: ${CHAT_DISK_ALERT_MIN_GB:-3}
       NODE_ENV: production
+    # Same Telegram-reachability workaround as the auth service (see the note there): the DNS answer
+    # for api.telegram.org is a blocked IPv4; pin the routable Telegram IPv4 so disk alerts can send.
+    extra_hosts:
+      - 'api.telegram.org:149.154.167.220'
     volumes:
       - gamehub-chat-uploads:/data
     depends_on:
