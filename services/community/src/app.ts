@@ -279,7 +279,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: AppDeps):
   if (method === 'PUT' && url === '/community/admin/settings') {
     const claims = await requireAdmin(req, res, deps);
     if (!claims) return;
-    const parsed = setPlatformSettingRequest.safeParse(await readJson(req));
+    // Sound overrides can be audio data URLs — allow a larger body than the 200 KB default.
+    const parsed = setPlatformSettingRequest.safeParse(await readJson(req, 1_500_000));
     if (!parsed.success) {
       send(res, 400, { code: 'validation', message: 'invalid setting' });
       return;

@@ -33,6 +33,16 @@ export interface GameInfo {
  * `path` wins in a production build (same origin as the hub — no protocol mismatch possible);
  * `externalPort` is the dev fallback (and the only option for a game that hasn't migrated to `path`).
  */
+/** Apply admin status overrides (from the public platform settings) onto the registry in place —
+ *  lets ops flip a game to «на обслуживании»/«скоро»/«играбельно» from apps/admin without a redeploy.
+ *  Called once on hub boot before the first render; unknown ids/statuses are ignored. */
+export const applyGameStatusOverrides = (overrides: Record<string, string>): void => {
+  for (const g of GAMES) {
+    const s = overrides[g.id];
+    if (s === 'playable' || s === 'soon' || s === 'maintenance') g.status = s;
+  }
+};
+
 export const getGameOrigin = (game: GameInfo): string | null => {
   if (game.path && !import.meta.env.DEV) return `${window.location.origin}/${game.path}`;
   if (game.externalPort) {

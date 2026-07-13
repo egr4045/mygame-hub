@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { usePlatformStore } from './platform/platformStore.js';
-import { useSocialStore, useChatStore, useCallStore, useToastStore } from '@mygame/sdk';
+import { useSocialStore, useChatStore, useCallStore, useToastStore, getPlatformSettings, setCustomSound } from '@mygame/sdk';
 import { resolveInvite } from './net/inviteClient.js';
 import { routeToInvite } from './platform/inviteRouting.js';
+import { applyGameStatusOverrides } from './platform/games.js';
 import { AuthScreen } from './screens/AuthScreen.js';
 import { HubScreen } from './screens/HubScreen.js';
 
@@ -23,9 +24,26 @@ export const App = (): JSX.Element => {
   const [inviteCode] = useState(readInviteCodeFromUrl);
   const invites = useSocialStore((s) => s.invites);
   const seenInvites = useRef<Set<string>>(new Set());
+  const [, forceRender] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
     usePlatformStore.getState().restore();
+  }, []);
+
+  // Public platform settings (admin-controlled): apply game-status overrides onto the registry and
+  // register any custom notification sounds, then re-render so the new statuses show.
+  useEffect(() => {
+    void getPlatformSettings().then((s) => {
+      try {
+        if (s.game_status_overrides) applyGameStatusOverrides(JSON.parse(s.game_status_overrides) as Record<string, string>);
+      } catch {
+        /* malformed override JSON — ignore */
+      }
+      setCustomSound('message', s.sound_message || null);
+      setCustomSound('call', s.sound_call || null);
+      setCustomSound('achievement', s.sound_achievement || null);
+      forceRender();
+    });
   }, []);
 
   // A friend's pushed game invite → a prominent Steam-style bottom-right toast with Join/Later

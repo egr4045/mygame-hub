@@ -24,6 +24,18 @@ export const getChangelog = async (gameId: string): Promise<ChangelogEntry[]> =>
   }
 };
 
+/** Public platform settings (brand, game-status overrides, sound overrides) — a plain key→value
+ *  map. Read is public; writes are admin-only (apps/admin). Empty object on failure. */
+export const getPlatformSettings = async (): Promise<Record<string, string>> => {
+  try {
+    const res = await fetch(`${config.communityUrl}/community/admin/settings`);
+    if (!res.ok) return {};
+    return ((await res.json()) as { settings: Record<string, string> }).settings ?? {};
+  } catch {
+    return {};
+  }
+};
+
 /** Publish a changelog entry. Requires the caller's account to be a community admin. Null on failure. */
 export const createChangelog = async (entry: CreateChangelogRequest): Promise<ChangelogEntry | null> => {
   const token = await freshAccessToken();

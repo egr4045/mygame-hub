@@ -5,10 +5,12 @@ import {
   deleteChangelog,
   deletePost,
   deleteThread,
+  getPlatformSettings,
   getThread,
   listChangelog,
   listLobbies,
   listThreads,
+  setPlatformSetting,
   stopLobby,
   updateChangelog,
   type LobbyGame,
@@ -349,6 +351,73 @@ const LobbySection = (): JSX.Element => {
  *  game shows up here without an admin-app code change. */
 const KNOWN_GAME_IDS = ['civa', 'svoyak', 'example-game', 'cards'];
 
+const STATUS_LABELS: Record<string, string> = {
+  playable: 'Играбельна',
+  maintenance: 'На обслуживании',
+  soon: 'Скоро выйдет',
+};
+
+/** Override each game's status shown in the hub (playable/maintenance/soon), stored as a JSON map in
+ *  the public `game_status_overrides` platform setting. Applies in the hub on its next load. */
+const GameStatusSection = ({ gameIds }: { gameIds: string[] }): JSX.Element => {
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    void (async () => {
+      const s = await getPlatformSettings();
+      try {
+        setOverrides(s?.game_status_overrides ? (JSON.parse(s.game_status_overrides) as Record<string, string>) : {});
+      } catch {
+        setOverrides({});
+      }
+    })();
+  }, []);
+
+  const setStatus = async (id: string, status: string): Promise<void> => {
+    const next = { ...overrides };
+    if (status) next[id] = status;
+    else delete next[id]; // "" = fall back to the registry default
+    setOverrides(next);
+    setBusy(true);
+    const ok = await setPlatformSetting('game_status_overrides', JSON.stringify(next));
+    setBusy(false);
+    showToast(ok ? 'Статус обновлён' : 'Не удалось сохранить статус', ok ? 'success' : 'error');
+  };
+
+  return (
+    <div className="glass-card">
+      <h3 style={{ margin: '0 0 8px', fontSize: 18 }}>Статусы игр</h3>
+      <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 16px' }}>
+        Переопределяет статус игры в хабе. Применяется при следующей загрузке хаба. «По умолчанию» —
+        значение из реестра игр.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {gameIds.map((id) => (
+          <div key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--bg-dark)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
+            <strong style={{ fontSize: 15 }}>{id}</strong>
+            <select
+              className="input-field"
+              style={{ minWidth: 200 }}
+              disabled={busy}
+              value={overrides[id] ?? ''}
+              onChange={(e) => void setStatus(id, e.target.value)}
+            >
+              <option value="">По умолчанию</option>
+              {Object.entries(STATUS_LABELS).map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export const GamesScreen = (): JSX.Element => {
   const [gameId, setGameId] = useState('civa');
   const [gameIds, setGameIds] = useState<string[]>(KNOWN_GAME_IDS);
@@ -372,6 +441,7 @@ export const GamesScreen = (): JSX.Element => {
           ))}
         </select>
       </div>
+      <GameStatusSection gameIds={gameIds} />
       <ChangelogSection gameId={gameId} />
       <DiscussionsSection gameId={gameId} />
       <LobbySection />

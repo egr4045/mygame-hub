@@ -59,14 +59,31 @@ export type AdminRosterResponse = z.infer<typeof adminRosterResponse>;
  * key-value UI (see `platform_settings` table). Reads are public (e.g. a support email is
  * reasonably shown to players too); only the write is admin-gated.
  */
-export const platformSettingsKeys = ['brand_name', 'support_email', 'tos_url'] as const;
+export const platformSettingsKeys = [
+  'brand_name',
+  'support_email',
+  'tos_url',
+  /** JSON map of gameId → 'playable'|'maintenance'|'soon' overriding the client registry defaults. */
+  'game_status_overrides',
+  /** Notification sound overrides — a data URL or absolute URL to an audio clip (empty = built-in). */
+  'sound_message',
+  'sound_call',
+  'sound_achievement',
+] as const;
 export type PlatformSettingsKey = (typeof platformSettingsKeys)[number];
+
+/** Sound values can be audio data URLs; keep the rest short. */
+const SOUND_KEYS: readonly PlatformSettingsKey[] = ['sound_message', 'sound_call', 'sound_achievement'];
 
 export const platformSettingsResponse = z.object({ settings: z.record(z.string()) });
 export type PlatformSettingsResponse = z.infer<typeof platformSettingsResponse>;
 
-export const setPlatformSettingRequest = z.object({
-  key: z.enum(platformSettingsKeys),
-  value: z.string().max(500),
-});
+export const setPlatformSettingRequest = z
+  .object({
+    key: z.enum(platformSettingsKeys),
+    value: z.string().max(1_000_000),
+  })
+  .refine((p) => SOUND_KEYS.includes(p.key) || p.value.length <= 2000, {
+    message: 'value too long for this key',
+  });
 export type SetPlatformSettingRequest = z.infer<typeof setPlatformSettingRequest>;
