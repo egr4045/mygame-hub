@@ -6,7 +6,16 @@
  */
 import { useState } from 'react';
 import type { social } from '@mygame/protocol';
-import { useSocialStore, useChatStore, useToastStore, useMenuStore, loadSession } from '@mygame/sdk';
+import {
+  useSocialStore,
+  useChatStore,
+  useToastStore,
+  useMenuStore,
+  loadSession,
+  useFriendSearch,
+  UserProfileModal,
+  type ProfileTarget,
+} from '@mygame/sdk';
 
 /** Clipboard copy with an execCommand fallback for contexts where navigator.clipboard is blocked. */
 const copyText = (text: string, onOk: () => void, onFail: () => void): void => {
@@ -80,6 +89,98 @@ const iconBtnStyle: React.CSSProperties = {
   color: 'var(--c-text-primary)',
 };
 
+/** Non-actionable relation labels for a search row (add / accept render as buttons instead). */
+const RELATION_LABEL: Partial<Record<social.SearchRelation, string>> = {
+  self: 'это вы',
+  friend: '✓ в друзьях',
+  outgoing: 'заявка отправлена',
+};
+
+/** Live search results (people to add) — avatar + name + code so you recognise a friend at a glance,
+ *  with a relation-aware action. Tapping the avatar/name opens the full profile card. */
+const SearchResultsMobile = ({
+  results,
+  loading,
+  onOpen,
+}: {
+  results: social.SearchResult[];
+  loading: boolean;
+  onOpen: (r: ProfileTarget) => void;
+}): JSX.Element => {
+  const { addByCode, accept } = useSocialStore.getState();
+  const addToast = useToastStore((s) => s.addToast);
+
+  if (loading && results.length === 0)
+    return <div className="hub-card" style={{ padding: 20, textAlign: 'center', color: 'var(--c-text-muted)', fontSize: 14 }}>Поиск…</div>;
+  if (results.length === 0)
+    return <div className="hub-card" style={{ padding: 20, textAlign: 'center', color: 'var(--c-text-muted)', fontSize: 14 }}>Никого не найдено</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {results.map((r) => (
+        <div key={r.accountId} className="hub-card" style={{ padding: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div onClick={() => onOpen(r)} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0, cursor: 'pointer' }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                flex: '0 0 auto',
+                borderRadius: 'var(--r-md)',
+                overflow: 'hidden',
+                background: 'var(--c-panel-hover)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: 18,
+                color: 'var(--c-text-primary)',
+              }}
+            >
+              {r.avatarIcon ? (
+                <img src={r.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                (r.displayName[0] ?? '?').toUpperCase()
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--c-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.displayName}
+              </div>
+              {r.friendCode && (
+                <div style={{ fontSize: 12, color: 'var(--c-text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: 1 }}>{r.friendCode}</div>
+              )}
+            </div>
+          </div>
+          {r.relation === 'none' ? (
+            <button
+              onClick={() =>
+                void addByCode(r.accountId).then((ack) =>
+                  addToast({
+                    type: 'system',
+                    title: ack.error ? 'Не добавлено' : 'Заявка отправлена',
+                    content: ack.error ?? `Запрос отправлен: ${r.displayName}`,
+                    icon: ack.error ? '⚠️' : '➕',
+                  }),
+                )
+              }
+              className="hub-btn hub-btn-primary"
+              style={{ padding: '10px 14px', minHeight: 44, whiteSpace: 'nowrap' }}
+            >
+              ＋ Добавить
+            </button>
+          ) : r.relation === 'incoming' ? (
+            <button onClick={() => accept(r.accountId)} className="hub-btn hub-btn-primary" style={{ padding: '10px 14px', minHeight: 44, whiteSpace: 'nowrap' }}>
+              ✓ Принять
+            </button>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--c-text-muted)', whiteSpace: 'nowrap' }}>{RELATION_LABEL[r.relation] ?? ''}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export const MobileFriendsTab = (): JSX.Element => {
   const me = useSocialStore((s) => s.me);
   const friends = useSocialStore((s) => s.friends);
@@ -92,6 +193,9 @@ export const MobileFriendsTab = (): JSX.Element => {
 
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
+  const [viewingProfile, setViewingProfile] = useState<ProfileTarget | null>(null);
+  const { results, loading } = useFriendSearch(code);
+  const searching = code.trim().length >= 2;
 
   const myCode = loadSession()?.friendCode ?? me?.accountId?.slice(0, 8) ?? '…';
 
@@ -128,6 +232,7 @@ export const MobileFriendsTab = (): JSX.Element => {
 
   const openFriendMenu = (e: React.MouseEvent, f: social.Friend): void => {
     openMenu(e.clientX, e.clientY, [
+      { label: '👤 Профиль', action: () => setViewingProfile(f) },
       { label: '💬 Написать', action: () => openChatWithUser(f.accountId, f.displayName) },
       { label: '📞 Позвать', action: () => ringUser(f.accountId, f.displayName, 'audio'), disabled: f.presence !== 'online' },
       { separator: true, action: () => {} },
@@ -137,22 +242,28 @@ export const MobileFriendsTab = (): JSX.Element => {
 
   const FriendRow = ({ f }: { f: social.Friend }): JSX.Element => (
     <div className="hub-card" style={{ padding: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-      <Avatar f={f} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 15,
-            fontWeight: 700,
-            color: 'var(--c-text-primary)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {f.displayName}
-          {f.titleAchievement && <span title="Есть титул"> 🏅</span>}
+      {/* Tap the avatar/name to open the full profile card; the icon buttons keep their own actions. */}
+      <div
+        onClick={() => setViewingProfile(f)}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0, cursor: 'pointer' }}
+      >
+        <Avatar f={f} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: 'var(--c-text-primary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {f.displayName}
+            {f.titleAchievement && <span title="Есть титул"> 🏅</span>}
+          </div>
+          <div style={{ fontSize: 12, color: f.activity ? 'var(--c-positive)' : 'var(--c-text-muted)' }}>{activityText(f)}</div>
         </div>
-        <div style={{ fontSize: 12, color: f.activity ? 'var(--c-positive)' : 'var(--c-text-muted)' }}>{activityText(f)}</div>
       </div>
       <button onClick={() => openChatWithUser(f.accountId, f.displayName)} aria-label="Написать" style={iconBtnStyle}>
         💬
@@ -191,24 +302,34 @@ export const MobileFriendsTab = (): JSX.Element => {
         </div>
       </div>
 
-      {/* Add a friend */}
+      {/* Find friends — search by nick OR code (exact code ranked first) */}
       <div style={{ display: 'flex', gap: 8 }}>
         <input
           value={code}
-          placeholder="Код друга"
+          placeholder="🔍 Ник или код друга"
           onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submitAdd()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') results[0] ? setViewingProfile(results[0]) : submitAdd();
+          }}
           className="hub-input"
           style={{ flex: 1, padding: '12px 14px', fontSize: 15, minHeight: 48 }}
+          aria-label="Поиск друзей по нику или коду"
         />
-        <button onClick={submitAdd} disabled={!code.trim()} className="hub-btn hub-btn-primary" style={{ padding: '0 18px', minHeight: 48 }}>
-          Добавить
-        </button>
+        {code && (
+          <button onClick={() => setCode('')} className="hub-btn" style={{ padding: '0 18px', minHeight: 48 }} aria-label="Очистить">
+            ✕
+          </button>
+        )}
       </div>
 
       {status !== 'connected' && (
         <div style={{ fontSize: 13, color: 'var(--c-text-muted)', textAlign: 'center' }}>Подключение к сети друзей…</div>
       )}
+
+      {searching ? (
+        <SearchResultsMobile results={results} loading={loading} onOpen={setViewingProfile} />
+      ) : (
+      <>
 
       {/* Incoming requests */}
       {incoming.length > 0 && (
@@ -275,9 +396,13 @@ export const MobileFriendsTab = (): JSX.Element => {
 
       {accepted.length === 0 && incoming.length === 0 && outgoing.length === 0 && status === 'connected' && (
         <div className="hub-card" style={{ padding: 20, textAlign: 'center', color: 'var(--c-text-muted)', fontSize: 14 }}>
-          У вас пока нет друзей. Поделитесь своим кодом или добавьте друга по коду выше.
+          У вас пока нет друзей. Найдите друга по нику или коду выше — узнаете его по аватарке.
         </div>
       )}
+      </>
+      )}
+
+      {viewingProfile && <UserProfileModal target={viewingProfile} onClose={() => setViewingProfile(null)} />}
     </div>
   );
 };

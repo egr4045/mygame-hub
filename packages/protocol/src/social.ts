@@ -42,6 +42,7 @@ export type Friend = z.infer<typeof friend>;
 // --- Client -> Server events -------------------------------------------------
 export const C2S = {
   request: 'social.request', // send a friend request by short friend code (or raw accountId); ack {ok|error}
+  search: 'social.search', // find accounts by display name OR friend code (ack returns matches + my relation)
   accept: 'social.accept',
   decline: 'social.decline', // decline an incoming request / cancel an outgoing one
   remove: 'social.remove',
@@ -58,6 +59,25 @@ export const C2S = {
 export const requestPayload = z.object({ code: z.string().min(1).max(64) });
 export const requestAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
 export type RequestAck = z.infer<typeof requestAck>;
+
+/** Find people to friend by typing a name OR a friend code — the server ranks exact code matches
+ *  first, then name matches. `relation` lets the UI show the right action (add / pending / already a
+ *  friend) and recognise yourself. Avatar + code come back so you can spot the right person visually. */
+export const searchPayload = z.object({ query: z.string().min(1).max(64) });
+export const searchRelation = z.enum(['self', 'friend', 'incoming', 'outgoing', 'none']);
+export type SearchRelation = z.infer<typeof searchRelation>;
+export const searchResult = z.object({
+  accountId: z.string(),
+  displayName: z.string(),
+  avatarIcon: z.string().nullable(),
+  friendCode: z.string().nullable(),
+  titleAchievement: titleAchievementRef,
+  relation: searchRelation,
+});
+export type SearchResult = z.infer<typeof searchResult>;
+export const searchAck = z.object({ results: z.array(searchResult) });
+export type SearchPayload = z.infer<typeof searchPayload>;
+export type SearchAck = z.infer<typeof searchAck>;
 export const targetPayload = z.object({ accountId: z.string().min(1) });
 export const setActivityPayload = z.object({ activity });
 export const getStatePayload = z.object({}).strict();

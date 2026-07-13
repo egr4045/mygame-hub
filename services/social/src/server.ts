@@ -255,6 +255,38 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
         }
       })();
     });
+    // Find people to add — by display name OR friend code. The ack carries my relation to each hit so
+    // the UI shows the right action (add / pending / already a friend / it's me). Async: hits the
+    // shared accounts table. Accounts either side has blocked are omitted (anti-probing, like request).
+    socket.on(social.C2S.search, (raw, ack?: (res: social.SearchAck) => void) => {
+      void (async () => {
+        try {
+          const { query } = parse(social.searchPayload, raw);
+          const matches = await deps.store.searchAccounts(query, 8);
+          const edges = deps.store.friendsOf(accountId);
+          const relationOf = (id: string): social.SearchRelation => {
+            if (id === accountId) return 'self';
+            const edge = edges.find((e) => e.accountId === id);
+            return edge ? (edge.status === 'accepted' ? 'friend' : edge.status) : 'none';
+          };
+          const results = matches
+            .filter((m) => !deps.store.isBlocked(accountId, m.accountId))
+            .map((m) => ({
+              accountId: m.accountId,
+              displayName: m.displayName,
+              avatarIcon: m.avatarIcon,
+              friendCode: m.friendCode,
+              titleAchievement: m.titleAchievement,
+              relation: relationOf(m.accountId),
+            }));
+          ack?.({ results });
+        } catch (err) {
+          if (!(err instanceof ContractError)) deps.logger.error('search', { err: String(err) });
+          ack?.({ results: [] });
+        }
+      })();
+    });
+
     socket.on(social.C2S.accept, (raw) =>
       guard(() => {
         deps.store.accept(accountId, parse(social.targetPayload, raw).accountId);

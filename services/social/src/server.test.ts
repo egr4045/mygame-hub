@@ -328,4 +328,34 @@ describe('social server — blocking', () => {
     expect((await getBlocked(c1)).blocked).toEqual([{ accountId: 'a2', displayName: 'Wei' }]);
     expect((await getBlocked(c2)).blocked).toEqual([]);
   });
+
+  it('searches accounts by name and annotates my relation to each', async () => {
+    const search = (c: ClientSocket, query: string): Promise<social.SearchAck> =>
+      new Promise((res) => c.emit(social.C2S.search, { query }, (ack: social.SearchAck) => res(ack)));
+
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+
+    // A stranger found by name is relation 'none'; my own account is marked 'self'.
+    const r1 = await search(c1, 'Wei');
+    expect(r1.results.find((r) => r.accountId === 'a2')).toMatchObject({ displayName: 'Wei', relation: 'none' });
+    expect((await search(c1, 'Mara')).results.find((r) => r.accountId === 'a1')?.relation).toBe('self');
+
+    // After I request them, the pending edge shows up as 'outgoing'.
+    c1.emit(social.C2S.request, { code: 'a2' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await search(c1, 'Wei')).results.find((r) => r.accountId === 'a2')?.relation).toBe('outgoing');
+  });
+
+  it('omits blocked accounts from search results', async () => {
+    const search = (c: ClientSocket, query: string): Promise<social.SearchAck> =>
+      new Promise((res) => c.emit(social.C2S.search, { query }, (ack: social.SearchAck) => res(ack)));
+
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    await block(c1, 'a2');
+    expect((await search(c1, 'Wei')).results.find((r) => r.accountId === 'a2')).toBeUndefined();
+  });
 });

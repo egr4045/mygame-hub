@@ -183,5 +183,34 @@ export const createPgSocialStore = (pool: Pool, logger: Logger): PgSocialStore =
         return null;
       }
     },
+
+    async searchAccounts(query, limit) {
+      const needle = query.trim();
+      if (!needle) return [];
+      // Escape LIKE wildcards in the user input so a typed % / _ is matched literally (default \ escape).
+      const esc = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const exactCode = needle.toUpperCase();
+      try {
+        const r = await pool.query(
+          `SELECT id, display_name, avatar_icon, friend_code, title_achievement
+             FROM accounts
+            WHERE is_banned IS NOT TRUE
+              AND (friend_code = $1 OR friend_code ILIKE $2 OR display_name ILIKE $3)
+            ORDER BY (friend_code = $1) DESC, (display_name ILIKE $4) DESC, char_length(display_name) ASC
+            LIMIT $5`,
+          [exactCode, `${exactCode}%`, `%${esc}%`, `${esc}%`, limit],
+        );
+        return r.rows.map((row) => ({
+          accountId: row.id as string,
+          displayName: row.display_name as string,
+          avatarIcon: (row.avatar_icon as string | null) ?? null,
+          friendCode: (row.friend_code as string | null) ?? null,
+          titleAchievement: (row.title_achievement as TitleAchievementRef | null) ?? null,
+        }));
+      } catch (err) {
+        logger.error('account search failed', { err: String(err) });
+        return [];
+      }
+    },
   };
 };

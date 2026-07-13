@@ -4,6 +4,8 @@ import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useChatStore } from '../state/chatStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { useFriendSearch } from '../state/useFriendSearch.js';
+import { UserProfileModal, type ProfileTarget } from './UserProfileModal.js';
 import { loadSession } from '../authClient.js';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -46,6 +48,29 @@ const activityText = (f: social.Friend): string => {
   return 'В сети';
 };
 
+/** 1–2 letters for an avatar placeholder in search results. */
+const initials = (name: string): string =>
+  (name || '?')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+
+/** Deterministic pleasant colour from a name (search-result avatar placeholders). */
+const avatarBg = (name: string): string => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h} 45% 42%)`;
+};
+
+/** Non-actionable relation labels for a search row (actionable ones render as buttons instead). */
+const RELATION_BADGE: Partial<Record<social.SearchRelation, { label: string; color: string }>> = {
+  self: { label: 'это вы', color: '#8f98a0' },
+  friend: { label: '✓ в друзьях', color: '#5c7e10' },
+  outgoing: { label: 'заявка отправлена', color: '#8f98a0' },
+};
+
 export const FriendsSidebar = ({
   inOverlay = false,
   onJoinActivity,
@@ -66,8 +91,10 @@ export const FriendsSidebar = ({
   const { addByCode, accept, decline, removeFriend, inviteFriend, block } = useSocialStore.getState();
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
-  const [viewingProfile, setViewingProfile] = useState<social.Friend | null>(null);
+  const [viewingProfile, setViewingProfile] = useState<ProfileTarget | null>(null);
   const addToast = useToastStore((s) => s.addToast);
+  const { results, loading } = useFriendSearch(code);
+  const searching = code.trim().length >= 2;
 
   const incoming = friends.filter((f) => f.status === 'incoming');
   const outgoing = friends.filter((f) => f.status === 'outgoing');
@@ -161,20 +188,32 @@ export const FriendsSidebar = ({
         </div>
       </div>
 
-      {/* Add Friend block */}
+      {/* Find friends — search by nick OR code (exact code ranked first). */}
       <div style={{ padding: '8px 12px', display: 'flex', gap: 6, borderBottom: '1px solid #23262e' }}>
         <input
           value={code}
-          placeholder="Код друга"
+          placeholder="🔍 Ник или код друга"
           onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') results[0] ? setViewingProfile(results[0]) : add();
+            else if (e.key === 'Escape') setCode('');
+          }}
           style={inputStyle}
+          aria-label="Поиск друзей по нику или коду"
         />
-        <button onClick={add} style={smallBtn}>Добавить</button>
+        {code && (
+          <button onClick={() => setCode('')} style={{ ...smallBtn, padding: '6px 9px' }} aria-label="Очистить">
+            ✕
+          </button>
+        )}
       </div>
 
-      {/* Lists */}
+      {/* Lists — search results while typing, otherwise your friend sections. */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
+        {searching ? (
+          <SearchResults results={results} loading={loading} onOpen={setViewingProfile} />
+        ) : (
+        <>
         {inGame.length > 0 && (
           <>
             <div style={sectionLabel}>В ИГРЕ ({inGame.length})</div>
@@ -226,6 +265,8 @@ export const FriendsSidebar = ({
             ))}
           </>
         )}
+        </>
+        )}
       </div>
 
       {/* Footer / Your code */}
@@ -234,26 +275,7 @@ export const FriendsSidebar = ({
         <button onClick={copyCode} style={{...smallBtn, padding: '4px 8px'}}>{copied ? 'Скопировано' : 'Копировать'}</button>
       </div>
 
-      {viewingProfile && (
-        <div
-          onClick={() => setViewingProfile(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: '#1b2838', border: '1px solid #3d4450', borderRadius: 8, padding: 24, width: 280, textAlign: 'center' }}>
-            <div style={{ width: 80, height: 80, borderRadius: '50%', margin: '0 auto 12px', overflow: 'hidden', background: '#3d4450', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
-              {viewingProfile.avatarIcon ? (
-                <img src={viewingProfile.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : '👤'}
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>{viewingProfile.displayName}</div>
-            <div style={{ fontSize: 12, color: '#8f98a0', marginTop: 4 }}>{activityText(viewingProfile)}</div>
-            {viewingProfile.titleAchievement && (
-              <div style={{ fontSize: 12, color: '#dcdedf', marginTop: 8 }}>🏅 Есть титул</div>
-            )}
-            <button onClick={() => setViewingProfile(null)} style={{ ...smallBtn, marginTop: 16, width: '100%' }}>Закрыть</button>
-          </div>
-        </div>
-      )}
+      {viewingProfile && <UserProfileModal target={viewingProfile} onClose={() => setViewingProfile(null)} />}
     </div>
   );
 };
@@ -307,5 +329,98 @@ const FriendRow = ({ f, onContextMenu }: { f: social.Friend, onContextMenu: (e: 
         </div>
       </div>
     </div>
+  );
+};
+
+/** Live search results (people to add) — avatar + name + code so a friend is recognisable at a
+ *  glance, with a relation-aware action. Clicking the row opens the full profile card. */
+const SearchResults = ({
+  results,
+  loading,
+  onOpen,
+}: {
+  results: social.SearchResult[];
+  loading: boolean;
+  onOpen: (r: social.SearchResult) => void;
+}): JSX.Element => {
+  const { addByCode, accept } = useSocialStore.getState();
+  const addToast = useToastStore((s) => s.addToast);
+
+  if (loading && results.length === 0)
+    return <div style={{ padding: 16, textAlign: 'center', color: '#8f98a0', fontSize: 13 }}>Поиск…</div>;
+  if (results.length === 0)
+    return <div style={{ padding: 16, textAlign: 'center', color: '#8f98a0', fontSize: 13 }}>Никого не найдено</div>;
+
+  return (
+    <>
+      {results.map((r) => {
+        const badge = RELATION_BADGE[r.relation];
+        return (
+          <div
+            key={r.accountId}
+            onClick={() => onOpen(r)}
+            style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderRadius: 4 }}
+            onMouseOver={(e) => (e.currentTarget.style.background = '#23262e')}
+            onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                flexShrink: 0,
+                borderRadius: '50%',
+                overflow: 'hidden',
+                background: avatarBg(r.displayName),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              {r.avatarIcon ? (
+                <img src={r.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                initials(r.displayName)
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#dcdedf', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.displayName}
+              </div>
+              {r.friendCode && (
+                <div style={{ fontSize: 11, color: '#6c7784', fontFamily: 'monospace', letterSpacing: 0.5 }}>{r.friendCode}</div>
+              )}
+            </div>
+            {r.relation === 'none' ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void addByCode(r.accountId).then((ack) =>
+                    addToast({ type: 'system', title: 'Друзья', content: ack.error ?? `Запрос отправлен: ${r.displayName}`, icon: ack.error ? '⚠️' : '➕' }),
+                  );
+                }}
+                style={{ ...smallBtn, background: '#2AABEE', padding: '5px 10px', whiteSpace: 'nowrap' }}
+              >
+                ＋ Добавить
+              </button>
+            ) : r.relation === 'incoming' ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  accept(r.accountId);
+                }}
+                style={{ ...smallBtn, background: '#5c7e10', padding: '5px 10px', whiteSpace: 'nowrap' }}
+              >
+                ✓ Принять
+              </button>
+            ) : badge ? (
+              <span style={{ fontSize: 11, color: badge.color, whiteSpace: 'nowrap' }}>{badge.label}</span>
+            ) : null}
+          </div>
+        );
+      })}
+    </>
   );
 };

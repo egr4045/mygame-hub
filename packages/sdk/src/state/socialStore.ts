@@ -35,6 +35,10 @@ interface SocialUIState {
   /** Send a friend request by short friend code (or raw accountId). Resolves with the server's ack
    *  so the caller can show «Код не найден» etc. */
   addByCode: (code: string) => Promise<social.RequestAck>;
+  /** Live search for people to add, by display name or friend code (exact code ranked first). Each
+   *  result carries my relation to that account so the UI shows add / pending / friend. Empty on
+   *  failure or if not connected. */
+  search: (query: string) => Promise<social.SearchResult[]>;
   accept: (accountId: string) => void;
   decline: (accountId: string) => void;
   removeFriend: (accountId: string) => void;
@@ -116,6 +120,15 @@ export const useSocialStore = create<SocialUIState>((set) => ({
       }
       // Send as-typed — the server normalises (UPPER for the friend code, exact for a raw accountId).
       socket.emit(social.C2S.request, { code: code.trim() }, (ack: social.RequestAck) => resolve(ack ?? { ok: true }));
+    }),
+  search: (query) =>
+    new Promise<social.SearchResult[]>((resolve) => {
+      if (!socket?.connected) {
+        resolve([]);
+        return;
+      }
+      socket.emit(social.C2S.search, { query }, (ack: social.SearchAck) => resolve(ack?.results ?? []));
+      window.setTimeout(() => resolve([]), 5000); // don't hang the UI if the ack is lost
     }),
   accept: (accountId) => emit(social.C2S.accept, { accountId }),
   decline: (accountId) => emit(social.C2S.decline, { accountId }),

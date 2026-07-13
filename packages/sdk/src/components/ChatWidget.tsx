@@ -3,6 +3,7 @@ import { useChatStore, type ChatMessage, type ChatSession } from '../state/chatS
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { UserProfileModal } from './UserProfileModal.js';
 import { useDroppable } from '@dnd-kit/core';
 import ReactMarkdown from 'react-markdown';
 import { config } from '../config.js';
@@ -1132,69 +1133,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
       </div>
       </div>
 
-      {viewingProfile && (() => {
-        const vp = viewingProfile;
-        const online = vp.presence === 'online';
-        const isFriend = friends.some((f) => f.accountId === vp.accountId && f.status === 'accepted');
-        const isSelf = vp.accountId === me?.accountId;
-        const close = () => setViewingProfile(null);
-        return (
-          <div
-            onClick={close}
-            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-          >
-            <div onClick={(e) => e.stopPropagation()} style={{ background: '#1b2838', border: '1px solid #3d4450', borderRadius: 12, width: 300, maxWidth: '100%', overflow: 'hidden', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}>
-              {/* Banner */}
-              <div style={{ height: 72, background: `linear-gradient(135deg, ${avatarBg(vp.displayName)}, #23262e)` }} />
-              <div style={{ padding: '0 20px 20px', marginTop: -36, textAlign: 'center' }}>
-                <div style={{ display: 'inline-block', position: 'relative', border: '4px solid #1b2838', borderRadius: '50%' }}>
-                  <Avatar src={vp.avatarIcon} name={vp.displayName} size={72} />
-                  <span style={{ position: 'absolute', right: 4, bottom: 4, width: 16, height: 16, borderRadius: '50%', background: online ? '#3ba55d' : '#6c7784', border: '3px solid #1b2838' }} />
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 18, color: '#fff', marginTop: 8 }}>{vp.displayName}</div>
-                <div style={{ fontSize: 12, color: online ? '#7ec98f' : '#8f98a0', marginTop: 2 }}>{activityText(vp)}</div>
-                {vp.titleAchievement && (
-                  <div style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#d4af37', background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.35)', borderRadius: 20, padding: '3px 12px' }}>
-                    🏅 Есть титульное достижение
-                  </div>
-                )}
-
-                {!isSelf && (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                    <button
-                      onClick={() => { openChatWithUser(vp.accountId, vp.displayName); close(); }}
-                      style={{ flex: 1, background: '#2AABEE', color: '#fff', border: 'none', borderRadius: 6, padding: '9px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-                    >
-                      💬 Написать
-                    </button>
-                    <button
-                      onClick={() => { useChatStore.getState().ringUser(vp.accountId, vp.displayName, 'audio'); close(); }}
-                      title="Позвонить"
-                      aria-label="Позвонить"
-                      style={{ background: '#3d4450', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 12px', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
-                    >
-                      📞
-                    </button>
-                  </div>
-                )}
-                {!isSelf && !isFriend && (
-                  <button
-                    onClick={() =>
-                      void addByCode(vp.accountId).then((ack) =>
-                        addToast({ type: 'system', title: 'Друзья', content: ack.error ?? `Запрос отправлен: ${vp.displayName}`, icon: ack.error ? '⚠️' : '➕' }),
-                      )
-                    }
-                    style={{ width: '100%', marginTop: 8, background: 'transparent', color: '#dcdedf', border: '1px solid #3d4450', borderRadius: 6, padding: '8px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
-                  >
-                    ➕ Добавить в друзья
-                  </button>
-                )}
-                <button onClick={close} style={{ width: '100%', marginTop: 8, background: 'none', color: '#8f98a0', border: 'none', padding: '6px', fontSize: 13, cursor: 'pointer' }}>Закрыть</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {viewingProfile && <UserProfileModal target={viewingProfile} onClose={() => setViewingProfile(null)} />}
     </div>
   );
 };

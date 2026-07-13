@@ -21,6 +21,17 @@ export interface FriendEdge {
   status: social.FriendStatus; // 'accepted' | 'incoming' | 'outgoing'
 }
 
+/** A raw account match from `searchAccounts` — the server annotates the caller's relation and filters
+ *  blocks/self before returning it on the wire. `friendCode` is the short code in Postgres mode; in
+ *  pure in-memory mode there's no code column, so the account id doubles as it (matching resolveFriendCode). */
+export interface AccountMatch {
+  accountId: string;
+  displayName: string;
+  avatarIcon: string | null;
+  friendCode: string | null;
+  titleAchievement: TitleAchievementRef | null;
+}
+
 export interface SocialStore {
   upsertAccount(id: string, displayName: string): Account;
   getAccount(id: string): Account | undefined;
@@ -30,6 +41,10 @@ export interface SocialStore {
    *  (auth is authoritative) and merge via `updateProfile`. No-op in-memory — there's no other
    *  source of truth to pull from, so avatar/title just stay null there. */
   refreshProfile(id: string): Promise<void>;
+  /** Find accounts by display name (substring) or friend code (exact/prefix), ranked with an exact
+   *  code match first, then name matches. Returns raw account fields; presence, the caller's relation
+   *  and block filtering are applied by the server. */
+  searchAccounts(query: string, limit: number): Promise<AccountMatch[]>;
   /** Send a request from `from` to `to`. Auto-accepts if `to` had already requested `from`. */
   request(from: string, to: string): void;
   /** Accept an incoming request (only if `other` requested `account`). */
@@ -85,6 +100,31 @@ export const createMemorySocialStore = (): SocialStore => {
       if (existing) Object.assign(existing, profile);
     },
     refreshProfile: async () => {},
+
+    async searchAccounts(query, limit) {
+      const q = query.trim().toLowerCase();
+      if (!q) return [];
+      // In-memory has no friend_code column — the account id doubles as the code (see resolveFriendCode).
+      const scored: { m: AccountMatch; rank: number }[] = [];
+      for (const acc of accounts.values()) {
+        const id = acc.id.toLowerCase();
+        const name = acc.displayName.toLowerCase();
+        const rank = id === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : id.startsWith(q) ? 3 : -1;
+        if (rank < 0) continue;
+        scored.push({
+          rank,
+          m: {
+            accountId: acc.id,
+            displayName: acc.displayName,
+            avatarIcon: acc.avatarIcon,
+            friendCode: acc.id,
+            titleAchievement: acc.titleAchievement,
+          },
+        });
+      }
+      scored.sort((a, b) => a.rank - b.rank || a.m.displayName.length - b.m.displayName.length);
+      return scored.slice(0, limit).map((s) => s.m);
+    },
 
     request(from, to) {
       if (from === to) return;
