@@ -84,14 +84,12 @@ export const ProfileView = (): JSX.Element => {
   const [tgId, setTgId] = useState<string | undefined>(undefined);
   const [tgModal, setTgModal] = useState<{ code: string; url: string } | null>(null);
 
-  // Real unlocked achievements (CIVA only — the showcase catalog above is CIVA-specific).
-  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+  // Real unlocked achievements across EVERY game (the CIVA catalog only decorates the CIVA ones).
+  const [unlocked, setUnlocked] = useState<{ gameId: string; achievementId: string }[]>([]);
   const refreshAchievements = () =>
-    void getAchievements().then((res) => {
-      const list = res?.achievements ?? [];
-      setUnlockedIds(new Set(list.filter((a) => a.gameId === CIVA_GAME_ID).map((a) => a.achievementId)));
-    });
+    void getAchievements().then((res) => setUnlocked(res?.achievements ?? []));
   useEffect(refreshAchievements, []);
+  const unlockedIds = new Set(unlocked.filter((a) => a.gameId === CIVA_GAME_ID).map((a) => a.achievementId));
 
   useEffect(() => {
     void getTelegramStatus().then((s) => {
@@ -353,11 +351,41 @@ export const ProfileView = (): JSX.Element => {
           )}
         </div>
 
-        {/* Right Column (Achievements Showcase) */}
+        {/* Right Column (Achievements) */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* All achievements actually unlocked, across every game (the real list from the API). */}
           <div className="hub-card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА ДОСТИЖЕНИЙ</h2>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ПОЛУЧЕННЫЕ ДОСТИЖЕНИЯ</h2>
+              <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{unlocked.length}</span>
+            </div>
+            {unlocked.length === 0 ? (
+              <div style={{ color: 'var(--c-text-muted)', fontSize: 13 }}>Пока нет достижений — играйте, чтобы получить.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {unlocked.map((a) => {
+                  const def = a.gameId === CIVA_GAME_ID ? ACHIEVEMENTS.find((d) => d.id === a.achievementId) : undefined;
+                  const gameName = GAMES.find((g) => g.id === a.gameId)?.name ?? a.gameId;
+                  return (
+                    <div key={`${a.gameId}:${a.achievementId}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--c-panel-deep)', borderRadius: 8 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--c-panel-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                        {def?.icon ?? '🏅'}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: 'var(--c-text-primary)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def?.name ?? a.achievementId}</div>
+                        <div style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{gameName}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* CIVA showcase catalog (locked + unlocked) — decorative, CIVA-specific. */}
+          <div className="hub-card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА CIVA</h2>
               <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{unlockedIds.size} из {ACHIEVEMENTS.length}</span>
             </div>
 
