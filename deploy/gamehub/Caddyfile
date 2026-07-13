@@ -87,6 +87,15 @@
 		reverse_proxy cards-web:5210
 	}
 
+	# Своя игра (Svoyak): its SPA + own socket.io + API on one server. Path-routed like /cards/* and
+	# /example-game/* — the prefix is STRIPPED, and the game's build bakes VITE_BASE_PATH=/svoyak/, so
+	# its assets, socket.io and API all live under /svoyak/ and reach svoyak:8089 at root. Served over
+	# the hub's HTTPS origin so getUserMedia (mic/cam) has a secure context (the whole point of this
+	# route — plain http://:8089 blocks it). On-demand: 502s until the orchestrator wakes svoyak.
+	handle_path /svoyak/* {
+		reverse_proxy svoyak:8089
+	}
+
 	# Game lobby (Socket.io, default path). Started on demand — 502s until the orchestrator brings
 	# it up. Does not collide with /social.io/ or /chat.io/ above.
 	handle /socket.io/* {

@@ -17,7 +17,11 @@ WORKDIR /app
 ARG SVOYAK_REPO=https://github.com/egr4045/svoyak
 RUN git clone --depth 1 "$SVOYAK_REPO" .
 
-# Frontend build -> /app/dist (served by the server from ../dist).
+# Frontend build -> /app/dist (served by the server from ../dist). VITE_BASE_PATH=/svoyak/ makes Vite
+# emit asset/socket.io/API URLs under /svoyak/ so the game is served over the hub's HTTPS origin
+# (mygame-quiz.ru/svoyak/, secure context for getUserMedia). MUST ship together with the Caddyfile
+# /svoyak/* route that strips the prefix — without it these asset paths 404. See deploy/gamehub/Caddyfile.
+ENV VITE_BASE_PATH=/svoyak/
 RUN npm ci && npm run build
 # Backend deps: prebuilt native bindings are fine on trixie's glibc (see the FROM comment); the
 # toolchain above still covers any package without a prebuild.

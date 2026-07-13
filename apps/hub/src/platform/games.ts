@@ -78,6 +78,10 @@ export const GAMES: GameInfo[] = [
     status: 'playable',
     accent: '#49a05a',
     emoji: '🧠',
+    // path: prod route behind the gateway (deploy/gamehub/Caddyfile strips /svoyak/). Served over the
+    // hub's HTTPS origin so getUserMedia (voice/camera) works — a secure context, unlike http://:8089.
+    // externalPort stays as the local-dev fallback (getGameOrigin prefers `path` outside dev mode).
+    path: 'svoyak',
     externalPort: 8089,
   },
   {
