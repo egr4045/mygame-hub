@@ -239,7 +239,7 @@ export const GameDetailsView = ({
           {stat === undefined ? (
             <div className="hub-skeleton" style={{ height: 14, width: 60 }} />
           ) : (
-            <div style={{ fontSize: '13px', color: 'var(--c-text-primary)' }}>{formatPlaytime(stat?.secondsPlayed ?? 0)}</div>
+            <div style={{ fontSize: '13px', color: 'var(--c-text-primary)' }}>{formatPlaytime(stat?.secondsPlayed ?? 0, (stat?.lastPlayedAt ?? null) !== null)}</div>
           )}
         </div>
       </div>

@@ -323,7 +323,7 @@ export const ProfileView = (): JSX.Element => {
                     <div>
                       <div style={{ color: 'var(--c-text-primary)', fontWeight: 600 }}>{game.name}</div>
                       <div style={{ color: 'var(--c-text-muted)', fontSize: '12px' }}>
-                        Сыграно {formatPlaytime(stat.secondsPlayed)} • Последний запуск: {formatLastPlayed(stat.lastPlayedAt).toLowerCase()}
+                        Сыграно {formatPlaytime(stat.secondsPlayed, stat.lastPlayedAt !== null)} • Последний запуск: {formatLastPlayed(stat.lastPlayedAt).toLowerCase()}
                       </div>
                     </div>
                   </div>

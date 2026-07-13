@@ -13,6 +13,8 @@ import { loadSession, freshAccessToken } from '../authClient.js';
 import { useToastStore } from './toastStore.js';
 import { useNotificationPrefsStore } from './notificationPrefsStore.js';
 import { useCallStore } from './callStore.js';
+import { useSocialStore } from './socialStore.js';
+import { playSound } from '../sound.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -297,13 +299,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // I'm looking right at this conversation — mark it read immediately, or the next threads
       // push raises the unread badge on the very chat that's open in front of the user.
       const { isOpen, activeChatId } = get();
-      if (
-        isOpen &&
-        activeChatId === p.message.conversationId &&
-        p.message.senderId !== meId &&
-        (typeof document === 'undefined' || document.hasFocus())
-      ) {
+      const looking =
+        isOpen && activeChatId === p.message.conversationId && (typeof document === 'undefined' || document.hasFocus());
+      if (looking && p.message.senderId !== meId) {
         socket?.emit(chat.C2S.markRead, { conversationId: p.message.conversationId });
+      }
+      // Steam-style popup for a message I'm not actively looking at — click it to open that chat.
+      if (
+        p.message.senderId !== meId &&
+        !looking &&
+        useNotificationPrefsStore.getState().messageToasts
+      ) {
+        const conv = get().sessions.find((sess) => sess.id === p.message.conversationId);
+        const senderAvatar = useSocialStore
+          .getState()
+          .friends.find((f) => f.accountId === p.message.senderId)?.avatarIcon;
+        const title =
+          conv?.type === 'group' ? `${p.message.senderName} · ${conv.name}` : p.message.senderName;
+        useToastStore.getState().addToast({
+          type: 'message',
+          title,
+          content: p.message.text?.trim() || '📎 Вложение',
+          ...(senderAvatar ? { avatar: senderAvatar } : {}),
+          onClick: () => get().openChat(p.message.conversationId),
+        });
+        playSound('message');
       }
     });
 
@@ -425,6 +445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           icon: '📞',
         });
       }
+      playSound('call');
     });
 
     // Someone joined the call. If that's *me* (the callee's own acceptCall already handles its own

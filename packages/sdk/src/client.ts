@@ -14,6 +14,7 @@ import type {
   TitleAchievementRef,
 } from '@mygame/protocol';
 import { configure, type ConfigureOptions } from './config.js';
+import { playSound } from './sound.js';
 import {
   loadSession,
   saveSession,
@@ -99,6 +100,20 @@ class MygameClient {
       // or localStorage). No-op without a session — `auth.adoptSession` retries it after the host
       // page's own auth bridge completes.
       void useCallStore.getState().resume();
+      // Revive sockets when the tab returns to the foreground or the network comes back: a slept
+      // phone kills the websockets and socket.io's own reconnect reuses the stale (15-min) token, so
+      // connect() (fresh token + fresh socket) is what actually recovers — no reload needed.
+      if (typeof document !== 'undefined') {
+        const revive = (): void => {
+          if (document.visibilityState !== 'visible') return;
+          if (useSocialStore.getState().status !== 'connected') void useSocialStore.getState().connect();
+          if (useChatStore.getState().status !== 'connected') void useChatStore.getState().connect();
+          void useCallStore.getState().resume();
+        };
+        document.addEventListener('visibilitychange', revive);
+        window.addEventListener('online', revive);
+        window.addEventListener('pageshow', revive);
+      }
       // Playtime: stamp this launch and start the in-game heartbeat (server derives + clamps duration).
       void recordGameEnter(gameId);
       startPlaytimeHeartbeat(gameId);
@@ -246,13 +261,16 @@ class MygameClient {
     grant: async (achievementId: string): Promise<boolean> => {
       if (!this.gameId) return false;
       const result = await grantAchievement(this.gameId, achievementId);
-      if (result?.granted && useNotificationPrefsStore.getState().achievementToasts) {
-        useToastStore.getState().addToast({
-          type: 'achievement',
-          title: 'Достижение получено',
-          content: achievementId,
-          icon: '🏆',
-        });
+      if (result?.granted) {
+        playSound('achievement');
+        if (useNotificationPrefsStore.getState().achievementToasts) {
+          useToastStore.getState().addToast({
+            type: 'achievement',
+            title: 'Достижение получено',
+            content: achievementId,
+            icon: '🏆',
+          });
+        }
       }
       return result?.granted ?? false;
     },

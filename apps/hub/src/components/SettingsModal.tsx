@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import { changeDisplayName, changePassword, useNotificationPrefsStore, useSocialStore, useChatStore } from '@mygame/sdk';
+import { changeDisplayName, changePassword, useNotificationPrefsStore, useSocialStore, useChatStore, playSound } from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
 
 const overlay: CSSProperties = {
@@ -101,8 +101,12 @@ export const SettingsModal = ({ initialTab, onClose, onGoToProfile }: Props): JS
 const NotificationsTab = (): JSX.Element => {
   const achievementToasts = useNotificationPrefsStore((s) => s.achievementToasts);
   const callToasts = useNotificationPrefsStore((s) => s.callToasts);
+  const messageToasts = useNotificationPrefsStore((s) => s.messageToasts);
+  const soundVolume = useNotificationPrefsStore((s) => s.soundVolume);
   const setAchievementToasts = useNotificationPrefsStore((s) => s.setAchievementToasts);
   const setCallToasts = useNotificationPrefsStore((s) => s.setCallToasts);
+  const setMessageToasts = useNotificationPrefsStore((s) => s.setMessageToasts);
+  const setSoundVolume = useNotificationPrefsStore((s) => s.setSoundVolume);
 
   return (
     <div>
@@ -110,13 +114,31 @@ const NotificationsTab = (): JSX.Element => {
         <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>🏆 Тосты о новых достижениях</span>
         <input type="checkbox" checked={achievementToasts} onChange={(e) => setAchievementToasts(e.target.checked)} />
       </div>
-      <div style={{ ...toggleRow, borderBottom: 'none' }}>
+      <div style={toggleRow}>
         <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>📞 Тосты о входящих звонках</span>
         <input type="checkbox" checked={callToasts} onChange={(e) => setCallToasts(e.target.checked)} />
       </div>
+      <div style={toggleRow}>
+        <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>💬 Всплывающие сообщения</span>
+        <input type="checkbox" checked={messageToasts} onChange={(e) => setMessageToasts(e.target.checked)} />
+      </div>
+      <div style={{ ...toggleRow, borderBottom: 'none', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>🔊 Громкость звуков: {Math.round(soundVolume * 100)}%</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(soundVolume * 100)}
+          onChange={(e) => {
+            setSoundVolume(Number(e.target.value) / 100);
+            void playSound('message'); // preview the level as you drag
+          }}
+          style={{ width: '100%' }}
+        />
+      </div>
       <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 16 }}>
-        Хранится только в этом браузере. Заявки в друзья и приглашения в игру по-прежнему видны в 🔔 —
-        это переключает только всплывающие тосты.
+        Хранится только в этом браузере. Звуки — плейсхолдеры (админ может заменить их своими). Заявки в
+        друзья по-прежнему видны в 🔔.
       </p>
     </div>
   );

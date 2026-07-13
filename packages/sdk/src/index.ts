@@ -25,4 +25,5 @@ export * from './authClient.js';
 export * from './statsClient.js';
 export * from './communityClient.js';
 export * from './emitter.js';
+export * from './sound.js';
 export * from './client.js';

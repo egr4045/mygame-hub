@@ -1,8 +1,10 @@
 /** Formatting helpers for real playtime/last-played stats, shared by GameDetailsView + ProfileView. */
 
-/** "12 часов", "45 минут", "Ещё не играли" for 0. */
-export const formatPlaytime = (secondsPlayed: number): string => {
-  if (secondsPlayed <= 0) return 'Ещё не играли';
+/** "12 ч.", "45 мин.". For 0 seconds: "0 мин." if they've actually launched the game (a short
+ *  session under a heartbeat's worth of time still counts as *played*), else "Ещё не играли".
+ *  `hasLaunched` defaults to whether any seconds accrued. */
+export const formatPlaytime = (secondsPlayed: number, hasLaunched = secondsPlayed > 0): string => {
+  if (secondsPlayed <= 0) return hasLaunched ? '0 мин.' : 'Ещё не играли';
   const hours = Math.floor(secondsPlayed / 3600);
   if (hours >= 1) return `${hours} ч.`;
   const minutes = Math.max(1, Math.floor(secondsPlayed / 60));
