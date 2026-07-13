@@ -17,6 +17,8 @@ import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
 import { createTelegramLinkCode, getTelegramStatus, createThread } from '@mygame/sdk';
+import { useIsMobile } from '../platform/useIsMobile.js';
+import { MobileHub } from '../mobile/MobileHub.js';
 
 const TG_DISMISS_KEY = 'mygame:tg-link-dismissed';
 
@@ -38,7 +40,18 @@ const copyViaTextarea = (text: string): boolean => {
   }
 };
 
+/**
+ * Screen router: below 768px the hub renders a dedicated single-column mobile shell; wider viewports
+ * get the desktop launcher untouched. Splitting at this boundary (rather than an early return inside
+ * the desktop component) keeps each shell's hook set stable when the viewport flips across the
+ * breakpoint — they mount/unmount as siblings instead of changing one component's hook count.
+ */
 export const HubScreen = (): JSX.Element => {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileHub /> : <DesktopHubScreen />;
+};
+
+const DesktopHubScreen = (): JSX.Element => {
   const selectGame = usePlatformStore((s) => s.selectGame);
   const logout = usePlatformStore((s) => s.logout);
   const account = usePlatformStore((s) => s.account);
