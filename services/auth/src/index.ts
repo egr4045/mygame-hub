@@ -4,7 +4,7 @@
  * in-memory otherwise — with a loud warning, since that loses every account on restart.
  */
 import { createAuthCore } from '@mygame/auth-core';
-import { createPool, runMigrations } from '@mygame/platform-db';
+import { createPool, runMigrations, type Pool } from '@mygame/platform-db';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './logger.js';
@@ -25,12 +25,13 @@ const auth = createAuthCore({
   handoffTtl: config.handoffTtl,
 });
 
+let pool: Pool | undefined;
 const { accounts, stats } = await (async (): Promise<{ accounts: AccountStore; stats: GameStatsStore }> => {
   if (!config.databaseUrl) {
     logger.warn('DATABASE_URL not set — accounts + playtime are in-memory and will not survive a restart');
     return { accounts: createMemoryAccountStore(), stats: createMemoryGameStatsStore() };
   }
-  const pool = createPool(config.databaseUrl);
+  pool = createPool(config.databaseUrl);
   await runMigrations(pool);
   const accountStore = createPgAccountStore(pool, logger);
   await accountStore.init();
@@ -55,13 +56,48 @@ for (const id of config.bootstrapAdminIds) {
   }
 }
 
+/** The disk-monitor bot (chat service) shares this single token, and only one consumer may poll a
+ *  given token — so auth owns polling and chat only *sends*. `admin` (from anyone) registers that
+ *  chat as the ops-alert recipient (persisted in the shared ops_alert_recipient table). */
+const handleOpsAdmin = async (client: ReturnType<typeof createTelegramClient>, chatId: string): Promise<void> => {
+  if (!pool) return;
+  try {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS ops_alert_recipient (
+         singleton BOOLEAN PRIMARY KEY DEFAULT true, chat_id TEXT NOT NULL, registered_at BIGINT NOT NULL)`,
+    );
+    const existing = await pool.query(`SELECT chat_id FROM ops_alert_recipient WHERE singleton = true`);
+    if (!existing.rows[0]) {
+      await pool.query(
+        `INSERT INTO ops_alert_recipient (singleton, chat_id, registered_at) VALUES (true, $1, $2)
+         ON CONFLICT (singleton) DO NOTHING`,
+        [chatId, Date.now()],
+      );
+      logger.info('ops alert recipient registered', { chatId });
+      await client.sendMessage(chatId, '✅ Готово. Теперь вы получаете алерты о состоянии сервера (место на диске и т.п.).');
+    } else if (existing.rows[0].chat_id === chatId) {
+      await client.sendMessage(chatId, 'Вы уже назначены получателем алертов.');
+    } else {
+      await client.sendMessage(chatId, 'Получатель алертов уже назначен другим пользователем.');
+    }
+  } catch (err) {
+    logger.error('ops admin register failed', { err: String(err) });
+  }
+};
+
 let telegram: TelegramLinking | undefined;
 if (config.telegramBotToken) {
   const client = createTelegramClient(config.telegramBotToken, logger);
   const me = await client.getMe();
   telegram = createTelegramLinking({ accounts, client, logger, botUsername: me?.username ?? null });
-  client.startPolling((m) => telegram!.handleMessage(m));
-  logger.info('telegram linking enabled', { bot: me?.username ?? '(unknown)' });
+  client.startPolling(async (m) => {
+    if (m.text.trim().toLowerCase().replace(/^\//, '') === 'admin') {
+      await handleOpsAdmin(client, m.chatId);
+      return;
+    }
+    await telegram!.handleMessage(m);
+  });
+  logger.info('telegram bot enabled (account linking + ops alerts)', { bot: me?.username ?? '(unknown)' });
 } else {
   logger.info('TELEGRAM_BOT_TOKEN not set — telegram linking disabled');
 }

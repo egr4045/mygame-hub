@@ -58,6 +58,9 @@ services:
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       # One-time admin bootstrap — see deploy/gamehub/.env.example. Empty is fine (no admins yet).
       AUTH_BOOTSTRAP_ADMIN_IDS: ${AUTH_BOOTSTRAP_ADMIN_IDS:-}
+      # Telegram: auth owns the single bot poller (account linking + the `admin` ops-alert
+      # registration). Same token the chat disk-monitor uses to SEND — one token, one poller.
+      TELEGRAM_BOT_TOKEN: ${OPS_ALERT_BOT_TOKEN:-}
       NODE_ENV: production
     depends_on:
       - postgres
@@ -202,7 +205,7 @@ services:
       # the compose file path is valid for the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/gamehub:/root/gamehub
-      # Same-path mount rule — the cards compose file must resolve for the host daemon.
+      # Same-path mount rule as above — the cards compose file must resolve for the host daemon.
       - /root/cards:/root/cards
     depends_on:
       - postgres

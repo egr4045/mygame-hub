@@ -61,38 +61,11 @@ export const createOpsMonitor = (opts: OpsMonitorOptions): (() => void) => {
     }
   };
 
-  const saveRecipient = async (chatId: string): Promise<void> => {
-    recipientChatId = chatId;
-    if (!pool) return;
-    try {
-      await pool.query(
-        `INSERT INTO ops_alert_recipient (singleton, chat_id, registered_at) VALUES (true, $1, $2)
-         ON CONFLICT (singleton) DO UPDATE SET chat_id = EXCLUDED.chat_id, registered_at = EXCLUDED.registered_at`,
-        [chatId, Date.now()],
-      );
-    } catch (err) {
-      logger.error('ops recipient save failed', { err: String(err) });
-    }
-  };
-
-  // `admin` (with or without a leading slash) registers the first sender as the alert recipient.
-  const onMessage = async (m: { chatId: string; text: string }): Promise<void> => {
-    if (m.text.trim().toLowerCase().replace(/^\//, '') !== 'admin') return;
-    if (recipientChatId === null) {
-      await saveRecipient(m.chatId);
-      logger.info('ops alert recipient registered', { chatId: m.chatId });
-      await bot.sendMessage(
-        m.chatId,
-        '✅ Готово. Теперь вы получаете алерты о состоянии сервера (место на диске и т.п.).',
-      );
-    } else if (recipientChatId === m.chatId) {
-      await bot.sendMessage(m.chatId, 'Вы уже назначены получателем алертов.');
-    } else {
-      await bot.sendMessage(m.chatId, 'Получатель алертов уже назначен другим пользователем.');
-    }
-  };
-
   const checkDisk = async (): Promise<void> => {
+    // The `admin` registration is handled by the auth service (it owns the single bot poller — one
+    // token can't be polled from two services); re-read the recipient each tick so a registration
+    // that lands after this process started is picked up without a restart.
+    await loadRecipient();
     let free: number;
     let total: number;
     try {
@@ -126,7 +99,7 @@ export const createOpsMonitor = (opts: OpsMonitorOptions): (() => void) => {
     }
   };
 
-  const stopPolling = bot.startPolling(onMessage);
+  // Send-only: no polling here (auth owns the single bot poller). We only push disk alerts.
   const timer = setInterval(() => void checkDisk(), diskCheckMs);
   timer.unref?.();
   void (async () => {
@@ -139,7 +112,6 @@ export const createOpsMonitor = (opts: OpsMonitorOptions): (() => void) => {
   logger.info('ops monitor started', { dataDir, diskCheckMs, diskAlertPct, diskAlertMinGb: (diskAlertMinBytes / GB).toFixed(1) });
 
   return () => {
-    stopPolling();
     clearInterval(timer);
   };
 };
