@@ -18,6 +18,12 @@ export default defineConfig([
     entry: { 'mygame-sdk': 'src/global.ts' },
     format: ['iife'],
     globalName: 'mygame',
+    // Browser target: без этого tsup собирает под platform:node — в бандл попадают
+    // ссылки на process и require('fs'), из-за чего IIFE падает в браузере и window.mygame
+    // не выставляется. platform:browser выбирает browser-поля зависимостей (без fs);
+    // env определяет process.env.NODE_ENV на этапе сборки (нужно React и др.).
+    platform: 'browser',
+    env: { NODE_ENV: 'production' },
     sourcemap: true,
     minify: true,
     // Unwrap the default export so `window.mygame` is the client itself (mygame.init(...)).
