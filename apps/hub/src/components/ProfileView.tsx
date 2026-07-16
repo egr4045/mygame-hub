@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePlatformStore } from '../platform/platformStore.js';
 import {
-  useMenuStore,
   useSocialStore,
   useToastStore,
   createTelegramLinkCode,
@@ -15,7 +14,6 @@ import {
 } from '@mygame/sdk';
 import type { GameStat, social } from '@mygame/protocol';
 import { useAchievementCatalogs } from '../platform/achievementsCatalog.js';
-import { AchievementShowcase } from './AchievementShowcase.js';
 import { GAMES } from '../platform/games.js';
 import { formatLastPlayed, formatPlaytime } from '../platform/statsFormat.js';
 
@@ -39,13 +37,12 @@ const errorToast = (content: string): void =>
 
 export const ProfileView = (): JSX.Element => {
   const me = usePlatformStore((s) => s.account);
-  const openMenu = useMenuStore((s) => s.openMenu);
 
   const [avatar, setAvatar] = useState<string | null>(null);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   // The equipped title, now a full cross-game reference (was CIVA-only) so any game's achievement works.
   const [titleAchievement, setTitleAchievement] = useState<{ gameId: string; achievementId: string } | null>(null);
-  const { byGame: catalogsByGame, defOf, loading: catalogsLoading } = useAchievementCatalogs();
+  const { defOf } = useAchievementCatalogs();
 
   const [isChoosingAchievement, setIsChoosingAchievement] = useState(false);
 
@@ -95,13 +92,6 @@ export const ProfileView = (): JSX.Element => {
   const refreshAchievements = () =>
     void getAchievements().then((res) => setUnlocked(res?.achievements ?? []));
   useEffect(refreshAchievements, []);
-  // gameId -> set of unlocked achievementIds, for the per-game showcases.
-  const unlockedByGame = new Map<string, Set<string>>();
-  for (const a of unlocked) {
-    const s = unlockedByGame.get(a.gameId);
-    if (s) s.add(a.achievementId);
-    else unlockedByGame.set(a.gameId, new Set([a.achievementId]));
-  }
 
   useEffect(() => {
     void getTelegramStatus().then((s) => {
@@ -394,39 +384,6 @@ export const ProfileView = (): JSX.Element => {
               </div>
             )}
           </div>
-
-          {/* Showcase (locked + unlocked, hover = description) — one section per game that registered a
-              catalog, not just CIVA. Right-click an unlocked tile to make it your title. */}
-          {catalogsLoading ? (
-            <div className="hub-card" style={{ padding: 24 }}>
-              <div className="hub-skeleton" style={{ height: 80 }} />
-            </div>
-          ) : catalogsByGame.size === 0 ? (
-            <div className="hub-card" style={{ padding: 24, color: 'var(--c-text-muted)', fontSize: 13 }}>
-              Витрина достижений появится, когда игры зарегистрируют свои достижения.
-            </div>
-          ) : (
-            [...catalogsByGame.entries()].map(([gameId, defs]) => {
-              const gameUnlocked = unlockedByGame.get(gameId) ?? new Set<string>();
-              return (
-                <div key={gameId} className="hub-card" style={{ padding: 24 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ВИТРИНА · {gameLabel(gameId).toUpperCase()}</h2>
-                    <span style={{ color: 'var(--c-text-muted)', fontSize: '14px' }}>{gameUnlocked.size} из {defs.length}</span>
-                  </div>
-                  <AchievementShowcase
-                    defs={defs}
-                    unlocked={gameUnlocked}
-                    onPick={(def, e) =>
-                      openMenu(e.clientX, e.clientY, [
-                        { label: '👑 Сделать титульной', action: () => void chooseTitle({ gameId: def.gameId, achievementId: def.achievementId }) },
-                      ])
-                    }
-                  />
-                </div>
-              );
-            })
-          )}
         </div>
 
       </div>
