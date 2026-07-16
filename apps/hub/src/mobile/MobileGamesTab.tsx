@@ -102,7 +102,7 @@ const GameDetail = ({ game, onBack }: { game: GameInfo; onBack: () => void }): J
   const playable = game.status === 'playable';
 
   return (
-    <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="mygame-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <button onClick={onBack} className="hub-btn" style={{ alignSelf: 'flex-start', padding: '8px 16px', minHeight: 44 }}>
         ← Назад
       </button>

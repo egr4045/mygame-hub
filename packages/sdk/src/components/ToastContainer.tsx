@@ -8,7 +8,7 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
   const clickable = !!toast.onClick;
   return (
     <div
-      className="civa-fade-in"
+      className="mygame-fade-in"
       onClick={
         clickable
           ? () => {

@@ -57,7 +57,7 @@ export const MobileHub = (): JSX.Element => {
 
   return (
     <SocialDndProvider>
-      <div className="mhub-root civa-fade-in">
+      <div className="mhub-root mygame-fade-in">
         {/* App bar */}
         <div className="mhub-appbar">
           <span className="mhub-wordmark">GAMEHUB</span>

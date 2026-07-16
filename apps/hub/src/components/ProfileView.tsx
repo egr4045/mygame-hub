@@ -391,7 +391,7 @@ export const ProfileView = (): JSX.Element => {
       {/* Title Achievement Modal */}
       {isChoosingAchievement && (
         <div className="hub-modal-scrim">
-          <div className="civa-fade-in" style={{ width: 500, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 24 }}>
+          <div className="mygame-fade-in" style={{ width: 500, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 24 }}>
             <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 24px 0', fontSize: 20 }}>Выберите титульную ачивку</h2>
             <p style={{ color: 'var(--c-text-muted)', marginBottom: 24, fontSize: 14 }}>
               Выбранная ачивка будет отображаться в виде специальной рамки и значка поверх вашей аватарки во всех играх.
@@ -448,7 +448,7 @@ export const ProfileView = (): JSX.Element => {
       {/* Telegram link modal */}
       {tgModal && (
         <div className="hub-modal-scrim">
-          <div className="civa-fade-in" style={{ width: 460, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
+          <div className="mygame-fade-in" style={{ width: 460, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
             <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 12px 0', fontSize: 22 }}>Привязка Telegram</h2>
             <p style={{ color: 'var(--c-text-muted)', marginBottom: 20, fontSize: 14, lineHeight: 1.5 }}>
               Открой бота в Telegram и нажми <b>Start</b> — аккаунт привяжется автоматически.

@@ -162,3 +162,38 @@ curl -s localhost:8088/cards/ | head -c 60                      # SPA отдаё
 /root/cards/deploy && docker compose up -d`. Оркестратор гасит стек после 10 минут без игроков
 (`/cards-io/`-сокеты считаются через `GET /metrics` на `cards-server:8091`); данные Postgres
 переживают stop/start на named volume `cards-postgres-data`.
+
+## Своя игра (Svoyak) — квиз-баззер
+
+Отдельный репозиторий (не в этом монорепо, `deploy/svoyak/Dockerfile` клонирует его при сборке
+образа). Раздаётся по HTTPS через шлюз хаба на `https://mygame-quiz.ru/svoyak/` (**secure context**,
+нужен для `getUserMedia` — голос/камера в игре) — прямой `http://<host>:8089` остаётся только как
+dev-фолбэк (`ports: '8089:8089'` в `deploy/svoyak/docker-compose.yml`).
+
+Три части этой маршрутизации должны катиться **вместе** (иначе ассеты с префиксом `/svoyak/*` 404):
+Caddyfile-роут (`handle_path /svoyak/*`), сборка Свояка с `VITE_BASE_PATH=/svoyak/`, и
+`apps/hub/src/platform/games.ts`'s `path: 'svoyak'`. Первый деплой:
+
+```sh
+# 1) Секреты и образ игры (тот же JWT_SECRET, что у платформы — см. deploy/gamehub/.env).
+cd /root/gamehub/deploy/svoyak && cp .env.example .env
+PLATFORM_SECRET=$(grep ^JWT_SECRET= ../gamehub/.env | cut -d= -f2)
+sed -i "s/change-me-to-a-long-random-string/$PLATFORM_SECRET/" .env
+
+# --no-cache: Dockerfile git-clone'ит репозиторий Свояка внутри сборки — без этого флага
+# образ пересоберётся со СТАРЫМ кодом игры из кэша слоя git clone.
+docker build --network=host --no-cache -t svoyak:latest .
+
+# 2) Платформа уже несёт Caddy-роут /svoyak/* и path:'svoyak' в реестре — просто поднять оба стека.
+cd /root/gamehub/deploy/gamehub && docker compose up -d web
+cd /root/gamehub/deploy/svoyak && docker compose up -d --force-recreate
+
+# 3) Smoke — стек on-demand, будим оркестратором.
+curl -s -X POST localhost:8088/orchestrator/games/svoyak/enter        # {"ready":true}
+curl -s localhost:8088/svoyak/ | grep -o "/svoyak/assets/[^\"']*"     # ассеты с правильным префиксом
+curl -s -o /dev/null -w "%{http_code}" localhost:8088/svoyak/vendor/mygame-sdk.global.js   # 200
+```
+
+Обновление игры: пересобрать образ (`--no-cache`, шаг 1 выше) и
+`docker compose up -d --force-recreate` в `deploy/svoyak`. Оркестратор гасит стек после 10 минут без
+игроков (`GET /metrics` на `svoyak:8089`, путь пробы не меняется base-путём — он живёт в корне).

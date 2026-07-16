@@ -82,7 +82,7 @@ export const SettingsModal = ({ initialTab, onClose, onGoToProfile }: Props): JS
 
   return (
     <div style={overlay} onClick={onClose}>
-      <div className="civa-fade-in" style={card} onClick={(e) => e.stopPropagation()}>
+      <div className="mygame-fade-in" style={card} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px', fontSize: 20 }}>Настройки</h2>
 
         <div style={{ display: 'flex', marginBottom: 20, borderBottom: '1px solid var(--c-panel-border)' }}>

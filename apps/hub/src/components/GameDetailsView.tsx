@@ -317,7 +317,7 @@ export const GameDetailsView = ({
 
             {/* View Single Discussion */}
             {viewDiscussion && (
-              <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div className="mygame-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <button onClick={() => setViewDiscussion(null)} className="hub-btn">← Назад</button>
                   <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--c-text-primary)', margin: 0 }}>{threadDetail?.thread.title ?? 'Загрузка…'}</h2>
@@ -377,7 +377,7 @@ export const GameDetailsView = ({
 
             {/* Create Discussion */}
             {isCreatingDiscussion && (
-              <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div className="mygame-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <button onClick={() => setIsCreatingDiscussion(false)} className="hub-btn">← Отмена</button>
                   <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--c-text-primary)', margin: 0 }}>Создать новую тему</h2>
@@ -414,7 +414,7 @@ export const GameDetailsView = ({
 
             {/* Discussions List */}
             {!viewDiscussion && !isCreatingDiscussion && (
-              <div className="civa-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="mygame-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>ОБСУЖДЕНИЯ</h2>
                   <button onClick={() => setIsCreatingDiscussion(true)} className="hub-btn hub-btn-primary">Новая тема</button>

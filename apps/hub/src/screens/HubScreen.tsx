@@ -150,7 +150,7 @@ const DesktopHubScreen = (): JSX.Element => {
     <SocialDndProvider>
       <div
         style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--c-panel-solid)', color: 'var(--c-text-primary)', pointerEvents: 'auto' }}
-        className="civa-fade-in"
+        className="mygame-fade-in"
         onContextMenu={(e) => {
         e.preventDefault();
         openMenu(e.clientX, e.clientY, [
@@ -265,7 +265,7 @@ const DesktopHubScreen = (): JSX.Element => {
 
       {showLinkModal && (
         <div className="hub-modal-scrim" style={{ zIndex: 1000 }}>
-          <div className="civa-fade-in" style={{ width: 480, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
+          <div className="mygame-fade-in" style={{ width: 480, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
             <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px 0', fontSize: 24 }}>Защитите свой аккаунт</h2>
             <p style={{ color: 'var(--c-text-muted)', marginBottom: 32, fontSize: 14, lineHeight: 1.5 }}>
               Привяжите Telegram или ВКонтакте прямо сейчас, чтобы не потерять прогресс. Это позволит вам мгновенно входить с любого устройства.
@@ -290,7 +290,7 @@ const DesktopHubScreen = (): JSX.Element => {
 
       {showLogoutConfirm && (
         <div className="hub-modal-scrim" style={{ zIndex: 1000 }}>
-          <div className="civa-fade-in" style={{ width: 400, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
+          <div className="mygame-fade-in" style={{ width: 400, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
             <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px 0', fontSize: 20 }}>Выход из аккаунта</h2>
             <p style={{ color: 'var(--c-text-muted)', marginBottom: 24, fontSize: 14 }}>Вы действительно хотите выйти из аккаунта?</p>
             <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>

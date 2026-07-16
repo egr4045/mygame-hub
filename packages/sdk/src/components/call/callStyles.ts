@@ -1,7 +1,7 @@
 /**
  * Shared inline-style constants for the call UI. Not a CSS-in-JS layer — just exported style
  * objects so the call components stay DRY while keeping the repo's inline-styles ethos. The only
- * global CSS the call needs is the speaking-pulse `@keyframes`, injected alongside `.civa-fade-in`
+ * global CSS the call needs is the speaking-pulse `@keyframes`, injected alongside `.mygame-fade-in`
  * in `overlay/mount.tsx` (shadow-DOM path) and the hub's `global.css` (direct-mount path).
  */
 import type { CSSProperties } from 'react';

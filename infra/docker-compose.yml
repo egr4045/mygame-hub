@@ -1,11 +1,16 @@
-# Local development infrastructure for CIVA.
+# Local development infrastructure for the GAMEHUB platform (shared by every service — auth, social,
+# chat, community — not any one game).
 #   corepack pnpm infra:up      -> start in the background
 #   corepack pnpm infra:down    -> stop
 #   corepack pnpm infra:reset   -> stop and wipe volumes (fresh DB)
 #
 # Services here are infrastructure only. Application services run from the workspace
 # (tsx/vite) during development; their production images are added in Phase 10.
-name: civa-infra
+# Postgres user/db/password stay 'civa' — a leftover credential name from before the platform/game
+# split, kept unchanged so it matches production's (also-unchanged, for the same reason — see
+# deploy/DEPLOY.md) DATABASE_URL default; renaming either would need a coordinated migration, not a
+# drive-by rename.
+name: gamehub-infra
 
 services:
   postgres:

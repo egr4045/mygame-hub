@@ -1,8 +1,9 @@
 # @mygame/community
 
-Per-game changelog + discussion forum. A CIVA backend service — isolated module, talks to the outside
-only through `@mygame/protocol`. See `docs/ARCHITECTURE.md` for why this is its own service rather
-than a route on `auth`.
+Per-game changelog + discussion forum, shared across every game on the platform (not one game's
+service). A GAMEHUB platform service — isolated module, talks to the outside only through
+`@mygame/protocol`. See `docs/ARCHITECTURE.md` for why this is its own service rather than a route on
+`auth`.
 
 ```sh
 corepack pnpm --filter @mygame/community dev:standalone   # run in isolation (in-memory)

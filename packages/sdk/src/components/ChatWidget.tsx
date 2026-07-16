@@ -527,7 +527,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
 
   return (
     <div
-      className="civa-fade-in"
+      className="mygame-fade-in"
       style={
         isMobile
           ? {

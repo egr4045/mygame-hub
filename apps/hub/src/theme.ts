@@ -25,7 +25,7 @@ ${toVars('fs', font.size, 'px')}
   --motion-phase: ${motion.phaseTransition};
 }`;
   const style = document.createElement('style');
-  style.id = 'civa-theme';
+  style.id = 'gamehub-theme';
   style.textContent = css;
   document.head.appendChild(style);
 };

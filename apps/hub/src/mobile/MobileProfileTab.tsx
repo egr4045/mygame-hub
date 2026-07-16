@@ -335,7 +335,7 @@ export const MobileProfileTab = (): JSX.Element => {
       {showLogout && (
         <div className="hub-modal-scrim" style={{ zIndex: 1000 }} onClick={() => setShowLogout(false)}>
           <div
-            className="civa-fade-in hub-card"
+            className="mygame-fade-in hub-card"
             onClick={(e) => e.stopPropagation()}
             style={{ width: '90%', maxWidth: 360, background: 'var(--c-panel-solid)', padding: 24, textAlign: 'center' }}
           >

@@ -148,7 +148,9 @@ const videoTargets = new Map<string, Set<HTMLElement>>(); // accountId -> contai
 const attachedEl = new Map<HTMLElement, { track: Track; media: HTMLMediaElement }>();
 const playback = new Map<string, { volume: number; muted: boolean }>(); // accountId -> local prefs
 
-const PERSIST_KEY = 'civa.activeCall';
+// Not 'civa.session'/JWT_ISSUER's category — resuming a call is a convenience, not identity, so
+// renaming costs a real user nothing worse than one in-progress call not auto-resuming.
+const PERSIST_KEY = 'gamehub.activeCall';
 /** A persisted call older than this is stale (tab closed mid-call, not a navigation) — don't
  *  surprise-rejoin. Refreshed every minute while connected, so long sessions stay resumable. */
 const PERSIST_MAX_AGE_MS = 15 * 60 * 1000;

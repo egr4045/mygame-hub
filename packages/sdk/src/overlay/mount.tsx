@@ -7,10 +7,10 @@ let host: HTMLDivElement | null = null;
 /**
  * Styles injected into the overlay's shadow root. Kept tiny and self-contained so the overlay looks
  * identical on top of any game regardless of the host page's CSS (the components are otherwise
- * inline-styled). `.civa-fade-in` mirrors the hub's entrance animation.
+ * inline-styled). `.mygame-fade-in` mirrors the hub's entrance animation.
  */
 export const OVERLAY_STYLES = `
-.civa-fade-in { animation: mygame-fade-in 0.15s ease-out; }
+.mygame-fade-in { animation: mygame-fade-in 0.15s ease-out; }
 @keyframes mygame-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes mygame-call-pulse { 0% { box-shadow: 0 0 0 0 rgba(59,165,93,0.55); } 70% { box-shadow: 0 0 0 16px rgba(59,165,93,0); } 100% { box-shadow: 0 0 0 0 rgba(59,165,93,0); } }
 

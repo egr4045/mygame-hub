@@ -105,7 +105,7 @@ export const AuthScreen = (): JSX.Element => {
   return (
     <div style={shell}>
       <div
-        className="civa-panel civa-fade-in"
+        className="hub-panel mygame-fade-in"
         style={{
           width: 440,
           padding: '40px',

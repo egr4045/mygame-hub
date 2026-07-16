@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (error) {
       return (
         <div
-          className="civa-panel"
+          className="hub-panel"
           style={{
             position: 'absolute',
             top: 12,

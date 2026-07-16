@@ -28,7 +28,7 @@ export const ContextMenu = (): JSX.Element | null => {
   return (
     <div 
       ref={menuRef}
-      className="civa-fade-in"
+      className="mygame-fade-in"
       style={{
         position: 'fixed',
         left: x,

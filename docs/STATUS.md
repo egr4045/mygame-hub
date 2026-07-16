@@ -71,8 +71,10 @@ idea box).
   Memory stays the read working set; writes mirror to Postgres (write-behind); boot hydrates from the
   DB. Set `DATABASE_URL=postgres://civa:civa@localhost:5432/civa` (matches `infra/docker-compose.yml`)
   to turn it on. Redis is still unused. Note: write-behind logs (not throws) on a failed DB write.
-- **Branding is inconsistent.** The UI says **CIVA** (nav bar) and **NEXUS** (login screen, bot
-  copy). Pick one platform name.
+- ✅ **Branding settled: GAMEHUB.** (Was inconsistent — the UI used to mix **CIVA** and **NEXUS** as
+  the platform name; both were leftovers from before the platform/game split.) The repo, deploy
+  images/network, and every doc now consistently call the *platform* GAMEHUB; **CIVA** refers only to
+  the 4X game itself, one of several games the platform launches (see `README.md`'s scope note).
 - **Password migration for pre-existing accounts is an open gap, not solved.** `packages/platform-db`'s
   migration adds `password_hash TEXT`, backfills existing rows to an empty string, then sets it
   `NOT NULL`. An account with an empty hash can never pass `verifyPassword` again (it always fails

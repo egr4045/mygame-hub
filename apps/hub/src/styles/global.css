@@ -45,22 +45,7 @@ button {
   border-radius: var(--r-pill);
 }
 
-/* Layer primitives ------------------------------------------------------- */
-
-.civa-canvas-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-.civa-overlay-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 100;
-  pointer-events: none; /* panels re-enable pointer events individually */
-}
-
-.civa-panel {
+.hub-panel {
   background: var(--c-panel);
   border: 1px solid var(--c-panel-border);
   border-radius: var(--r-lg);
@@ -68,39 +53,19 @@ button {
   pointer-events: auto;
 }
 
-.civa-fade-in {
-  animation: civaFadeIn var(--motion-base);
+/* Shared with @mygame/sdk's own components (ContextMenu/ChatWidget/ToastContainer render both here
+   and inside the SDK's Shadow-DOM overlay for embedded games) — same class name in both stylesheets,
+   matching the overlay's own `mygame-fade-in` keyframe (packages/sdk/src/overlay/mount.tsx). */
+.mygame-fade-in {
+  animation: mygame-fade-in var(--motion-base);
 }
 
-@keyframes civaFadeIn {
+@keyframes mygame-fade-in {
   from {
     opacity: 0;
   }
   to {
     opacity: 1;
-  }
-}
-
-/* Announcer "speaking" pulse used on the assembly screen. */
-.civa-eq {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
-  border-radius: 50%;
-  background: var(--c-positive);
-  animation: civaPulse 1s ease-in-out infinite;
-}
-
-@keyframes civaPulse {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.2);
   }
 }
 
@@ -132,22 +97,6 @@ button {
 .chat-markdown ul, .chat-markdown ol { margin: 4px 0; padding-left: 18px; }
 .chat-markdown blockquote { margin: 4px 0; padding-left: 8px; border-left: 3px solid rgba(255, 255, 255, 0.25); color: #b8c2cc; }
 .chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { font-size: 14px; margin: 6px 0 2px; }
-
-/* Ringing phone in the incoming-call queue. */
-@keyframes civaRing {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  20%,
-  60% {
-    transform: rotate(-12deg);
-  }
-  40%,
-  80% {
-    transform: rotate(12deg);
-  }
-}
 
 /* Hub building blocks — the repeated button/input/card/scrim patterns, expressed once against the
    ui-kit CSS variables (injectTheme). Screens use these instead of hand-rolled hex styles. */
