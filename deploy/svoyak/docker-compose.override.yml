@@ -1,0 +1,12 @@
+# PLATFORM_AUTH_URL: auth-сервис платформы в сети gamehub-net (SSO-мост)
+# Тома монтируем на data/ и uploads/ (НЕ на db/, иначе том затеняет database.js и ломает миграции)
+services:
+  svoyak:
+    environment:
+      PLATFORM_AUTH_URL: http://auth:8081
+    volumes:
+      - svoyak-data:/app/server/data
+      - svoyak-uploads:/app/server/uploads
+volumes:
+  svoyak-data:
+  svoyak-uploads:

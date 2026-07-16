@@ -12,6 +12,7 @@ networks:
 services:
   lobby:
     image: civa-service:latest
+    mem_limit: 512m
     command: ['pnpm', '--filter', '@civa/lobby', 'start']
     environment:
       LOBBY_PORT: '8082'

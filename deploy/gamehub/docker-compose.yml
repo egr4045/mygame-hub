@@ -43,6 +43,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 1g
 
   auth:
     image: gamehub-service:latest
@@ -74,6 +75,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 512m
 
   social:
     image: gamehub-service:latest
@@ -95,6 +97,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 512m
 
   chat:
     image: gamehub-service:latest
@@ -135,6 +138,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 512m
 
   # GAMEHUB's own self-hosted LiveKit for chat voice/video — a separate instance from Leaders' own
   # (port 7881, do not touch), on different ports (see livekit.yaml + the RTC ports below). The
@@ -159,6 +163,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 1g
 
   community:
     image: gamehub-service:latest
@@ -188,6 +193,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 512m
 
   orchestrator:
     image: gamehub-orchestrator:latest
@@ -231,6 +237,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 512m
 
   web:
     image: gamehub-web:latest
@@ -253,6 +260,7 @@ services:
       - livekit
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 128m
 
   # SDK starter template — path-routed under the hub's own origin (web's Caddyfile strips
   # /example-game/ before proxying here), not its own port: same-origin means a browser's
@@ -272,6 +280,7 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 128m
 
   # Minimal admin panel — path-routed under the hub's own origin (web's Caddyfile strips /admin/
   # before proxying here), same reasoning as examplegame above. Never shipped in the player-facing
@@ -289,3 +298,4 @@ services:
       - gamehub-net
     restart: unless-stopped
     logging: *default-logging
+    mem_limit: 128m

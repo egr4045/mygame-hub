@@ -1,6 +1,7 @@
-# svoyak — on-demand game (own SPA + auth on its own origin/port). Started/stopped by the
-# orchestrator. Reached by the browser on host port 8089; the orchestrator probes /metrics on
-# gamehub-net.
+# svoyak — on-demand game (own SPA + auth). Started/stopped by the orchestrator. No published host
+# ports: the gateway (deploy/gamehub) reaches svoyak:8089 over the shared gamehub-net network and
+# serves the SPA under /svoyak/ on the hub HTTPS origin — mic/cam need that secure context, so a
+# plain http://:8089 origin is not a usable path anyway. The orchestrator probes /metrics the same way.
 name: svoyak
 
 networks:
@@ -10,6 +11,7 @@ networks:
 services:
   svoyak:
     image: svoyak:latest
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -17,8 +19,6 @@ services:
       PORT: '8089'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/svoyak/.env}
       NODE_ENV: production
-    ports:
-      - '8089:8089'
     networks:
       - gamehub-net
     restart: unless-stopped
