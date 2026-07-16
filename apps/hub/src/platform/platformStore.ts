@@ -17,8 +17,6 @@ import {
 
 export type PlatformStatus = 'idle' | 'logging-in' | 'ready' | 'error';
 
-// Not 'civa.session'/JWT_ISSUER's category — this is just a UI convenience (last-viewed game), not
-// identity, so renaming it costs a real user nothing worse than one reset to the default game.
 const GAME_KEY = 'gamehub.game';
 const readGame = (): string | null => {
   try {

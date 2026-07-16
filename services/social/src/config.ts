@@ -16,7 +16,7 @@ export const loadConfig = (): ServiceConfig => ({
   port: Number(process.env.SOCIAL_PORT ?? 8083),
   env: process.env.NODE_ENV ?? 'development',
   jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
-  jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
+  jwtIssuer: process.env.JWT_ISSUER ?? 'gamehub',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
   databaseUrl: process.env.DATABASE_URL,
 });

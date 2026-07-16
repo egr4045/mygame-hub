@@ -46,7 +46,7 @@ afterEach(() => server?.close());
 const start = async (opts: { admin?: boolean } = {}) => {
   const runtime = new FakeRuntime();
   const orch = new Orchestrator([game()], { runtime, probe: fakeProbe, clock: createFakeClock(0), logger: createCapturingLogger() });
-  const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+  const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
   server = createApp({
     orch,
     logger: createCapturingLogger(),

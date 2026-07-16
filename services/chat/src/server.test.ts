@@ -7,7 +7,7 @@ import { createCapturingLogger } from '@mygame/test-harness';
 import { createChatServer, type ChatServer } from './server.js';
 import { createMemoryChatStore } from './store.js';
 
-const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
 
 let server: ChatServer | undefined;
 const clients: ClientSocket[] = [];

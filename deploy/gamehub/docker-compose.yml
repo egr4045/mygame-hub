@@ -54,7 +54,7 @@ services:
     environment:
       AUTH_PORT: '8081'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
-      JWT_ISSUER: civa
+      JWT_ISSUER: gamehub
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       # One-time admin bootstrap — see deploy/gamehub/.env.example. Empty is fine (no admins yet).
       AUTH_BOOTSTRAP_ADMIN_IDS: ${AUTH_BOOTSTRAP_ADMIN_IDS:-}
@@ -85,7 +85,7 @@ services:
     environment:
       SOCIAL_PORT: '8083'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
-      JWT_ISSUER: civa
+      JWT_ISSUER: gamehub
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       NODE_ENV: production
@@ -106,7 +106,7 @@ services:
     environment:
       CHAT_PORT: '8084'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
-      JWT_ISSUER: civa
+      JWT_ISSUER: gamehub
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       LIVEKIT_URL: "${LIVEKIT_URL:?set LIVEKIT_URL in deploy/gamehub/.env, e.g. wss://mygame-quiz.ru/gamehub-livekit}"
@@ -170,7 +170,7 @@ services:
     environment:
       COMMUNITY_PORT: '8085'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
-      JWT_ISSUER: civa
+      JWT_ISSUER: gamehub
       CORS_ORIGIN: '*'
       DATABASE_URL: postgres://civa:civa@postgres:5432/civa
       # New-suggestion Telegram alerts (send-only; auth owns the single poller of this token). The
@@ -212,7 +212,7 @@ services:
       CARDS_IDLE_MS: '600000'
       REAPER_MS: '30000'
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/gamehub/.env}
-      JWT_ISSUER: civa
+      JWT_ISSUER: gamehub
       # Read-only: checks the shared accounts.is_admin flag for apps/admin's force-stop route (the
       # orchestrator's first-ever Postgres touch). Unset would 501 that one route; every other route
       # (GET /games, POST /:id/enter) stays exactly as public as before either way.

@@ -36,7 +36,7 @@ export const loadConfig = (): ServiceConfig => ({
   port: Number(process.env.CHAT_PORT ?? 8084),
   env: process.env.NODE_ENV ?? 'development',
   jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
-  jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
+  jwtIssuer: process.env.JWT_ISSUER ?? 'gamehub',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
   databaseUrl: process.env.DATABASE_URL,
   livekitUrl: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',

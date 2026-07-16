@@ -26,7 +26,7 @@ export interface Session {
   refreshToken: string;
 }
 
-const KEY = 'civa.session';
+const KEY = 'gamehub.session';
 
 export const loadSession = (): Session | null => {
   try {

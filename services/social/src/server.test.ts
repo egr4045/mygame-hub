@@ -8,7 +8,7 @@ import { createSocialServer, type SocialServer } from './server.js';
 import { createMemorySocialStore } from './store.js';
 import { createMemoryInviteStore } from './invites.js';
 
-const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
 
 let server: SocialServer | undefined;
 const clients: ClientSocket[] = [];

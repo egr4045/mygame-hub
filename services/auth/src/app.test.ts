@@ -23,7 +23,7 @@ let server: ReturnType<typeof createApp> | undefined;
 afterEach(() => server?.close());
 
 const start = async () => {
-  const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+  const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
   const accounts = createMemoryAccountStore();
   server = createApp({
     clock: createFakeClock(0),
@@ -207,7 +207,7 @@ describe('auth service — bans are enforced, not just displayed', () => {
 
 describe('auth service — credential rate limiting', () => {
   it('429s after the per-IP burst is exhausted', async () => {
-    const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+    const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
     server = createApp({
       clock: createFakeClock(0),
       logger: createCapturingLogger(),

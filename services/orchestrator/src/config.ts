@@ -48,6 +48,6 @@ export const loadConfig = (): ServiceConfig => ({
   reaperMs: Number(process.env.REAPER_MS ?? 30_000),
   games: defaultGames(),
   jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-me',
-  jwtIssuer: process.env.JWT_ISSUER ?? 'civa',
+  jwtIssuer: process.env.JWT_ISSUER ?? 'gamehub',
   databaseUrl: process.env.DATABASE_URL,
 });

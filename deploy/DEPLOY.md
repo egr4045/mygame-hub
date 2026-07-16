@@ -131,9 +131,18 @@ means that domain 502s until GAMEHUB is brought back up.
 - `social`/`chat` run their Socket.io servers on custom paths (`/social.io/`, `/chat.io/`), not the
   default `/socket.io/` — that path is reserved for the game lobby's own socket, on the same shared
   origin (see `docs/ARCHITECTURE.md`).
-- JWT issuer (`civa`) and the SDK's `localStorage` keys (`civa.session`) are unchanged by the
-  GAMEHUB rename — deliberately: renaming those would invalidate every existing session/token
-  cross-game, which wasn't asked for. Only the deploy path/repo/image names moved.
+- **JWT issuer is now `gamehub`** (was `civa` — changed 2026-07-16, `JWT_ISSUER: gamehub` in this
+  compose's five service blocks + `deploy/civa-game/docker-compose.yml`). The SDK's `localStorage`
+  session key is now `gamehub.session` (was `civa.session`). Both were left unchanged during the
+  original GAMEHUB rename specifically to avoid invalidating live sessions — that tradeoff was
+  revisited and the user explicitly accepted the one-time logout. **Deploy consequence:** every
+  service reading `JWT_ISSUER` verifies tokens by issuer match (`jose`'s `jwtVerify(..., {issuer})`
+  hard-rejects a mismatch) — auth/social/chat/community/orchestrator must all redeploy **together**,
+  not one at a time, or requests between an old-issuer service and a new-issuer service fail. Every
+  token issued before this deploy (`iss: 'civa'`) stops verifying the instant the new build is live —
+  every logged-in user is signed out and must log in again (their account/data is untouched, only the
+  session). Postgres user/db/password stay `civa/civa/civa` — a separate, unrelated credential; not
+  part of this change.
 
 ## Spellforge (cards) — карточная игра
 

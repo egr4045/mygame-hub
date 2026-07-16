@@ -14,7 +14,7 @@ afterEach(() => server?.close());
 const ADMIN = 'admin-account-id';
 
 const start = async (adminIds: string[] = [ADMIN]) => {
-  const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+  const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
   server = createApp({
     clock: createFakeClock(1000),
     logger: createCapturingLogger(),
@@ -321,7 +321,7 @@ describe('community app — platform settings', () => {
 describe('community app — suggestions', () => {
   it('accepts a suggestion from any logged-in user, lists + triages it as admin, notifies once', async () => {
     let notified = 0;
-    const auth = createAuthCore({ secret: 's', issuer: 'civa', accessTtl: '15m', refreshTtl: '30d' });
+    const auth = createAuthCore({ secret: 's', issuer: 'gamehub', accessTtl: '15m', refreshTtl: '30d' });
     server = createApp({
       clock: createFakeClock(1000),
       logger: createCapturingLogger(),
