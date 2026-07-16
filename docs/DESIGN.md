@@ -3,8 +3,11 @@
 > **Scope:** this document describes the **CIVA 4X game** — a *separate product* that the platform in
 > this repo launches as an on-demand stack. It is **not** the platform's design. The game's code and
 > `packages/game-config` are not in this repository (the game ships from its own `deploy/civa-game`
-> compose). The CIVA domain types referenced below also appear in `@mygame/shared-types`, but the
-> platform itself does not use them. For the platform, see `STATUS.md` / `ARCHITECTURE.md` / `PLAN.md`.
+> compose). The CIVA domain types this design describes (resources/biomes/buildings/units/tech/
+> diplomacy) used to also live in `@mygame/shared-types`, from when this repo was still a fork of
+> CIVA's own before the platform/game split — removed 2026-07-16 once confirmed the platform itself
+> never used them (not moved anywhere; CIVA's next implementation starts over). This document is now
+> their only home. For the platform, see `STATUS.md` / `ARCHITECTURE.md`.
 
 This is the agreed design after the criteria review. It is the source of truth for balance intent;
 numbers live in `packages/game-config` (in the game's repo).

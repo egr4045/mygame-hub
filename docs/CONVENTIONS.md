@@ -47,8 +47,9 @@ Depend on `Clock`, `Logger` (`@mygame/shared-types/ports.ts`) and the per-servic
 in the service; in-memory fakes live in the service and/or `@mygame/test-harness`. The `index.ts`
 entry wires real adapters; `standalone.ts` wires in-memory ones.
 
-> Reality check: real adapters today are only the in-memory ones (and Docker/HTTP for the
-> orchestrator). Postgres adapters are the next step — see `STATUS.md` / `PLAN.md`.
+> Reality check: `auth`/`social`/`chat`/`community` all have real Postgres adapters now (gated on
+> `DATABASE_URL`, in-memory fallback otherwise); `orchestrator` still has only Docker/HTTP, since it
+> has no datastore of its own. See `STATUS.md` / `ARCHITECTURE.md`.
 
 ## Logging
 

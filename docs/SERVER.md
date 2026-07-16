@@ -39,10 +39,17 @@ Do not break one while touching another.
   Reachable directly at **http://186.246.11.239:8088**, and — the real public entry point — at
   **https://mygame-quiz.ru** (the root domain, no subdomain; Leaders' Caddy already forwards it here,
   see Product A above).
-- **On-demand games** (started/stopped by the orchestrator):
+- **On-demand games** (started/stopped by the orchestrator; each registers a manifest entry +
+  its own `deploy/<game>` compose):
   - CIVA lobby — `deploy/civa-game` (project `civa-game`). The game itself is still called CIVA;
-    GAMEHUB is the platform's name, not any one game's.
-  - (more games register in the orchestrator manifest + their own `deploy/<game>` compose).
+    GAMEHUB is the platform's name, not any one game's. On the legacy per-port model, not path-routed
+    — `status: 'maintenance'` in the hub's registry rather than shipping a Play button that would hit
+    the http→https browser upgrade bug (see `docs/ARCHITECTURE.md`'s Hub section).
+  - Своя игра (svoyak) — `deploy/svoyak` (project `svoyak`). Path-routed at `/svoyak/` (HTTPS,
+    same-origin — required for `getUserMedia`, mic/cam); no published host port. Own repo, cloned
+    during the image build.
+  - Spellforge (cards) — `deploy/cards` (its own repo, `/root/cards` on this server, not in this
+    monorepo). Path-routed at `/cards/`, own Socket.io path `/cards-io/*`.
 - Networking: a shared external Docker network **`gamehub-net`**; the gateway routes one origin:
   `/auth/*`→auth, `/social.io/*`→social (Socket.io, custom path), `/chat.io/*`→chat (Socket.io, custom
   path), `/chat/call/token`→chat (HTTP, mints a LiveKit token), `/community/*`→community,
@@ -66,16 +73,26 @@ Do not break one while touching another.
   Leaders' Postgres (127.0.0.1:5432) for the platform.
 - **Secrets via env only, never committed.** Set per-container in `deploy/gamehub/.env`:
   - `JWT_SECRET` — shared secret for SSO; the **same** value must be set on every game that accepts
-    the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat`/`community` alike.
+    the platform login (see `SSO-FEDERATION.md`), and on `auth`/`social`/`chat`/`community`/
+    `orchestrator` alike (orchestrator verifies tokens too, for its admin force-stop route).
+  - `JWT_ISSUER` — defaults to `gamehub` in every service if unset; must also match across all five
+    services above, same reason as `JWT_SECRET` — `jose`'s issuer check is a hard reject on mismatch,
+    so a partial rollout of a `JWT_ISSUER` change breaks cross-service token verification, not just
+    client sessions. **Not** the same key as the Postgres credentials below, which are unrelated and
+    still literally `civa` (see `docs/STATUS.md`'s recent-history note on the 2026-07-16 issuer rename).
   - `DATABASE_URL` — e.g. `postgres://civa:civa@postgres:5432/civa`; set identically on
-    `auth`/`social`/`chat`/`community` for durable state.
+    `auth`/`social`/`chat`/`community` (and `orchestrator`, read-only, just for the admin check) for
+    durable state.
   - `AUTH_BOOTSTRAP_ADMIN_IDS` (on `auth`) — comma-separated accountIds to grant the platform's
     `is_admin` flag on boot (one-time; the account must already exist — log in once first). Gates
     everything in `apps/admin`, including changelog publishing. Every admin after this one is managed
     via `apps/admin` itself, not by editing this and restarting.
-  - `TELEGRAM_BOT_TOKEN` — the Telegram bot token for account linking/login. When set, `auth` starts
-    a long-polling bot — **run a single auth instance** (Telegram allows one `getUpdates` consumer per
-    token; disable any webhook). Keep the token out of git, logs and docs.
+  - `OPS_ALERT_BOT_TOKEN` — same Telegram bot as `TELEGRAM_BOT_TOKEN` below (two env var names, one
+    token: `auth` reads it as `TELEGRAM_BOT_TOKEN` since it owns account linking; `chat` and
+    `community` read it as `OPS_ALERT_BOT_TOKEN` since they only ever *send* through it — disk-space
+    alerts and new-suggestion pings). Whoever first DMs the bot `admin` becomes the alert recipient
+    (persisted). **`auth` must be the only long-poller** — Telegram allows exactly one `getUpdates`
+    consumer per token; `chat`/`community` never poll, only send. Keep the token out of git, logs, docs.
   - `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (on `chat`) + `LIVEKIT_KEYS` (on `livekit`,
     same key/secret pair, `"apikey: apisecret"` format) — GAMEHUB's own LiveKit, generate the secret
     with `openssl rand -hex 32`. `LIVEKIT_URL` must be the public address
@@ -110,8 +127,12 @@ Check on-demand: `curl -sXPOST localhost:8088/orchestrator/games/civa/enter` the
 | (projectflow ports) | projectflow app/db | see its own compose — not this repo's concern |
 
 ## Quick orientation for an agent
-- This file is the map. The GAMEHUB repo's `docs/` has DESIGN.md (game), DEPLOY.md (ops), PLAN.md
-  (roadmap), ARCHITECTURE.md (how the platform is put together), STATUS.md (real vs. mock).
+- This file is the map. The GAMEHUB repo's `docs/` has DESIGN.md (game), DEPLOY.md (ops),
+  ARCHITECTURE.md (how the platform is put together), STATUS.md (real vs. mock, start there).
+- Every service in `deploy/gamehub/docker-compose.yml` carries a `mem_limit`, added directly on the
+  server — this host is shared with Leaders + projectflow, watch free RAM before raising one. Check
+  `git status` there before assuming the repo and the running config match; ops changes have landed
+  on the server uncommitted before (see `deploy/DEPLOY.md`'s history).
 - To change GAMEHUB: edit in the repo, `git push`, then on the server `git pull` + redeploy (above).
 - To check what's running: `docker ps`. Leaders containers are prefixed `leaders-`, GAMEHUB
   `gamehub-` (plus `civa-game-*` for the on-demand lobby), projectflow `projectflow-`.

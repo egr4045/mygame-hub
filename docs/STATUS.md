@@ -1,154 +1,111 @@
 # Platform status — what actually works
 
-> Audited 2026-07-11 against the code on branch `refactor/hub-split`. This is the source of truth for
-> "is this real or a mock". Update it whenever a mock becomes real.
+> Audited 2026-07-16 against branch `refactor/hub-split`. This is the source of truth for "is this
+> real or a mock". Rewritten from scratch this pass — the previous version had drifted badly behind
+> the code (missing several shipped systems, and still describing "find groups/lobbies" as real after
+> it was removed entirely). Update it whenever a mock becomes real or a real feature changes shape.
 
 ## Legend
 
-- ✅ **Real** — backed by a working service.
-- 🟡 **Partial** — works, but **in-memory only** (lost on restart) *or* the frontend is ready and the
-  backend is a stub.
-- ❌ **Mock** — UI only, no backend at all (hardcoded data / `alert()` / local state).
+- ✅ **Real** — backed by a working service, Postgres-persisted where it needs to be.
+- 🟡 **Partial** — works, but **in-memory only** (lost on restart without `DATABASE_URL`) *or* one
+  specific piece of an otherwise-real feature is still a stub.
+- ❌ **Mock / not built** — UI only, no backend, or genuinely doesn't exist yet.
 
 ## Summary
 
-The **social skeleton** of the platform (identity + friends + launcher + chat + achievements +
-profile) is real, working, and Postgres-persisted. The Steam-style *store content* around it
-(changelog, forum, lobby browser, playtime stats) is now real too — the hub's frontend mocks were
-replaced with a new `services/community` (changelog + discussions), a `game_stats` slice on `auth`
-(playtime, driven by an in-game SDK heartbeat), and a presence-derived lobby query on `social`. A
-runnable starter (`apps/example-game`) exercises the whole SDK surface end-to-end. A standalone
-`apps/admin` panel (path-routed at `/admin/`, gated server-side by an `is_admin` account flag) now
-covers game/user/settings management. Voice/video calls
-now run on GAMEHUB's own self-hosted LiveKit. What's left is a couple of genuinely unimplemented
-pieces (VK linking, chat reactions) and lower-priority UI polish (profile status, "Связь с автором"
-idea box).
+The platform's identity/social/content spine is real and Postgres-persisted end to end: accounts,
+friends, DMs/groups, voice/video calls (self-hosted LiveKit), achievements (unlocks **and** their
+display catalogs — no longer hardcoded per game), profiles, changelog/discussions, a triaged player
+**suggestions** queue, and a **standalone admin panel** covering all of it. Telegram is wired for both
+account linking/login and ops alerting (disk space, new suggestions), routed through a single bot the
+`auth` service polls. The hub ships a dedicated mobile shell alongside the desktop launcher, an instant
+boot skeleton + caching so returning from a game isn't a blank wait, and unified friend search by nick
+or code. What's left unbuilt: VK linking (deferred by request), chat reactions, and a real "invite a
+friend to my current game" trigger from inside an actual game session (the receiving side is real; only
+the hub's own demo button exercises the sending side today).
 
 ## Features
 
 | Feature | Status | Reality |
 |---|---|---|
-| Account login | 🟢 | Real backend (`services/auth`, real HS256 JWT access/refresh). Login requires a password. "Регистрация" and "Авторизация" are fully implemented. |
-| Account persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/auth/src/pgStore.ts`): accounts survive restart, ids stay stable (durable SSO identity). Falls back to in-memory with a loud warning when unset (and in `standalone`). |
-| Admin panel (`apps/admin`) | ✅ | Real, already-deployed standalone app, path-routed at `/admin/` on the same origin (same pattern as `example-game`'s `/example-game/` — see `deploy/gamehub/docker-compose.yml` + `Caddyfile`). Login is the same password register/login flow every player uses; access is gated **server-side** by the account's `is_admin` boolean (`services/auth`'s `requireAdmin` → 403 if logged in but not an admin), not a client-side check. The first admin(s) are bootstrapped via `AUTH_BOOTSTRAP_ADMIN_IDS` (comma-separated accountIds, checked once at boot, idempotent — replaces the old single-purpose `COMMUNITY_ADMIN_IDS`, fully removed); every admin after that is promoted/demoted from inside the app itself (`PUT /auth/admin/accounts/:id/role`, with a server-side guard against demoting the last remaining admin). Ships: game management (changelog CRUD, discussion moderation, achievement grant/revoke, orchestrator force-stop of a running game), user management (search/list/detail, clear avatar/wallpaper, grant/revoke achievements), and general settings (admin roster promote/demote, a live per-service health dashboard, branding/contact key-value settings). |
-| SSO handoff into a game | ✅ | `POST /auth/handoff` mints a short-lived (120s) token; the hub passes it via `?pt=` (`HubScreen.tsx`). The game's own origin redeems it via auth's own `POST /auth/exchange` (there is no separate `/auth/platform` route — every game exchanges against the same auth service) for a full session; the server verifies the token signature, `typ === "handoff"`, and that the account still exists (404 if not) — the client never decodes/trusts the JWT itself. SDK surface: `authClient.exchangeHandoff` / `mygame.auth.loginWithToken` (see `apps/example-game/src/App.tsx`'s `pt=` handling for the reference implementation). See `SSO-FEDERATION.md`. |
-| Telegram account linking | ✅ | Real bot (`services/auth/src/telegram.ts` long-poll + `telegramLinking.ts`), gated on `TELEGRAM_BOT_TOKEN`. Hub profile → `POST /auth/telegram/link-code` → open bot `/start <code>` → binds `accounts.telegram_id` (persisted). Status via `GET /auth/telegram/status`. |
-| Login from another device (Telegram) | ✅ | Send `/login` to the bot → one-time code → enter it on the auth screen (`POST /auth/social/login`) → full session for the linked account. |
-| VK account linking | ❌ | Deferred by request. Button shows "(скоро)". |
-| Friends list (add/accept/decline/remove) | ✅ | Real Socket.io backend (`services/social`). Account id doubles as friend code. |
-| Presence (online/offline/in-game) | ✅ | Computed from live socket connections; activity is pushed to friends. |
-| Friends persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/social/src/pgStore.ts`): the friendship graph survives restart. Falls back to in-memory (warning) when unset / in `standalone`. |
-| Friend avatar / title visible to others | ✅ | Real: `social`'s `Friend`/`me` payloads carry `avatarIcon`/`titleAchievement`, mirrored (read-only) from the shared `accounts` table `auth` owns. Refreshed on every socket connect (`refreshProfile`, gated on `DATABASE_URL` — a no-op in pure in-memory mode, so avatar/title stay `null` there). `FriendsSidebar` renders the avatar image directly and a generic 🏅 indicator when a friend has a title equipped (no name/icon — that needs a per-game display catalog the SDK deliberately doesn't own). Propagation is reconnect-driven, not live-pushed: an already-connected friend sees your new avatar once *you* reconnect, same staleness profile as a display-name change today. |
-| Invite codes | ✅ | Real: mint a code, resolve via `GET /invite/:code`, push an invite to a friend's socket. Postgres-backed when `DATABASE_URL` is set (`pgInvites.ts`), 1h TTL; in-memory fallback otherwise. |
-| Invite **links** (deep-link join) | ✅ | `App.tsx` reads `?invite=CODE` on load, resolves it (`resolveInvite`), and — once logged in — auto-wakes the game, mints a handoff token, and navigates (`routeToInvite`). Works whether the code came from a link someone shared or a push notification. **Creating** a shareable link/pushing one to a friend has no dedicated UI yet — `createInvite`/`inviteFriend` are only exercised via a demo button and the (still-mock) "invite to game" friend-menu item; see `ARCHITECTURE.md`. |
-| Chat: DMs + groups | ✅ | Real backend: `services/chat` (Socket.io + JWT, mirrors `social`). Unified `Conversation` model (dm = 2-member conversation, group = named, membership changeable post-creation — see the row below). Send/receive, persisted history, unread counts, read receipts (dm only). Postgres-backed when `DATABASE_URL` is set, in-memory fallback otherwise. |
-| Chat widget ships with `@mygame/sdk` | ✅ | The chat UI (`ChatWidget`) lives in `packages/sdk/src/components/`, not the hub — it's rendered by the SDK's self-mounting overlay (`mountOverlay()` → `MygameOverlay`), so **any game embedding the SDK gets a working chat window + launcher button automatically**, no UI code required. The hub renders the same component directly (not through the overlay). `mygame.chat.*` also exposes a full imperative API (`createGroup`, `addMembers`, `removeMember`, `leaveGroup`, `send`, `getThreads`, `getUnreadCount`, `subscribe`) for a game that wants to build its own UI on the data instead. |
-| Friends widget ships with `@mygame/sdk` | ✅ | `FriendsWidget`/`FriendsSidebar` moved from the hub into `packages/sdk/src/components/` and render from `MygameOverlay` too — same treatment as chat. "Invite to current game" lost its (already-mock, hub-only) disabled-state gating in the move — see `ARCHITECTURE.md`. |
-| Group membership management | ✅ | Real: any current member may add others (`ChatWidget`'s "➕" reuses the create-group friend-picker, scoped to friends not already in the group); any member may remove themselves (leave, "🚪" in the group header); only the group's owner (creator, `ownerId`) may remove someone else — enforced server-side in `services/chat/src/server.ts`, not just in the UI. Kicking a *specific* member has no dedicated button yet (the backend/`mygame.chat.removeMember` API supports it) — only leave + add got UI this pass. |
-| Chat reactions / edit / delete / typing indicators | ❌ | Dropped from the real backend for v1 scope. Message context-menu actions (reply/edit/delete) are still `alert(...)`. |
-| Voice / video calls | ✅ | Real: GAMEHUB's own self-hosted LiveKit (separate from Leaders' own instance — see `docs/SERVER.md`). Signaling (`chat.callRing/callAccept/callDecline/callHangup`) is ephemeral, live-only (not persisted, mirrors how presence/activity work) — `services/chat/src/server.ts` tracks it in memory only. `POST /chat/call/token` (plain HTTP, bearer JWT) mints a room-scoped LiveKit access token once the caller is confirmed to be a participant of that conversation; the SDK (`chatStore.ts`) connects via `livekit-client`, publishes mic/cam, and `ChatWidget.tsx` attaches real `<video>`/`<audio>` elements from LiveKit's own track events (no more `CALL VIEW MOCK`). Supports audio, video, and group calls (multiple participants in one LiveKit room per conversation). |
-| Achievements | 🟡 | Real API: `POST/GET /auth/achievements` on `services/auth` (idempotent grant, scoped per `gameId`+`achievementId`, persisted via the account store). `mygame.achievements.grant/list` in the SDK; a genuinely new unlock fires a toast automatically. **But** the display catalog (name/description/icon per achievement) is still a hardcoded local array in `ProfileView.tsx` — the platform only knows *that* an id is unlocked, not how to describe it (inherently a per-game concern; see `ARCHITECTURE.md`). |
-| Profile avatar / wallpaper / title | ✅ | Real: `PUT/GET /auth/profile/{avatar,wallpaper,title}` on `services/auth`, persisted on the account row as data URLs (no object storage exists — see `ARCHITECTURE.md` for the size cap and why). Title must reference an achievement the account actually has unlocked (server validates). `mygame.profile.*` in the SDK. Survives reload/restart (Postgres-backed like the rest of the account). |
-| Notifications (toasts) | 🟡 | Toast mechanism is real. `mygame.achievements.grant()` fires one automatically on a genuinely new unlock (real, for any SDK consumer) — but the hub's own achievement/message demo buttons trigger it manually rather than from a real chat/achievement event reaching the hub. |
-| Notification center (🔔) | ✅ | Real: shows incoming friend requests (click = accept) and pushed game invites (click = join, via `routeToInvite`) with a live count badge. Falls back to "Нет новых уведомлений" when both are empty. "Настройки уведомлений" is still `alert(...)`. |
-| Game library | ✅ | Real static registry (`apps/hub/src/platform/games.ts`), mirrors the orchestrator manifest. |
-| Game launch / orchestrator | ✅ | `services/orchestrator` really runs `docker compose up/stop`, wakes a game on entry, reaps it on idle (reaper polls each game's `/metrics`). Hub calls `POST /orchestrator/games/:id/enter`. |
-| SDK starter template | ✅ | `apps/example-game` — a minimal Vite+React app exercising the full SDK surface (handoff login, achievements, activity/lobbies, chat/friends overlay, playtime, changelog/discussions). Doubles as living documentation and registered in the hub's game library (`example-game`, port 5190). |
-| Game page: changelog | ✅ | Real: `services/community` (`GET/POST /community/changelog/:gameId`), Postgres-backed when `DATABASE_URL` is set. Reads are public; publishing requires the caller's account to have the platform's `is_admin` flag (curated patch notes, not user content — see `ARCHITECTURE.md`; the flag is the same one `apps/admin` gates on, not a community-specific allowlist). `mygame.community.getChangelog`. |
-| Game page: find groups / lobbies | ✅ | Real, derived live from presence: `social.getLobbies` (socket ack) groups online accounts whose `activity.joinable` is set, by room, for the requested game — no persistence. Honestly sparse until a game actually calls `setActivity({ joinable: true })` (the example game does). "+ Создать лобби" sets your own activity and enters the room. |
-| Game page: discussions / forum | ✅ | Real forum on `services/community` (`discussion_threads`/`discussion_posts`, Postgres-backed). Reads are public; creating a thread/reply needs only a valid session (same trust model as chat/achievements — no moderation yet). `mygame.community.getThreads/getThread/createThread/createPost`. |
-| Playtime / "last played" stats | ✅ | Real: `game_stats` on `services/auth`. `last_played_at` is stamped on launch (`recordGameEnter`); `seconds_played` accrues from an **in-game** SDK heartbeat (`mygame.stats` — started automatically by `mygame.init()`) since the hub can't time a session once it navigates to the game's own origin. The server clamps each heartbeat's credited delta so a missed beat/closed tab never over-credits — see `ARCHITECTURE.md`. |
-| Profile status (online / DND) | — | Removed rather than left mocked: the fake "🟢 В сети / 🌙 Не беспокоить" menu items are gone (`HubScreen.tsx`). Presence is real but binary (online/offline, from `social`); a genuine status feature (DND, etc.) is unbuilt, not stubbed. |
-| "Copy my ID" (top bar) | ✅ | Copies the real accountId (`HubScreen.tsx`, same value as the friends sidebar's "copy code"). |
-| Context menus (right-click) | 🟡 | Menus are real; most actions now work (open chat, remove friend, play, open discussions). A few remain `alert(...)`/disabled placeholders (invite, block, call, share, favorites). |
-| "Связь с автором" | 🟡 | Real external Telegram link. "Предложить идею" has no backend. Donation = "Временно недоступно". |
-| "Protect your account" modal | 🟡 | Telegram button now starts the real linking flow (same as the profile page); VK is an explicit disabled "скоро", not a fake close. |
+| Account login/register | ✅ | `services/auth`, HS256 JWT access/refresh (`@mygame/auth-core`), scrypt-hashed passwords, timing-safe verify, per-IP rate limiting on register/login. |
+| Account persistence | ✅ | Postgres-backed when `DATABASE_URL` is set (`services/auth/src/pgStore.ts`) — accounts, playtime, achievement unlocks, achievement catalogs all survive restart. Falls back to in-memory with a loud warning when unset (and always in `standalone`). |
+| SSO handoff into a game | ✅ | `POST /auth/handoff` mints a 120s token; the hub passes it via `?pt=`. The target game's own origin redeems it via `POST /auth/exchange` for a full session — the server verifies signature + `typ==='handoff'` + account still exists; the client never decodes the JWT itself. SDK: `mygame.auth.getHandoff()` / `.loginWithToken()` / `.adoptSession()` (for a game whose *own server* redeems the token and hands the browser a session — see `SSO-FEDERATION.md`). |
+| Telegram account linking + login | ✅ | Real bot (`@mygame_quiz_hub_bot`, long-poll, `services/auth/src/telegramLinking.ts` + `packages/telegram`), gated on `TELEGRAM_BOT_TOKEN`. `POST /auth/telegram/link-code` → open bot `/start <code>` → binds `accounts.telegram_id`. `/login` on the bot → one-time code → `POST /auth/social/login` on a new device. Auth is the **sole poller** of this bot token — `services/chat`'s disk-alert monitor and `services/community`'s suggestion-notify both only *send* through the same token, never poll (two pollers on one token 409s). |
+| VK account linking | ❌ | Deferred by request. |
+| Friends (add/accept/decline/remove/block) | ✅ | Real Socket.io backend (`services/social`), Postgres-persisted. Account id doubles as a short, dictatable friend code. |
+| Find friends by nick or code | ✅ | `social.search` — live search as you type, ranked with an exact friend-code match first, then name matches; each result carries your relation to that account (add / pending / already friends / self) and blocked accounts are filtered out. Used by the desktop friends sidebar and the mobile Друзья tab. |
+| Presence (online/offline/in-game) | ✅ | Computed from live socket connections; activity (what game, joinable room) is pushed to friends. |
+| Friend/own avatar + title visible to others | ✅ | `social`'s `Friend`/`me` payloads mirror `avatarIcon`/`titleAchievement` (read-only) from the shared `accounts` table `auth` owns, refreshed on every socket connect. The redesigned profile card (`UserProfileModal`, one shared component used everywhere a profile opens — friends sidebar, chat, mobile) resolves a friend's title to its real name/icon/description via the achievement catalog registry (see below), not just a generic 🏅. |
+| Invite codes + deep links | ✅ | Mint a code (`createInvite`/`inviteFriend`), resolve via public `GET /invite/:code`, push to a friend's socket. `?invite=CODE` on load auto-resolves once logged in and routes into the game (`routeToInvite`). Steam-style bottom-right toast for a pushed invite (Присоединиться/Позже), not just the 🔔 center. |
+| Chat: DMs + groups | ✅ | `services/chat` (Socket.io + JWT). A DM is a deterministic 2-member conversation; a group has a mutable member list, an owner, and promotable admins. Persisted history with pagination (`loadOlder`), unread counts, read receipts (dm only), typing indicators (throttled, auto-clears), image uploads (50MB cap, 30-day message retention, durable volume). Rate-limited (send/edit/delete, signaling, uploads). |
+| Chat: edit / delete / reply / pin | ✅ | Edit is sender-only and not allowed on an already-deleted message. Delete is a tombstone (own messages always; someone else's only for a group owner/admin) — the row survives so reply-chains and ordering stay stable, rendered as "Сообщение удалено". Reply quotes and scrolls to the original. Group owner/admins can pin one message. |
+| Group membership + roles | ✅ | Any member may add others; only the owner/admins may remove someone else (self-removal/leave is always allowed); the owner can promote/demote admins and update the group's name/avatar. A member-list "⋯" context menu drives all of this in `ChatWidget`. |
+| Chat reactions | ❌ | Not built. |
+| Voice / video calls | ✅ | GAMEHUB's own self-hosted LiveKit (separate instance from Leaders' — see `docs/SERVER.md`). Two call kinds share one media layer (`callStore`): **conversation calls** (ring/accept/decline/hangup over the chat socket, Discord-style live participant presence pushed to every group member) and **portable game-room calls** (`mygame.call.joinGameRoom`, a host can `bindToRoom` their conversation call so game-side joiners land in the same LiveKit room, and `inviteToGame` pushes a "come play" invite over the data channel). Calls survive a page navigation (persisted + resumed via `mygame.call.resume()`, called from `mygame.init()` and on tab-visibility/online/pageshow — see "socket auto-revive" below). Multi-device: LiveKit identity is `accountId#device`, so the same account can join from two devices without evicting itself. |
+| Achievements: unlock + list | ✅ | `POST/GET /auth/achievements` on `services/auth`, idempotent grant scoped per `gameId`+`achievementId`, Postgres-persisted. `mygame.achievements.grant/list`; a genuinely new unlock fires a sound + toast automatically. Trust model: the caller's own token authorizes the grant (same posture as the rest of the platform) — a game that cares should grant from its own trusted backend. |
+| Achievements: display catalog | ✅ | A game registers its own catalog (name/description/icon/colour per achievement) via `mygame.achievements.registerCatalog()` — idempotent full-replace, `PUT/GET /auth/achievements/catalog(/:gameId)`, Postgres-persisted (`achievement_definitions` table, CIVA's seeded since its own repo isn't here yet). The hub fetches all registered catalogs (cached, stale-while-revalidate) and shows a real per-game showcase (locked+unlocked, hover = description) on that game's own page; the profile's achievements list decorates every unlock with the real name/icon instead of a bare id. `example-game` registers a demo catalog on boot as the reference implementation. |
+| Profile avatar / wallpaper / title | ✅ | `PUT/GET /auth/profile/{avatar,wallpaper,title}`, persisted as data URLs on the account row (no object storage — see `ARCHITECTURE.md`). Title must reference an achievement the account actually holds (server-validated) and can now reference *any* game's achievement, not just one hardcoded game. |
+| Notification sounds | ✅ | WebAudio-synthesized placeholders for message/call/achievement (obviously synthetic on purpose — real audio files are a copyright follow-up). Admin can override each with an uploaded file (`apps/admin`'s Settings → Sounds, stored as a data URL in `platform_settings`); a master volume slider lives in the hub's notification settings. |
+| Notification toasts | ✅ | Steam-style, bottom-right, with sender avatar and action buttons where relevant (invite Join/Later). Fire for: incoming chat message (when that chat isn't the one currently open), incoming call, achievement unlock, pushed game invite. A per-category mute toggle lives in notification settings. |
+| Notification center (🔔) | ✅ | Incoming friend requests (click = accept) and pushed game invites (click = join) with a live count badge. |
+| Suggestions ("предложить идею") | ✅ | `services/community` owns a triaged suggestions queue (`suggestions` table: new → accepted/rejected/implemented), separate from the discussion forum. Any logged-in account can submit (`createSuggestion`, hub's "Связь с автором" + mobile profile tab); a new submission pings the registered Telegram ops recipient with a deep link straight into the admin panel's Предложения tab (`/admin/#suggestions`). Admin can filter by status and move a suggestion through the pipeline. |
+| Game page: changelog | ✅ | `services/community`, Postgres-backed. Reads are public; publishing is admin-gated (`is_admin`, same flag `apps/admin` gates on everywhere). |
+| Game page: discussions / forum | ✅ | `discussion_threads`/`discussion_posts`, Postgres-backed. Reads are public; creating a thread/reply needs only a valid session. Soft-delete moderation (admin-gated). |
+| Game page: achievements panel | ✅ | Real showcase from the achievement catalog registry (see above) — was a hardcoded "Достижения пока недоступны" placeholder until this pass. |
+| Game page: find groups / lobbies | ❌ removed | Was a presence-derived lobby query (`social.getLobbies`); removed entirely by request — a game showed a joinable "lobby" even while the game itself was unreachable (maintenance). Games are expected to build their own matchmaking now; nothing in the platform replaces this. |
+| Playtime / "last played" stats | ✅ | `game_stats` on `services/auth`. `last_played_at` stamps on launch; `seconds_played` accrues from an in-game SDK heartbeat (started automatically by `mygame.init()`), server-clamped so a missed beat/crash never over-credits. Under 30s played shows "0 мин", not "ещё не играли". |
+| Game library | ✅ | Static registry (`apps/hub/src/platform/games.ts`) mirroring the orchestrator manifest. Admin can flip a game's status (playable/soon/maintenance) at runtime via `platform_settings` — no redeploy needed, applied on the hub's next boot (cached + revalidated, like the achievement catalogs). |
+| Game launch / orchestrator | ✅ | `services/orchestrator` runs `docker compose up/stop`, wakes a game on entry, reaps it after idle (default 10 min, polls each game's `/metrics`). Admin can also force-stop a running game, bypassing its idle timer. |
+| Game routing: HTTPS same-origin path | ✅ for svoyak, example-game, cards · ❌ for civa | Reached at `mygame-quiz.ru/<game>/` behind the gateway (Caddy strips the prefix), not a bare port — required for `getUserMedia` (mic/cam), which browsers block on an insecure `http://host:port` origin. CIVA is still on the legacy per-port model and is marked `status: 'maintenance'` in the registry rather than shipping a Play button that would hit that bug. |
+| Mobile hub | ✅ | A dedicated shell (`apps/hub/src/mobile`) below a 768px breakpoint — bottom tab bar (Игры/Друзья/Профиль), full-screen game details, its own friends/profile surfaces built on the same stores as desktop (no logic duplicated). |
+| Boot performance | ✅ | Launching a game is a same-tab navigation, so returning to the hub is a full page reload. `index.html` now paints an instant CSS-only skeleton before the JS bundle parses; the session restores synchronously (no login-screen flash); admin-controlled settings (game statuses, sounds) and achievement catalogs apply from a `localStorage` cache immediately, then revalidate; Vite's hashed assets get a year-long immutable `Cache-Control` so a repeat load skips the network entirely. |
+| Socket auto-revive | ✅ | A backgrounded/slept tab kills the websockets; socket.io's own reconnect reuses the stale token and can't recover. `visibilitychange`/`online`/`pageshow` handlers mint a fresh token and reconnect social/chat/resume any call — no manual reload needed. |
+| Admin panel (`apps/admin`) | ✅ | Standalone app, path-routed at `/admin/`. Same password login as any player; access gated **server-side** by `is_admin` (403 if not admin, not a client-side check). First admin(s) bootstrapped via `AUTH_BOOTSTRAP_ADMIN_IDS`; everyone after is promoted/demoted from inside the app (guarded against demoting the last admin). Screens: **Dashboard** (live per-service health), **Games** (changelog CRUD, discussion moderation, live-lobby force-stop, per-game status override, notification-sound uploads), **Users** (search/detail, ban, clear avatar/wallpaper, grant/revoke achievements), **Suggestions** (filter + triage player ideas), **Settings** (admin roster, branding/contact key-value settings). |
+| Ops: disk-space alerts | ✅ | `services/chat` watches the upload volume's free space (`fs.statfs`, hysteresis so it doesn't flap) and DMs the registered Telegram ops recipient below a configurable threshold. Whoever first DMs the shared bot `admin` becomes the recipient (persisted). |
+| Context menus (right-click) | ✅ | Real, most actions wired (open chat, remove/block friend, play, open discussions, member management, achievement title-pick). |
 
-## Cross-cutting gaps
+## Known gaps
 
-- **Persistence — done.** `auth` and `social` now have Postgres adapters (`@mygame/platform-db` +
-  per-service `pgStore`/`pgInvites`) wired into their production entries, gated on `DATABASE_URL`.
-  Memory stays the read working set; writes mirror to Postgres (write-behind); boot hydrates from the
-  DB. Set `DATABASE_URL=postgres://civa:civa@localhost:5432/civa` (matches `infra/docker-compose.yml`)
-  to turn it on. Redis is still unused. Note: write-behind logs (not throws) on a failed DB write.
-- ✅ **Branding settled: GAMEHUB.** (Was inconsistent — the UI used to mix **CIVA** and **NEXUS** as
-  the platform name; both were leftovers from before the platform/game split.) The repo, deploy
-  images/network, and every doc now consistently call the *platform* GAMEHUB; **CIVA** refers only to
-  the 4X game itself, one of several games the platform launches (see `README.md`'s scope note).
-- **Password migration for pre-existing accounts is an open gap, not solved.** `packages/platform-db`'s
-  migration adds `password_hash TEXT`, backfills existing rows to an empty string, then sets it
-  `NOT NULL`. An account with an empty hash can never pass `verifyPassword` again (it always fails
-  against an empty hash) — so any account that existed before this migration lands is permanently
-  locked out of its old displayName/identity the moment this deploys, with no recovery path
-  implemented. This needs an explicit decision (e.g. a one-time forced password reset, or a
-  Telegram-linked-account bypass) before shipping to a server that already has real accounts on it
-  — GAMEHUB is already live on `mygame-quiz.ru` (see `docs/SERVER.md`), so this is not hypothetical.
-- **`@mygame/shared-types` carries CIVA game-domain types** (resources, biomes, buildings, units,
-  tech, diplomacy) the platform doesn't use. They're forward-looking/leftover from the game design.
-- **Chat and friends now ship as SDK widgets; achievements/profile don't have one yet** (achievements
-  arguably don't need one — see `ARCHITECTURE.md`; a profile/showcase page might, if built).
-- **`SteamOverlay.tsx`** (a Shift+Tab-toggle in-game-style overlay showing a floating friends panel)
-  is imported by `HubScreen.tsx` but never actually rendered (`<SteamOverlay />` doesn't appear in its
-  JSX) — dead/unwired, found while moving `FriendsSidebar`. Left as-is (repointed its import, changed
-  nothing else) since it's a real, functioning feature, just not one this pass was scoped to finish or
-  remove.
+- **Password migration for pre-existing accounts.** `packages/platform-db`'s migration adds
+  `password_hash TEXT`, backfills existing rows to `''`, then sets it `NOT NULL`. An empty hash never
+  verifies, so any account that predates this migration is permanently locked out of its old identity
+  the moment it deploys, with no recovery path implemented. GAMEHUB has been live with real accounts
+  since before this shipped — this is a real, standing gap, not hypothetical. Needs an explicit
+  decision (one-time forced reset, or a Telegram-linked-account bypass) if it hasn't already bitten.
+- **"Invite a friend to my current game" has no real trigger.** The *receiving* side (a pushed invite,
+  or `?invite=CODE`) is fully real. The hub can't send one itself — it stops tracking your session the
+  moment you navigate into a game's own origin — so this needs `mygame.social.createInvite`/
+  `.inviteFriend` (currently only reachable via the React hook the hub uses internally) called from
+  inside an actual game's own lobby/room UI. No game in this repo does that yet.
+- **Chat reactions** are out of scope for v1, not stubbed.
+- **VK linking** deferred by request; the Telegram flow is the template if it's ever picked up.
 
-## Mock → real, progress
+## Recent history (this session)
 
-1. ✅ **Persistence (Postgres adapters)** — done (`auth` + `social` + `chat`, gated on `DATABASE_URL`).
-2. ✅ **Telegram linking + login** — done (real bot, gated on `TELEGRAM_BOT_TOKEN`).
-3. ✅ **Chat backend + SDK widget (DMs + groups)** — done (`services/chat`, Postgres-backed;
-   `ChatWidget` ships in `@mygame/sdk`'s overlay). Reactions/typing indicators still out of v1 scope.
-4. ✅ **Group membership management (add/remove/leave)** — done. Any current member may add others;
-   only the group's owner (creator) may remove someone else; anyone may always remove themselves
-   (leave) — enforced in `services/chat/src/server.ts`, not just the UI. Wire change:
-   `ChatThread.participantIds: string[]` became `participants: ChatParticipant[]` (id + display name),
-   and gained `ownerId`. SDK: `mygame.chat.addMembers/removeMember/leaveGroup`; `ChatWidget` gained an
-   add-member picker and a leave-group button. Kicking a *specific* member has no dedicated button yet
-   (only leave + add got UI this pass) — see the Features table row above.
-5. ✅ **Achievements API** — done (`auth` grants/lists per-game achievements, `mygame.achievements.*`
-   in the SDK). Display catalog (name/icon/description) stays a per-game/client concern by design —
-   see `ARCHITECTURE.md`.
-6. ✅ **Friends widget in the SDK** — done (`FriendsWidget`/`FriendsSidebar` moved into
-   `packages/sdk`, rendered by `MygameOverlay`).
-7. ✅ **Profile persistence + upload** — done (avatar/wallpaper as data URLs, title achievement
-   server-validated, `mygame.profile.*` in the SDK).
-8. ✅ **Invite deep-links + notification center** — done (`?invite=CODE` auto-join, real 🔔 center for
-   friend requests + game invites). *Creating/sending* an invite from a real in-game moment has no UI
-   yet — see the next item.
-9. ⏳ **Wire a real "invite friend to my game" action.** The hub can't do this itself (it doesn't
-   track which room you're in once you've navigated into a game's own origin) — this needs the SDK's
-   imperative `mygame.social.*` to grow `createInvite`/`inviteFriend`, and the actual game (CIVA, not
-   in this repo) to call them from its own lobby/room UI. On hold while work stays scoped to hub+SDK
-   only (the game itself is out of bounds for now).
-10. **VK linking** (deferred by request).
-11. ✅ **Deploy reconciliation + rename to GAMEHUB** — done. `deploy/civa` → `deploy/gamehub`
-    (`@civa/auth` → `@mygame/auth` fixed; `social`/`chat`/`community` + a dedicated Postgres container
-    added to `docker-compose.yml`; the gateway `Caddyfile` gained routes for all three —
-    `social`/`chat` moved their Socket.io servers to custom paths, `/social.io/`/`/chat.io/`, so they
-    don't collide with the game lobby's default `/socket.io/` on the shared origin). Images renamed
-    `gamehub-*`, network `gamehub-net`. JWT issuer (`civa`) and the SDK's `localStorage` keys
-    (`civa.session`) are deliberately unchanged — see `deploy/DEPLOY.md`.
-12. ✅ **Hub frontend mock cleanup** — done. Real Copy-ID, a working Telegram link button in the
-    "protect your account" modal, `ProfileWidget` shows real avatar/achievements, `LibrarySidebar`'s
-    context menu wires Play for real, and the leftover demo-button block + fake status/settings
-    `alert()`s are gone.
-13. ✅ **Playtime + last-played stats** — done. New `game_stats` table on `auth`; `mygame.stats`
-    (`recordEnter`, `getStats`, `startHeartbeat`/`stopHeartbeat` — the last two run automatically from
-    `mygame.init()`). See `ARCHITECTURE.md` for the heartbeat-clamp design (the hub can't time a
-    session once it navigates away to the game's own origin).
-14. ✅ **Changelog + discussions (new `services/community`)** — done. Own service (port 8085, `COMMUNITY_PORT`)
-    rather than folded into `auth`, to keep unbounded user-generated content out of the
-    security-critical identity process. Changelog writes are gated to the platform's `is_admin` flag
-    (an account-level flag, not a community-specific allowlist — see `ARCHITECTURE.md`); discussion
-    threads/posts use the same open trust model as chat/achievements.
-15. ✅ **Find groups / lobbies** — done. `social.getLobbies` (socket ack) derives joinable rooms from
-    existing presence (`activityOf`/`socketsOf`) — no new persistence. Sparse until a game reports
-    joinable activity.
-16. ✅ **Starter example game** — done. `apps/example-game` exercises the whole SDK surface
-    (handoff login, achievements, activity, chat/friends, playtime, community) as both a smoke test
-    and living documentation for third-party game developers.
-17. ✅ **Voice/video calls (LiveKit)** — done. GAMEHUB's own self-hosted LiveKit (`deploy/gamehub`),
-    separate from Leaders' own instance on this shared server. Ring/accept/decline/hangup signaling
-    over the existing chat socket; a plain HTTP route mints the LiveKit room token. Audio, video, and
-    group calls all work through the same signaling path.
+Roughly chronological; see git log on `refactor/hub-split` for the full detail.
+
+1. Chat/calls hardening pass (edit/delete/reply/pagination, rate limiting, upload security, ring
+   timeout/race fixes) + full CSS-token pass across the hub.
+2. Upload cap raised to 50MB + Telegram disk-space ops alerting + 30-day message retention + docker
+   log rotation.
+3. Ten UI items from a bug/polish pass: short friend code, avatar placeholders, drag-and-drop upload
+   zone, member context menu, call presence, mobile hub layout, multi-device call identity.
+4. Admin game-status control, notification sounds, single movable launcher button, Steam-style toasts,
+   Telegram linking live in prod, socket auto-revive, achievements-in-profile fix.
+5. Friend search by nick/code, one shared `UserProfileModal` used everywhere, mobile scroll fix.
+6. Achievement catalog registry (replacing the hardcoded per-game display catalog), suggestions queue
+   + Telegram notify, removed "find groups/lobbies" entirely.
+7. Svoyak migrated to HTTPS path routing (`/svoyak/`) — was on a bare port, which silently broke
+   mic/cam (insecure context).
+8. Boot-performance pass: instant skeleton, synchronous session restore, cached settings/catalogs,
+   immutable asset caching.
+9. Repo-wide cleanup of leftover "civa" naming where it wrongly stood in for the whole platform
+   (docs, dead CSS from CIVA's own old game UI, `infra/docker-compose.yml`'s dev-infra labelling) —
+   CIVA the game's own naming (its id, its own deploy stack, its design doc) is untouched, that's
+   correct. Then, by explicit request accepting the one-time mass logout: **JWT issuer and the SDK's
+   session storage key renamed `civa` → `gamehub`** (every service redeployed together — a mixed
+   fleet would have broken cross-service token verification, not just client sessions), and
+   `@mygame/shared-types` lost ~120 lines of unused CIVA 4X-game domain vocabulary (verified zero
+   platform usages before deleting; not moved anywhere, since CIVA's next implementation starts over).

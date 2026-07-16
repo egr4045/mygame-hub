@@ -104,10 +104,10 @@ A verbatim copy of that live block is kept at `deploy/gamehub/leaders-caddy-refe
 as a disaster-recovery reference (e.g. if `/root/leaders/deploy/Caddyfile` is ever rebuilt from
 scratch and needs re-populating) — do not re-apply it if the block is already there.
 
-> Games get a path under this same domain going forward (e.g. `mygame-quiz.ru/civa`), not their own
-> subdomain — see `docs/PLAN.md`. That's a separate, not-yet-started piece of work (Caddy per-game
-> path routes + each game's SPA base path + the hub's launch/handoff code, which currently addresses a
-> game by port, not path).
+> Games get a path under this same domain rather than their own subdomain — done for `example-game`,
+> Spellforge (`/cards/`) and Svoyak (`/svoyak/`, see its own section above); CIVA is still on the
+> legacy per-port model (`status: 'maintenance'` in the hub's registry so it doesn't ship a broken Play
+> button — see `docs/ARCHITECTURE.md`'s Hub section for the `path`-vs-`externalPort` mechanics).
 
 ## Updating
 
