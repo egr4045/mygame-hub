@@ -90,3 +90,112 @@ export const playSound = (kind: SoundKind): void => {
     /* WebAudio unavailable — silent */
   }
 };
+
+/* ------------------------------------------------------------------------------------------------
+ * Call loops. A real incoming call rings for 45–60s — one 1.2s blip (the old behavior) was trivially
+ * missed. `startRingtone` loops until an explicit stop from the call lifecycle (accept / decline /
+ * hangup / timeout / disconnect — chatStore owns every exit). `startRingback` is the quieter
+ * caller-side "line is ringing" cadence.
+ * ---------------------------------------------------------------------------------------------- */
+
+const RING_PHRASE_MS = 1900; // synth.call phrase ≈ 1.26s + a natural pause
+const RINGBACK_PHRASE_MS = 3000; // classic ~1s tone / ~2s silence cadence
+
+let ringTimer: ReturnType<typeof setInterval> | null = null;
+let ringAudio: HTMLAudioElement | null = null;
+let ringbackTimer: ReturnType<typeof setInterval> | null = null;
+/** Which loop is *wanted* right now — lets the gesture-unlock handler start a pending loop late. */
+let wantLoop: 'ringtone' | 'ringback' | null = null;
+
+/** True when WebAudio is actually able to produce sound right now (autoplay policy satisfied). */
+export const isAudioReady = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return !!ctx && ctx.state === 'running';
+};
+
+const ringbackPhrase = (ac: AudioContext, vol: number): void => {
+  const t = ac.currentTime;
+  // Single soft 425 Hz burst (European ringback), quieter than the callee's ringtone.
+  tone(ac, 425, t, 0.9, 0.07 * vol, 'sine');
+};
+
+const startLoop = (kind: 'ringtone' | 'ringback'): void => {
+  wantLoop = kind;
+  stopLoopTimersOnly();
+  const vol = (): number => useNotificationPrefsStore.getState().soundVolume;
+
+  if (kind === 'ringtone' && customSounds.call) {
+    try {
+      ringAudio = new Audio(customSounds.call);
+      ringAudio.loop = true;
+      ringAudio.volume = vol();
+      void ringAudio.play().catch(() => {
+        /* autoplay blocked — the gesture-unlock listener restarts us */
+      });
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  const phrase = (): void => {
+    const v = vol();
+    if (v <= 0) return; // muted — keep looping silently so a live volume change is heard
+    try {
+      const ac = getCtx();
+      if (!ac || ac.state !== 'running') return; // suspended — unlock listener will resume
+      if (kind === 'ringtone') synth.call(ac, v);
+      else ringbackPhrase(ac, v);
+    } catch {
+      /* ignore */
+    }
+  };
+  phrase();
+  const t = setInterval(phrase, kind === 'ringtone' ? RING_PHRASE_MS : RINGBACK_PHRASE_MS);
+  if (kind === 'ringtone') ringTimer = t;
+  else ringbackTimer = t;
+};
+
+const stopLoopTimersOnly = (): void => {
+  if (ringTimer) clearInterval(ringTimer);
+  if (ringbackTimer) clearInterval(ringbackTimer);
+  ringTimer = null;
+  ringbackTimer = null;
+  if (ringAudio) {
+    ringAudio.pause();
+    ringAudio = null;
+  }
+};
+
+/** Loop the incoming-call ringtone until stopped. Idempotent. */
+export const startRingtone = (): void => startLoop('ringtone');
+/** Loop the caller-side ringback until stopped. Idempotent. */
+export const startRingback = (): void => startLoop('ringback');
+
+/** Stop every call-related loop. Safe to call from all call-lifecycle exits. */
+export const stopAllCallSounds = (): void => {
+  wantLoop = null;
+  stopLoopTimersOnly();
+};
+
+let unlockInstalled = false;
+/**
+ * Autoplay policies keep the AudioContext `suspended` until a user gesture. Install once per page:
+ * the first pointerdown/keydown resumes the context and (re)starts any loop that is still wanted —
+ * so a ring that began on a fresh tab becomes audible the moment the user touches anything.
+ */
+export const installGestureUnlock = (): void => {
+  if (unlockInstalled || typeof window === 'undefined') return;
+  unlockInstalled = true;
+  const unlock = (): void => {
+    try {
+      const ac = getCtx();
+      if (ac && ac.state === 'suspended') void ac.resume();
+    } catch {
+      /* ignore */
+    }
+    if (wantLoop) startLoop(wantLoop);
+  };
+  window.addEventListener('pointerdown', unlock, { capture: true, passive: true });
+  window.addEventListener('keydown', unlock, { capture: true, passive: true });
+};

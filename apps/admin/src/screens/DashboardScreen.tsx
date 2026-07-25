@@ -76,7 +76,7 @@ export const DashboardScreen = (): JSX.Element => {
           {health.map((h) => (
             <div key={h.name} style={{
               background: 'var(--bg-dark)',
-              border: `1px solid ${h.up ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+              border: `1px solid ${h.up ? 'rgba(63, 206, 122, 0.2)' : 'rgba(239, 83, 80, 0.2)'}`,
               borderRadius: 8,
               padding: '12px 16px',
               display: 'flex',

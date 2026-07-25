@@ -43,9 +43,9 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
               padding: '12px 20px',
               borderLeft: `4px solid ${t.type === 'success' ? 'var(--success)' : t.type === 'error' ? 'var(--danger)' : 'var(--accent)'}`,
               background: 'var(--bg-card)',
-              color: '#fff',
+              color: 'var(--text-main)',
               fontSize: 14,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              boxShadow: '0 10px 28px rgba(0, 0, 0, 0.5)',
             }}
           >
             {t.message}

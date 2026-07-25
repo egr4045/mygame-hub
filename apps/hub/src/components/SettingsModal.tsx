@@ -1,5 +1,15 @@
 import { useState, type CSSProperties } from 'react';
-import { changeDisplayName, changePassword, useNotificationPrefsStore, useSocialStore, useChatStore, playSound } from '@mygame/sdk';
+import {
+  changeDisplayName,
+  changePassword,
+  useNotificationPrefsStore,
+  useSocialStore,
+  useChatStore,
+  playSound,
+  notificationsSupported,
+  notificationPermission,
+  requestNotificationPermission,
+} from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
 
 const overlay: CSSProperties = {
@@ -102,11 +112,28 @@ const NotificationsTab = (): JSX.Element => {
   const achievementToasts = useNotificationPrefsStore((s) => s.achievementToasts);
   const callToasts = useNotificationPrefsStore((s) => s.callToasts);
   const messageToasts = useNotificationPrefsStore((s) => s.messageToasts);
+  const systemNotifications = useNotificationPrefsStore((s) => s.systemNotifications);
   const soundVolume = useNotificationPrefsStore((s) => s.soundVolume);
   const setAchievementToasts = useNotificationPrefsStore((s) => s.setAchievementToasts);
   const setCallToasts = useNotificationPrefsStore((s) => s.setCallToasts);
   const setMessageToasts = useNotificationPrefsStore((s) => s.setMessageToasts);
+  const setSystemNotifications = useNotificationPrefsStore((s) => s.setSystemNotifications);
   const setSoundVolume = useNotificationPrefsStore((s) => s.setSoundVolume);
+
+  // Browser-permission state drives the system-notifications row: 'denied' disables the toggle with
+  // a hint (irreversible from JS — only the user can re-allow in browser site settings).
+  const [permission, setPermission] = useState<NotificationPermission>(notificationPermission());
+  const blocked = notificationsSupported() && permission === 'denied';
+
+  const toggleSystem = async (on: boolean): Promise<void> => {
+    if (!on) {
+      setSystemNotifications(false);
+      return;
+    }
+    const p = await requestNotificationPermission();
+    setPermission(p);
+    setSystemNotifications(p === 'granted');
+  };
 
   return (
     <div>
@@ -122,19 +149,43 @@ const NotificationsTab = (): JSX.Element => {
         <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>💬 Всплывающие сообщения</span>
         <input type="checkbox" checked={messageToasts} onChange={(e) => setMessageToasts(e.target.checked)} />
       </div>
+      <div style={{ ...toggleRow, ...(blocked || !notificationsSupported() ? { opacity: 0.6 } : {}) }}>
+        <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>
+          🖥️ Системные уведомления
+          <span style={{ display: 'block', color: 'var(--c-text-muted)', fontSize: 12, marginTop: 2 }}>
+            {!notificationsSupported()
+              ? 'Не поддерживается этим браузером'
+              : blocked
+                ? 'Заблокировано в браузере — разрешите уведомления для этого сайта'
+                : 'Звонки и сообщения, когда вкладка не активна'}
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={systemNotifications && permission === 'granted'}
+          disabled={blocked || !notificationsSupported()}
+          onChange={(e) => void toggleSystem(e.target.checked)}
+        />
+      </div>
       <div style={{ ...toggleRow, borderBottom: 'none', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
         <span style={{ color: 'var(--c-text-primary)', fontSize: 14 }}>🔊 Громкость звуков: {Math.round(soundVolume * 100)}%</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(soundVolume * 100)}
-          onChange={(e) => {
-            setSoundVolume(Number(e.target.value) / 100);
-            void playSound('message'); // preview the level as you drag
-          }}
-          style={{ width: '100%' }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(soundVolume * 100)}
+            onChange={(e) => {
+              setSoundVolume(Number(e.target.value) / 100);
+              void playSound('message'); // preview the level as you drag
+            }}
+            style={{ flex: 1 }}
+          />
+          {/* Doubles as the audio-unlock gesture (autoplay policy) — plays one ringtone phrase. */}
+          <button className="hub-btn" style={{ flexShrink: 0, padding: '4px 10px', fontSize: 12 }} onClick={() => playSound('call')}>
+            ▶ Проверить
+          </button>
+        </div>
       </div>
       <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 16 }}>
         Хранится только в этом браузере. Звуки — плейсхолдеры (админ может заменить их своими). Заявки в

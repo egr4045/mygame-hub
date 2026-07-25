@@ -21,14 +21,14 @@ const inputStyle: CSSProperties = {
 const primaryBtn: CSSProperties = {
   width: '100%',
   padding: '14px 18px',
-  borderRadius: '4px',
+  borderRadius: 'var(--r-md)',
   background: 'var(--c-accent)',
   color: '#fff',
   fontWeight: 800,
   fontSize: '14px',
   border: 'none',
   cursor: 'pointer',
-  transition: 'transform 0.1s',
+  transition: 'background var(--motion-fast), transform 0.1s',
 };
 
 const modeTab = (active: boolean): CSSProperties => ({

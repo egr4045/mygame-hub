@@ -1,8 +1,8 @@
 /**
  * The one "other player" profile card — used everywhere a profile is opened (the friends sidebar,
- * the chat widget, the mobile Друзья tab). Self-contained and palette-hardcoded (not the hub's CSS
- * tokens) so it looks identical when rendered inside an embedded game's overlay, which has no access
- * to the hub theme. Give it a `target` (whatever you have — a friend row, a search hit, a chat
+ * the chat widget, the mobile Друзья tab). Reads the `mg` theme vars; still self-contained inside
+ * an embedded game's overlay because every `mg.*` value carries a baked-in fallback (the stock
+ * GAMEHUB look) when no host defines `--mg-*`. Give it a `target` (whatever you have — a friend row, a search hit, a chat
  * peer) and it resolves the live relation/presence from the social store itself, then shows the
  * right actions: message, call, and add / accept / pending / remove depending on your relationship.
  */
@@ -11,6 +11,8 @@ import type { social, TitleAchievementRef } from '@mygame/protocol';
 import { useSocialStore } from '../state/socialStore.js';
 import { useChatStore } from '../state/chatStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { mg, mgZ } from '../theme/tokens.js';
+import { btn, surfaceWindow } from '../theme/primitives.js';
 
 /** Whatever the caller happens to know about the person. Presence/activity/title are filled in live
  *  from the friends list when they're a friend, so a stale or sparse `target` still renders correctly. */
@@ -47,27 +49,8 @@ const activityLabel = (presence: social.Presence | undefined, activity: social.A
   return '';
 };
 
-const primaryBtn: React.CSSProperties = {
-  background: '#2AABEE',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 8,
-  padding: '10px',
-  fontWeight: 700,
-  fontSize: 13,
-  cursor: 'pointer',
-};
-const subtleBtn: React.CSSProperties = {
-  background: 'transparent',
-  color: '#dcdedf',
-  border: '1px solid #3d4450',
-  borderRadius: 8,
-  padding: '9px',
-  fontWeight: 600,
-  fontSize: 13,
-  cursor: 'pointer',
-  width: '100%',
-};
+const primaryBtn: React.CSSProperties = { ...btn('primary'), padding: '10px' };
+const subtleBtn: React.CSSProperties = { ...btn('neutral'), padding: '9px', width: '100%' };
 
 export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; onClose: () => void }): JSX.Element => {
   const me = useSocialStore((s) => s.me);
@@ -120,7 +103,7 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
             removeFriend(target.accountId);
             onClose();
           }}
-          style={{ ...subtleBtn, color: '#e6737d', borderColor: 'rgba(230,115,125,0.4)' }}
+          style={{ ...btn('danger'), padding: '9px', width: '100%' }}
         >
           🗑️ Удалить из друзей
         </button>
@@ -138,7 +121,7 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
             accept(target.accountId);
             onClose();
           }}
-          style={{ ...primaryBtn, width: '100%', background: '#3ba55d' }}
+          style={{ ...primaryBtn, width: '100%', background: mg.positive }}
         >
           ✓ Принять заявку в друзья
         </button>
@@ -156,8 +139,9 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.65)',
-        zIndex: 2000,
+        background: mg.overlay,
+        // Above the call window (mgZ.call) — a profile can be opened while a call is up.
+        zIndex: mgZ.menu,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -166,27 +150,19 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#1b2838',
-          border: '1px solid #3d4450',
-          borderRadius: 14,
-          width: 300,
-          maxWidth: '100%',
-          overflow: 'hidden',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
-        }}
+        style={{ ...surfaceWindow, width: 300, maxWidth: '100%' }}
       >
         {/* Banner */}
-        <div style={{ height: 76, background: `linear-gradient(135deg, ${avatarBg(target.displayName)}, #23262e)` }} />
+        <div style={{ height: 76, background: `linear-gradient(135deg, ${avatarBg(target.displayName)}, ${mg.surfaceDeep})` }} />
         <div style={{ padding: '0 20px 20px', marginTop: -38, textAlign: 'center' }}>
-          <div style={{ display: 'inline-block', position: 'relative', border: '4px solid #1b2838', borderRadius: '50%' }}>
+          <div style={{ display: 'inline-block', position: 'relative', border: `4px solid ${mg.surface}`, borderRadius: '50%' }}>
             <div
               style={{
                 width: 76,
                 height: 76,
                 borderRadius: '50%',
                 overflow: 'hidden',
-                background: avatar ? '#3d4450' : avatarBg(target.displayName),
+                background: avatar ? mg.border : avatarBg(target.displayName),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -210,19 +186,19 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
                   width: 16,
                   height: 16,
                   borderRadius: '50%',
-                  background: online ? '#3ba55d' : '#6c7784',
-                  border: '3px solid #1b2838',
+                  background: online ? mg.positive : mg.textMuted,
+                  border: `3px solid ${mg.surface}`,
                 }}
               />
             )}
           </div>
 
-          <div style={{ fontWeight: 700, fontSize: 18, color: '#fff', marginTop: 8, overflowWrap: 'anywhere' }}>
+          <div style={{ fontWeight: 700, fontSize: 18, color: mg.text, marginTop: 8, overflowWrap: 'anywhere' }}>
             {target.displayName}
-            {isSelf && <span style={{ color: '#8f98a0', fontWeight: 500, fontSize: 13 }}> (вы)</span>}
+            {isSelf && <span style={{ color: mg.textMuted, fontWeight: 500, fontSize: 13 }}> (вы)</span>}
           </div>
           {activityLabel(presence, activity) && (
-            <div style={{ fontSize: 12, color: online ? '#7ec98f' : '#8f98a0', marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: online ? mg.positive : mg.textMuted, marginTop: 2 }}>
               {activityLabel(presence, activity)}
             </div>
           )}
@@ -232,10 +208,10 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
                 display: 'inline-block',
                 marginTop: 8,
                 fontSize: 12,
-                color: '#d4af37',
+                color: mg.achievement,
                 background: 'rgba(212,175,55,0.12)',
                 border: '1px solid rgba(212,175,55,0.35)',
-                borderRadius: 20,
+                borderRadius: mg.rPill,
                 padding: '3px 12px',
               }}
             >
@@ -243,8 +219,8 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
             </div>
           )}
           {target.friendCode && (
-            <div style={{ fontSize: 12, color: '#8f98a0', marginTop: 8 }}>
-              Код друга: <strong style={{ color: '#dcdedf', letterSpacing: 1, fontFamily: 'monospace' }}>{target.friendCode}</strong>
+            <div style={{ fontSize: 12, color: mg.textMuted, marginTop: 8 }}>
+              Код друга: <strong style={{ color: mg.text, letterSpacing: 1, fontFamily: 'monospace' }}>{target.friendCode}</strong>
             </div>
           )}
 
@@ -268,10 +244,7 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
                 aria-label="Позвонить"
                 disabled={presence !== undefined && !online}
                 style={{
-                  background: '#3d4450',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 8,
+                  ...btn('neutral'),
                   padding: '9px 14px',
                   fontSize: 15,
                   cursor: presence !== undefined && !online ? 'default' : 'pointer',
@@ -285,7 +258,7 @@ export const UserProfileModal = ({ target, onClose }: { target: ProfileTarget; o
           {friendAction && <div style={{ marginTop: 8 }}>{friendAction}</div>}
           <button
             onClick={onClose}
-            style={{ width: '100%', marginTop: 8, background: 'none', color: '#8f98a0', border: 'none', padding: '6px', fontSize: 13, cursor: 'pointer' }}
+            style={{ width: '100%', marginTop: 8, background: 'none', color: mg.textMuted, border: 'none', padding: '6px', fontSize: 13, cursor: 'pointer' }}
           >
             Закрыть
           </button>

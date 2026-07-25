@@ -1,7 +1,9 @@
 import { useToastStore, type ToastData } from '../state/toastStore.js';
+import { mg, mgZ } from '../theme/tokens.js';
+import { btn, surfaceWindow } from '../theme/primitives.js';
 
 const accentFor = (t: ToastData['type']): string =>
-  t === 'achievement' ? '#d4af37' : t === 'invite' ? '#3ba55d' : t === 'message' ? '#2AABEE' : '#6c7784';
+  t === 'achievement' ? mg.achievement : t === 'invite' ? mg.positive : t === 'message' ? mg.accent : mg.textMuted;
 
 const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void }): JSX.Element => {
   const accent = accentFor(toast.type);
@@ -18,10 +20,10 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
           : undefined
       }
       style={{
-        background: '#1b2838',
-        border: `1px solid ${toast.type === 'achievement' ? '#d4af37' : toast.type === 'invite' ? '#3ba55d' : toast.type === 'message' ? '#2AABEE' : '#3d4450'}`,
-        boxShadow: `0 6px 20px rgba(0,0,0,0.55)`,
-        borderRadius: 6,
+        ...surfaceWindow,
+        border: `1px solid ${toast.type === 'achievement' ? mg.achievement : toast.type === 'invite' ? mg.positive : toast.type === 'message' ? mg.accent : mg.border}`,
+        boxShadow: mg.shadowPopover,
+        borderRadius: mg.rMd,
         padding: '12px 14px 12px 16px',
         width: 320,
         maxWidth: 'calc(100vw - 32px)',
@@ -30,7 +32,6 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
         gap: 12,
         cursor: clickable ? 'pointer' : 'default',
         position: 'relative',
-        overflow: 'hidden',
       }}
     >
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: accent }} />
@@ -40,8 +41,8 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
           flexShrink: 0,
           width: 40,
           height: 40,
-          borderRadius: toast.type === 'invite' || toast.type === 'achievement' ? 8 : '50%',
-          background: '#23262e',
+          borderRadius: toast.type === 'invite' || toast.type === 'achievement' ? mg.rMd : '50%',
+          background: mg.surfaceRaised,
           overflow: 'hidden',
           display: 'flex',
           alignItems: 'center',
@@ -57,10 +58,10 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: toast.type === 'achievement' ? '#d4af37' : '#dcdedf', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: toast.type === 'achievement' ? mg.achievement : mg.text, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {toast.title}
         </div>
-        <div style={{ fontSize: 12, color: '#b8c2cc', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+        <div style={{ fontSize: 12, color: mg.textMuted, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
           {toast.content}
         </div>
         {toast.actions && toast.actions.length > 0 && (
@@ -73,16 +74,7 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
                   a.onClick();
                   onRemove();
                 }}
-                style={{
-                  border: 'none',
-                  borderRadius: 5,
-                  padding: '5px 12px',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  background: a.primary ? accent : '#3d4450',
-                  color: '#fff',
-                }}
+                style={a.primary ? { ...btn('primary'), background: accent } : btn('ghost')}
               >
                 {a.label}
               </button>
@@ -97,7 +89,7 @@ const ToastItem = ({ toast, onRemove }: { toast: ToastData; onRemove: () => void
           onRemove();
         }}
         aria-label="Закрыть"
-        style={{ background: 'none', border: 'none', color: '#6c7784', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0 }}
+        style={{ background: 'none', border: 'none', color: mg.textMuted, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0 }}
       >
         ✕
       </button>
@@ -115,11 +107,11 @@ export const ToastContainer = (): JSX.Element => {
       style={{
         position: 'fixed',
         right: 16,
-        bottom: 16,
+        bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        zIndex: 99999, // above everything, including context menus
+        zIndex: mgZ.toast, // above everything, including context menus
         pointerEvents: 'none',
       }}
     >

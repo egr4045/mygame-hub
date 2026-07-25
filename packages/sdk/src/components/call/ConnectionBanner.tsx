@@ -1,5 +1,6 @@
 import { ConnectionState } from 'livekit-client';
 import { useConnectionState } from '@livekit/components-react';
+import { palette } from './callStyles.js';
 
 /** A thin banner shown while LiveKit is auto-reconnecting a dropped call. Must be rendered inside
  *  CallView's `RoomContext.Provider`. Terminal failure (give-up) is handled in chatStore's
@@ -11,8 +12,8 @@ export const ConnectionBanner = (): JSX.Element | null => {
     <div
       style={{
         flexShrink: 0,
-        background: '#f0b232',
-        color: '#1b1b1b',
+        background: palette.warning,
+        color: palette.textInverse,
         fontSize: 13,
         fontWeight: 700,
         textAlign: 'center',

@@ -144,7 +144,7 @@ const AppContent = (): JSX.Element => {
             <>
               <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
               <p style={{ fontSize: 16, marginBottom: 24 }}>
-                У аккаунта <strong style={{ color: '#fff' }}>{account.displayName}</strong> нет прав администратора.
+                У аккаунта <strong style={{ color: 'var(--text-main)' }}>{account.displayName}</strong> нет прав администратора.
               </p>
               <button className="btn btn-ghost" onClick={handleLogout} style={{ width: '100%', justifyContent: 'center' }}>Выйти</button>
             </>

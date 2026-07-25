@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useMenuStore } from '../state/menuStore.js';
+import { mg, mgZ } from '../theme/tokens.js';
+import { surfaceWindow } from '../theme/primitives.js';
+import { getViewport } from '../hooks/useViewport.js';
 
 export const ContextMenu = (): JSX.Element | null => {
   const { menu, closeMenu } = useMenuStore();
@@ -21,24 +24,24 @@ export const ContextMenu = (): JSX.Element | null => {
 
   if (!menu) return null;
 
-  // Simple bounds checking so menu doesn't go off screen
-  const x = Math.min(menu.x, window.innerWidth - 220);
-  const y = Math.min(menu.y, window.innerHeight - (menu.items.length * 36));
+  // Simple bounds checking so menu doesn't go off screen (visualViewport-aware).
+  const vp = getViewport();
+  const x = Math.max(4, Math.min(menu.x, vp.w - 220));
+  const y = Math.max(4, Math.min(menu.y, vp.h - menu.items.length * 36));
 
   return (
     <div 
       ref={menuRef}
       className="mygame-fade-in"
       style={{
+        ...surfaceWindow,
         position: 'fixed',
         left: x,
         top: y,
         width: 220,
-        background: '#1b2838',
-        border: '1px solid #3d4450',
-        borderRadius: 4,
-        boxShadow: '0 8px 16px rgba(0,0,0,0.8)',
-        zIndex: 9999,
+        borderRadius: mg.rMd,
+        boxShadow: mg.shadowPopover,
+        zIndex: mgZ.menu,
         pointerEvents: 'auto',
         padding: '4px 0',
         display: 'flex',
@@ -48,12 +51,14 @@ export const ContextMenu = (): JSX.Element | null => {
     >
       {menu.items.map((item, i) => {
         if (item.separator) {
-          return <div key={i} style={{ height: 1, background: '#3d4450', margin: '4px 0' }} />;
+          return <div key={i} style={{ height: 1, background: mg.border, margin: '4px 0' }} />;
         }
-        
+
         return (
           <div
             key={i}
+            className={item.disabled ? undefined : 'cw-menu-item'}
+            data-danger={item.danger ? 'true' : undefined}
             onClick={() => {
               if (item.disabled) return;
               item.action();
@@ -62,22 +67,9 @@ export const ContextMenu = (): JSX.Element | null => {
             style={{
               padding: '8px 16px',
               fontSize: '13px',
-              color: item.disabled ? '#6c7784' : (item.danger ? '#ff5c5c' : '#dcdedf'),
+              color: item.disabled ? mg.textMuted : (item.danger ? mg.danger : mg.text),
               cursor: item.disabled ? 'default' : 'pointer',
-              background: 'transparent',
-              transition: 'background 0.1s, color 0.1s'
-            }}
-            onMouseOver={(e) => {
-              if (!item.disabled) {
-                e.currentTarget.style.background = item.danger ? 'rgba(255, 92, 92, 0.2)' : '#2a475e';
-                e.currentTarget.style.color = '#fff';
-              }
-            }}
-            onMouseOut={(e) => {
-              if (!item.disabled) {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = item.danger ? '#ff5c5c' : '#dcdedf';
-              }
+              background: 'transparent'
             }}
           >
             {item.label}

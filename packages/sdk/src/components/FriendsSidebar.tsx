@@ -9,32 +9,18 @@ import { UserProfileModal, type ProfileTarget } from './UserProfileModal.js';
 import { loadSession } from '../authClient.js';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { mg } from '../theme/tokens.js';
+import { btn, input } from '../theme/primitives.js';
 
 const inputStyle: CSSProperties = {
+  ...input,
   flex: 1,
-  padding: '6px 10px',
-  borderRadius: 2,
-  background: '#23262e',
-  color: '#dcdedf',
-  border: '1px solid #101214',
-  fontSize: '13px',
   minWidth: 0,
-};
-
-const smallBtn: CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: 2,
-  background: '#3d4450',
-  color: '#dcdedf',
-  fontWeight: 600,
-  fontSize: '13px',
-  border: 'none',
-  cursor: 'pointer',
 };
 
 const sectionLabel: CSSProperties = {
   fontSize: '11px',
-  color: '#6c7784',
+  color: mg.textMuted,
   textTransform: 'uppercase',
   fontWeight: 700,
   letterSpacing: 0.5,
@@ -66,9 +52,9 @@ const avatarBg = (name: string): string => {
 
 /** Non-actionable relation labels for a search row (actionable ones render as buttons instead). */
 const RELATION_BADGE: Partial<Record<social.SearchRelation, { label: string; color: string }>> = {
-  self: { label: 'это вы', color: '#8f98a0' },
-  friend: { label: '✓ в друзьях', color: '#5c7e10' },
-  outgoing: { label: 'заявка отправлена', color: '#8f98a0' },
+  self: { label: 'это вы', color: mg.textMuted },
+  friend: { label: '✓ в друзьях', color: mg.positive },
+  outgoing: { label: 'заявка отправлена', color: mg.textMuted },
 };
 
 export const FriendsSidebar = ({
@@ -166,30 +152,30 @@ export const FriendsSidebar = ({
       flexDirection: 'column',
       width: '100%',
       height: '100%',
-      background: '#1b2838',
-      color: '#dcdedf',
+      background: mg.surface,
+      color: mg.text,
       ...(inOverlay ? {} : {
-        position: 'absolute', right: 16, bottom: 16, width: 300, height: 500, borderRadius: 4, boxShadow: '0 4px 16px rgba(0,0,0,0.5)', zIndex: 100
+        position: 'absolute', right: 16, bottom: 16, width: 300, height: 500, borderRadius: mg.rSm, boxShadow: mg.shadowMd, zIndex: 100
       })
     }}>
       {/* Header */}
-      <div style={{ padding: 12, background: '#171a21', display: 'flex', alignItems: 'center' }}>
-        <div style={{ width: 40, height: 40, background: '#3d4450', borderRadius: 4, marginRight: 12, overflow: 'hidden' }}>
+      <div style={{ padding: 12, background: mg.surfaceDeep, display: 'flex', alignItems: 'center' }}>
+        <div style={{ width: 40, height: 40, background: mg.surfaceRaised, borderRadius: mg.rSm, marginRight: 12, overflow: 'hidden' }}>
           {me?.avatarIcon && (
             <img src={me.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           )}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: '15px' }}>{me?.displayName || 'Загрузка...'}</div>
-          <div style={{ fontSize: '12px', color: status === 'connected' ? (myActivity ? '#a3d928' : '#5c7e10') : '#8f98a0', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: status === 'connected' ? (myActivity ? '#a3d928' : '#5c7e10') : '#8f98a0' }} />
+          <div style={{ fontSize: '12px', color: status === 'connected' ? mg.positive : mg.textMuted, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: status === 'connected' ? mg.positive : mg.surfaceRaised }} />
             {status === 'connected' ? (myActivity ? `Играет в ${myActivity.gameName}` : 'В сети') : 'Подключение...'}
           </div>
         </div>
       </div>
 
       {/* Find friends — search by nick OR code (exact code ranked first). */}
-      <div style={{ padding: '8px 12px', display: 'flex', gap: 6, borderBottom: '1px solid #23262e' }}>
+      <div style={{ padding: '8px 12px', display: 'flex', gap: 6, borderBottom: `1px solid ${mg.border}` }}>
         <input
           value={code}
           placeholder="🔍 Ник или код друга"
@@ -202,7 +188,7 @@ export const FriendsSidebar = ({
           aria-label="Поиск друзей по нику или коду"
         />
         {code && (
-          <button onClick={() => setCode('')} style={{ ...smallBtn, padding: '6px 9px' }} aria-label="Очистить">
+          <button onClick={() => setCode('')} style={{ ...btn('neutral'), padding: '6px 9px' }} aria-label="Очистить">
             ✕
           </button>
         )}
@@ -247,8 +233,8 @@ export const FriendsSidebar = ({
             {incoming.map(f => (
               <div key={f.accountId} style={{ padding: '4px 8px', display: 'flex', gap: 8 }}>
                 <span style={{flex: 1, fontSize: '13px'}}>{f.displayName}</span>
-                <button onClick={() => accept(f.accountId)} style={{...smallBtn, background: '#5c7e10', padding: '2px 8px'}}>✓</button>
-                <button onClick={() => decline(f.accountId)} style={{...smallBtn, padding: '2px 8px'}}>✕</button>
+                <button onClick={() => accept(f.accountId)} style={{...btn('primary'), padding: '2px 8px'}}>✓</button>
+                <button onClick={() => decline(f.accountId)} style={{...btn('danger'), padding: '2px 8px'}}>✕</button>
               </div>
             ))}
           </>
@@ -259,8 +245,8 @@ export const FriendsSidebar = ({
             <div style={sectionLabel}>ОТПРАВЛЕННЫЕ</div>
             {outgoing.map(f => (
               <div key={f.accountId} style={{ padding: '4px 8px', display: 'flex', gap: 8 }}>
-                <span style={{flex: 1, fontSize: '13px', color: '#8f98a0'}}>{f.displayName}</span>
-                <button onClick={() => decline(f.accountId)} style={{...smallBtn, padding: '2px 8px'}}>Отменить</button>
+                <span style={{flex: 1, fontSize: '13px', color: mg.textMuted}}>{f.displayName}</span>
+                <button onClick={() => decline(f.accountId)} style={{...btn('danger'), padding: '2px 8px'}}>Отменить</button>
               </div>
             ))}
           </>
@@ -270,9 +256,9 @@ export const FriendsSidebar = ({
       </div>
 
       {/* Footer / Your code */}
-      <div style={{ padding: 12, background: '#171a21', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ color: '#8f98a0' }}>Ваш код: <strong style={{ color: '#dcdedf', letterSpacing: 1 }}>{myFriendCode}</strong></span>
-        <button onClick={copyCode} style={{...smallBtn, padding: '4px 8px'}}>{copied ? 'Скопировано' : 'Копировать'}</button>
+      <div style={{ padding: 12, background: mg.surfaceDeep, fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: mg.textMuted }}>Ваш код: <strong style={{ color: mg.text, letterSpacing: 1 }}>{myFriendCode}</strong></span>
+        <button onClick={copyCode} style={{...btn('neutral'), padding: '4px 8px'}}>{copied ? 'Скопировано' : 'Копировать'}</button>
       </div>
 
       {viewingProfile && <UserProfileModal target={viewingProfile} onClose={() => setViewingProfile(null)} />}
@@ -294,7 +280,7 @@ const FriendRow = ({ f, onContextMenu }: { f: social.Friend, onContextMenu: (e: 
     padding: '6px 8px',
     cursor: 'grab',
     gap: 12,
-    background: isDragging ? '#23262e' : 'transparent',
+    background: isDragging ? mg.rowHover : 'transparent',
     opacity: isDragging ? 0.5 : 1,
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     zIndex: isDragging ? 9999 : undefined,
@@ -307,24 +293,24 @@ const FriendRow = ({ f, onContextMenu }: { f: social.Friend, onContextMenu: (e: 
       {...attributes}
       onContextMenu={onContextMenu}
       style={style}
-      onMouseOver={(e) => e.currentTarget.style.background = '#23262e'}
+      onMouseOver={(e) => e.currentTarget.style.background = mg.rowHover}
       onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
     >
-      <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
+      <div style={{ width: 32, height: 32, background: isInGame ? mg.positive : (isOnline ? mg.accent : mg.surfaceRaised), borderRadius: mg.rSm, padding: 2, overflow: 'hidden' }}>
         {f.avatarIcon ? (
           <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
-          <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+          <div style={{ width: '100%', height: '100%', background: mg.surfaceDeep }} />
         )}
       </div>
       <div>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0'), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ fontSize: '13px', fontWeight: 600, color: isInGame ? mg.positive : (isOnline ? mg.accent : mg.textMuted), display: 'flex', alignItems: 'center', gap: 4 }}>
           {f.displayName}
           {/* Generic "has an equipped title" indicator -- resolving it to a name/icon needs a
               per-game display catalog the SDK deliberately doesn't own (see ARCHITECTURE.md). */}
           {f.titleAchievement && <span title="Есть титул">🏅</span>}
         </div>
-        <div style={{ fontSize: '11px', color: isInGame ? '#a3d928' : '#8f98a0' }}>
+        <div style={{ fontSize: '11px', color: isInGame ? mg.positive : mg.textMuted }}>
           {activityText(f)}
         </div>
       </div>
@@ -347,9 +333,9 @@ const SearchResults = ({
   const addToast = useToastStore((s) => s.addToast);
 
   if (loading && results.length === 0)
-    return <div style={{ padding: 16, textAlign: 'center', color: '#8f98a0', fontSize: 13 }}>Поиск…</div>;
+    return <div style={{ padding: 16, textAlign: 'center', color: mg.textMuted, fontSize: 13 }}>Поиск…</div>;
   if (results.length === 0)
-    return <div style={{ padding: 16, textAlign: 'center', color: '#8f98a0', fontSize: 13 }}>Никого не найдено</div>;
+    return <div style={{ padding: 16, textAlign: 'center', color: mg.textMuted, fontSize: 13 }}>Никого не найдено</div>;
 
   return (
     <>
@@ -359,8 +345,8 @@ const SearchResults = ({
           <div
             key={r.accountId}
             onClick={() => onOpen(r)}
-            style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderRadius: 4 }}
-            onMouseOver={(e) => (e.currentTarget.style.background = '#23262e')}
+            style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderRadius: mg.rSm }}
+            onMouseOver={(e) => (e.currentTarget.style.background = mg.rowHover)}
             onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             <div
@@ -386,11 +372,11 @@ const SearchResults = ({
               )}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#dcdedf', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: mg.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {r.displayName}
               </div>
               {r.friendCode && (
-                <div style={{ fontSize: 11, color: '#6c7784', fontFamily: 'monospace', letterSpacing: 0.5 }}>{r.friendCode}</div>
+                <div style={{ fontSize: 11, color: mg.textMuted, fontFamily: 'monospace', letterSpacing: 0.5 }}>{r.friendCode}</div>
               )}
             </div>
             {r.relation === 'none' ? (
@@ -401,7 +387,7 @@ const SearchResults = ({
                     addToast({ type: 'system', title: 'Друзья', content: ack.error ?? `Запрос отправлен: ${r.displayName}`, icon: ack.error ? '⚠️' : '➕' }),
                   );
                 }}
-                style={{ ...smallBtn, background: '#2AABEE', padding: '5px 10px', whiteSpace: 'nowrap' }}
+                style={{ ...btn('primary'), padding: '5px 10px', whiteSpace: 'nowrap' }}
               >
                 ＋ Добавить
               </button>
@@ -411,7 +397,7 @@ const SearchResults = ({
                   e.stopPropagation();
                   accept(r.accountId);
                 }}
-                style={{ ...smallBtn, background: '#5c7e10', padding: '5px 10px', whiteSpace: 'nowrap' }}
+                style={{ ...btn('primary'), padding: '5px 10px', whiteSpace: 'nowrap' }}
               >
                 ✓ Принять
               </button>

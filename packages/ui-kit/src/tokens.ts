@@ -9,23 +9,25 @@
 
 export const color = {
   // Translucent panel surfaces over the map (Paradox-style).
-  panel: 'rgba(14, 20, 30, 0.82)',
-  panelSolid: '#0e141e',
+  // 2026-07 facelift: deeper near-black base with a cooler cast, subtler borders, electric accent —
+  // semantic names are stable, only the values moved (SDK --mg-* fallbacks derive from these).
+  panel: 'rgba(15, 18, 26, 0.85)',
+  panelSolid: '#0f1219',
   /** The darkest chrome layer: nav bars, page headers, input wells (below panelSolid). */
-  panelDeep: '#0a0f16',
-  panelBorder: 'rgba(120, 150, 190, 0.25)',
-  panelHover: 'rgba(26, 36, 52, 0.9)',
+  panelDeep: '#0a0d14',
+  panelBorder: 'rgba(140, 165, 210, 0.16)',
+  panelHover: 'rgba(30, 37, 52, 0.92)',
   /** Modal scrims. */
-  overlay: 'rgba(0, 0, 0, 0.65)',
+  overlay: 'rgba(4, 6, 10, 0.72)',
 
   // Text.
-  textPrimary: '#e8eef6',
-  textMuted: '#9aa9bd',
+  textPrimary: '#eef2f9',
+  textMuted: '#98a4b8',
   textInverse: '#0b0f16',
 
   // Accents.
-  accent: '#3da9fc',
-  accentMuted: '#2b6cb0',
+  accent: '#4c9aff',
+  accentMuted: '#2f7fe0',
 
   // Resource semantics (used by the top resource bar + tooltips).
   food: '#7fc97f',
@@ -41,12 +43,12 @@ export const color = {
   population: '#e0a3c0',
 
   // States.
-  positive: '#46c46a',
-  negative: '#e0524a',
-  warning: '#e8a13a',
+  positive: '#3fce7a',
+  negative: '#ef5350',
+  warning: '#f0a93c',
   // Diplomacy / combat feed.
-  aggression: '#e0524a',
-  diplomacy: '#3da9fc',
+  aggression: '#ef5350',
+  diplomacy: '#4c9aff',
 } as const;
 
 export const space = {
@@ -66,10 +68,21 @@ export const radius = {
 } as const;
 
 export const font = {
-  family: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+  // 'Inter Variable' is the family name registered by @fontsource-variable/inter (self-hosted by
+  // the hub and admin apps); everything after it is the graceful fallback stack for surfaces that
+  // don't load webfonts (e.g. SDK widgets inside embedded games).
+  family: "'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
   mono: "'JetBrains Mono', ui-monospace, monospace",
   size: { xs: 11, sm: 13, md: 15, lg: 18, xl: 24, xxl: 34 },
   weight: { regular: 400, medium: 500, bold: 700 },
+} as const;
+
+/** Elevation scale — one shadow language for every floating surface (panels, windows, popovers). */
+export const shadow = {
+  sm: '0 2px 8px rgba(0, 0, 0, 0.35)',
+  md: '0 6px 20px rgba(0, 0, 0, 0.45)',
+  popover: '0 10px 28px rgba(0, 0, 0, 0.5)',
+  window: '0 16px 48px rgba(0, 0, 0, 0.55)',
 } as const;
 
 /** Stacking order for the overlay layers above the Canvas (section 8). */

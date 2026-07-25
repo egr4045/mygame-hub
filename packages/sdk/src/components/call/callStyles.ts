@@ -5,21 +5,27 @@
  * in `overlay/mount.tsx` (shadow-DOM path) and the hub's `global.css` (direct-mount path).
  */
 import type { CSSProperties } from 'react';
+import { mg } from '../../theme/tokens.js';
 
+/** Call palette, expressed through the shared `--mg-*` theme (stage stays darker than chat chrome).
+ *  Consumers keep reading `palette.*` — only the values moved onto the token seam. */
 export const palette = {
   /** deep near-black call backdrop (darker than the chat window for a "stage" feel) */
-  stage: '#0e1116',
-  tileBg: '#1a1f29',
-  tileBgAlt: '#12161d',
+  stage: mg.stage,
+  tileBg: mg.tile,
+  tileBgAlt: mg.tileAlt,
   panel: 'rgba(17,20,27,0.92)',
-  border: '#3d4450',
-  accent: '#5c7e10',
-  /** Discord-green active-speaker highlight */
-  speaking: '#3ba55d',
-  danger: '#ed4245',
-  text: '#dcdedf',
-  subtle: '#8f98a0',
-  blue: '#2AABEE',
+  border: mg.border,
+  accent: mg.positive,
+  /** active-speaker highlight */
+  speaking: mg.positive,
+  danger: mg.danger,
+  warning: mg.warning,
+  /** dark text for on-warning/on-light chips */
+  textInverse: mg.textInverse,
+  text: mg.text,
+  subtle: mg.textMuted,
+  blue: mg.accent,
 } as const;
 
 /** A round control button (mic / cam / screen / leave). `variant` sets the resting fill. */
@@ -78,7 +84,7 @@ export const chromeButton: CSSProperties = {
 export const tileBase: CSSProperties = {
   position: 'relative',
   background: palette.tileBg,
-  borderRadius: 10,
+  borderRadius: mg.rMd,
   overflow: 'hidden',
   minHeight: 0,
   minWidth: 0,

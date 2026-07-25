@@ -1,6 +1,15 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { usePlatformStore } from './platform/platformStore.js';
-import { useSocialStore, useChatStore, useCallStore, useToastStore, getPlatformSettings, setCustomSound } from '@mygame/sdk';
+import {
+  useSocialStore,
+  useChatStore,
+  useCallStore,
+  useToastStore,
+  getPlatformSettings,
+  setCustomSound,
+  installGestureUnlock,
+  enableTabBadge,
+} from '@mygame/sdk';
 import { resolveInvite } from './net/inviteClient.js';
 import { routeToInvite } from './platform/inviteRouting.js';
 import { applyGameStatusOverrides } from './platform/games.js';
@@ -43,6 +52,11 @@ export const App = (): JSX.Element => {
 
   useEffect(() => {
     usePlatformStore.getState().restore();
+    // The hub owns its own tab chrome: (N) unread title/favicon badge + ring flash. Embedded games
+    // never get this (badge is host-opt-in). Gesture unlock lets a pending ringtone start on the
+    // first click/keypress despite the autoplay policy.
+    installGestureUnlock();
+    enableTabBadge();
   }, []);
 
   // Drop the instant boot skeleton (index.html) once React has mounted and painted the real shell —

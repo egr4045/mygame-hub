@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import type { chat } from '@mygame/protocol';
 import { controlButton, palette } from './callStyles.js';
 import { initials, avatarColor } from './callLayout.js';
+import { isAudioReady, installGestureUnlock } from '../../sound.js';
+import { mg } from '../../theme/tokens.js';
 
 type Status = 'ringing-out' | 'ringing-in' | 'connecting';
 
@@ -25,6 +28,19 @@ export const RingingView = ({
 }): JSX.Element => {
   // 'screen' is a deprecated call type the store already coerces to 'video' before it gets here.
   const kindLabel = type === 'video' ? 'видео' : 'аудио';
+
+  // Autoplay policy: on a fresh tab the ringtone can be silently suspended until a user gesture.
+  // Surface that as a tappable chip — the tap itself is the unlocking gesture.
+  const [audioReady, setAudioReady] = useState(isAudioReady);
+  useEffect(() => {
+    if (audioReady) return undefined;
+    installGestureUnlock();
+    const t = setInterval(() => {
+      if (isAudioReady()) setAudioReady(true);
+    }, 500);
+    return () => clearInterval(t);
+  }, [audioReady]);
+
   return (
     <div
       style={{
@@ -64,6 +80,24 @@ export const RingingView = ({
           {status === 'ringing-in' && `Входящий звонок (${kindLabel})`}
           {status === 'connecting' && 'Подключение…'}
         </div>
+        {status === 'ringing-in' && !audioReady && (
+          <button
+            onClick={() => setAudioReady(isAudioReady())}
+            style={{
+              marginTop: 10,
+              background: mg.warning,
+              color: mg.textInverse,
+              border: 'none',
+              borderRadius: mg.rPill,
+              padding: '4px 12px',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            🔇 Включить звук
+          </button>
+        )}
       </div>
 
       {status === 'ringing-in' ? (

@@ -3,6 +3,13 @@
  * components the hub uses; Phase 2 step 2 adds a framework-agnostic core (`mygame.init/auth/social/
  * ui/...`) and a self-mounting Shadow-DOM overlay, with these React hooks kept as a thin binding.
  */
+export * from './theme/tokens.js';
+export * from './theme/primitives.js';
+export { SDK_OVERLAY_CSS } from './theme/overlayCss.js';
+export * from './hooks/useViewport.js';
+export * from './hooks/useFloatingWindow.js';
+export * from './hooks/useIsMobile.js';
+
 export * from './state/toastStore.js';
 export * from './state/notificationPrefsStore.js';
 export * from './state/socialStore.js';
@@ -21,6 +28,10 @@ export { UserProfileModal, type ProfileTarget } from './components/UserProfileMo
 export { MygameOverlay } from './components/MygameOverlay.js';
 export { SocialDndProvider } from './components/SocialDndProvider.js';
 export * from './overlay/mount.js';
+
+export * from './state/missedCallsStore.js';
+export * from './notifications.js';
+export * from './badge.js';
 
 export * from './config.js';
 export * from './authClient.js';

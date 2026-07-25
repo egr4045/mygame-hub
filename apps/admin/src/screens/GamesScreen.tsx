@@ -111,7 +111,7 @@ const ChangelogSection = ({ gameId }: { gameId: string }): JSX.Element => {
               </div>
             </div>
           ) : (
-            <div key={e.id} style={{ background: 'var(--bg-dark)', padding: 16, borderRadius: 8, border: '1px solid rgba(255,255,255,0.02)' }}>
+            <div key={e.id} style={{ background: 'var(--bg-dark)', padding: 16, borderRadius: 8, border: '1px solid rgba(140, 165, 210, 0.07)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
                 <div>
                   <strong style={{ fontSize: 16 }}>{e.title}</strong> <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>v{e.version}</span>
@@ -205,7 +205,7 @@ const DiscussionsSection = ({ gameId }: { gameId: string }): JSX.Element => {
           <div key={t.id} style={{ background: 'var(--bg-dark)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ cursor: 'pointer', flex: 1 }} onClick={() => void open(t.id)}>
-                <strong style={{ fontSize: 16, color: openId === t.id ? 'var(--accent)' : '#fff' }}>{t.title}</strong>
+                <strong style={{ fontSize: 16, color: openId === t.id ? 'var(--accent)' : 'var(--text-main)' }}>{t.title}</strong>
                 <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>
                   Автор: {t.authorName} · Ответы: {t.replyCount}
                 </div>
@@ -216,7 +216,7 @@ const DiscussionsSection = ({ gameId }: { gameId: string }): JSX.Element => {
               <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {posts.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 13, paddingLeft: 12, borderLeft: '2px solid var(--border-color)' }}>В треде пока нет ответов.</div>}
                 {posts.map((p) => (
-                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: 12, background: 'rgba(140, 165, 210, 0.05)', borderRadius: 6 }}>
                     <div>
                       <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>{p.authorName}</div>
                       <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{p.body}</div>

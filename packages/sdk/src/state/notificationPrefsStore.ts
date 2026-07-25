@@ -9,6 +9,9 @@ export interface NotificationPrefs {
   achievementToasts: boolean;
   callToasts: boolean;
   messageToasts: boolean;
+  /** OS-level banners via the Notification API when the tab is hidden/unfocused (needs browser
+   *  permission — requested when this is switched on, never on load). */
+  systemNotifications: boolean;
   /** Master volume (0..1) for notification sounds; 0 mutes them. */
   soundVolume: number;
 }
@@ -17,11 +20,18 @@ interface NotificationPrefsState extends NotificationPrefs {
   setAchievementToasts: (on: boolean) => void;
   setCallToasts: (on: boolean) => void;
   setMessageToasts: (on: boolean) => void;
+  setSystemNotifications: (on: boolean) => void;
   setSoundVolume: (v: number) => void;
 }
 
 const KEY = 'mygame.notificationPrefs';
-const DEFAULTS: NotificationPrefs = { achievementToasts: true, callToasts: true, messageToasts: true, soundVolume: 0.5 };
+const DEFAULTS: NotificationPrefs = {
+  achievementToasts: true,
+  callToasts: true,
+  messageToasts: true,
+  systemNotifications: false,
+  soundVolume: 0.5,
+};
 
 const load = (): NotificationPrefs => {
   try {
@@ -44,6 +54,7 @@ const snapshot = (s: NotificationPrefs): NotificationPrefs => ({
   achievementToasts: s.achievementToasts,
   callToasts: s.callToasts,
   messageToasts: s.messageToasts,
+  systemNotifications: s.systemNotifications,
   soundVolume: s.soundVolume,
 });
 
@@ -59,6 +70,10 @@ export const useNotificationPrefsStore = create<NotificationPrefsState>((set, ge
   },
   setMessageToasts: (on) => {
     set({ messageToasts: on });
+    save(snapshot(get()));
+  },
+  setSystemNotifications: (on) => {
+    set({ systemNotifications: on });
     save(snapshot(get()));
   },
   setSoundVolume: (v) => {

@@ -285,7 +285,8 @@ export const ProfileView = (): JSX.Element => {
             ) : (
               <button
                 onClick={() => void startTelegramLink()}
-                style={{ background: 'var(--c-accent)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+                className="hub-btn hub-btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: 8 }}
               >
                 <span>✈</span> Привязать TG
               </button>
@@ -459,7 +460,7 @@ export const ProfileView = (): JSX.Element => {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {tgModal.url && (
-                <a href={tgModal.url} target="_blank" rel="noreferrer" style={{ background: 'var(--c-accent)', color: '#fff', padding: '12px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 }}>
+                <a href={tgModal.url} target="_blank" rel="noreferrer" className="hub-btn hub-btn-primary" style={{ padding: 12, textDecoration: 'none', textAlign: 'center' }}>
                   ✈ Открыть Telegram
                 </a>
               )}

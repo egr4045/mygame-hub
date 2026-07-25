@@ -5,8 +5,8 @@ import { useToast } from '../components/ToastProvider.js';
 
 const STATUS_META: Record<SuggestionStatus, { label: string; color: string }> = {
   new: { label: 'Новое', color: 'var(--accent)' },
-  accepted: { label: 'Принято', color: '#3ba55d' },
-  implemented: { label: 'Реализовано', color: '#9b59b6' },
+  accepted: { label: 'Принято', color: 'var(--success)' },
+  implemented: { label: 'Реализовано', color: '#7c6cf0' },
   rejected: { label: 'Отклонено', color: 'var(--danger)' },
 };
 const STATUS_ORDER: SuggestionStatus[] = ['new', 'accepted', 'implemented', 'rejected'];

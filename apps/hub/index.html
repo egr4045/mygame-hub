@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>GAMEHUB</title>
     <!-- Boot skeleton: paints instantly (before the JS bundle parses) so returning from a game — a
          full page reload — never shows a white screen. Removed by App.tsx once React has mounted;
@@ -13,9 +13,9 @@
         position: fixed;
         inset: 0;
         z-index: 99999;
-        background: linear-gradient(180deg, #0a0f16 0%, #0e141e 60%);
-        color: #e8eef6;
-        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        background: linear-gradient(180deg, #0a0d14 0%, #0f1219 60%);
+        color: #eef2f9;
+        font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
         display: flex;
         flex-direction: column;
         opacity: 1;
@@ -32,14 +32,14 @@
         align-items: center;
         justify-content: space-between;
         padding: 0 24px;
-        background: #0a0f16;
-        border-bottom: 1px solid rgba(120, 150, 190, 0.15);
+        background: #0a0d14;
+        border-bottom: 1px solid rgba(140, 165, 210, 0.12);
       }
       .bs-logo {
         font-weight: 800;
         letter-spacing: 2px;
         font-size: 18px;
-        background: linear-gradient(90deg, #3da9fc, #e8eef6);
+        background: linear-gradient(90deg, #4c9aff, #eef2f9);
         -webkit-background-clip: text;
         background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -95,14 +95,14 @@
       .bs-sk {
         position: relative;
         overflow: hidden;
-        background: rgba(120, 150, 190, 0.08);
+        background: rgba(140, 165, 210, 0.08);
       }
       .bs-sk::after {
         content: '';
         position: absolute;
         inset: 0;
         transform: translateX(-100%);
-        background: linear-gradient(90deg, transparent, rgba(120, 150, 190, 0.14), transparent);
+        background: linear-gradient(90deg, transparent, rgba(140, 165, 210, 0.14), transparent);
         animation: bs-shimmer 1.3s ease-in-out infinite;
       }
       @keyframes bs-shimmer {

@@ -403,7 +403,8 @@ export const GameDetailsView = ({
                     <button
                       onClick={() => void handleCreateThread()}
                       disabled={!newThreadTitle.trim() || !newThreadBody.trim()}
-                      style={{ background: 'var(--c-positive)', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: 4, fontWeight: 600, cursor: newThreadTitle.trim() && newThreadBody.trim() ? 'pointer' : 'not-allowed', fontSize: '16px', opacity: newThreadTitle.trim() && newThreadBody.trim() ? 1 : 0.5 }}
+                      className="hub-btn hub-btn-primary"
+                      style={{ padding: '12px 32px', fontSize: 16 }}
                     >
                       Опубликовать
                     </button>

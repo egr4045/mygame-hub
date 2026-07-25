@@ -1,35 +1,13 @@
 import { createRoot, type Root } from 'react-dom/client';
 import { MygameOverlay } from '../components/MygameOverlay.js';
+import { SDK_OVERLAY_CSS } from '../theme/overlayCss.js';
+import { installGestureUnlock } from '../sound.js';
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
-/**
- * Styles injected into the overlay's shadow root. Kept tiny and self-contained so the overlay looks
- * identical on top of any game regardless of the host page's CSS (the components are otherwise
- * inline-styled). `.mygame-fade-in` mirrors the hub's entrance animation.
- */
-export const OVERLAY_STYLES = `
-.mygame-fade-in { animation: mygame-fade-in 0.15s ease-out; }
-@keyframes mygame-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@keyframes mygame-call-pulse { 0% { box-shadow: 0 0 0 0 rgba(59,165,93,0.55); } 70% { box-shadow: 0 0 0 16px rgba(59,165,93,0); } 100% { box-shadow: 0 0 0 0 rgba(59,165,93,0); } }
-
-/* ChatWidget rows: hover via CSS (keyboard/AT friendly) — active/drop states stay inline. */
-.cw-hover-row:hover { background: #23262e; }
-
-/* Markdown inside chat bubbles — without these, UA margins blow the bubble up and long code/links
-   overflow it. Mirrored in apps/hub global.css (the hub renders ChatWidget outside this shadow root). */
-.chat-markdown p { margin: 0; }
-.chat-markdown p + p { margin-top: 6px; }
-.chat-markdown a { color: #9fd1ff; word-break: break-all; }
-.chat-markdown img { max-width: 100%; border-radius: 6px; }
-.chat-markdown pre { background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
-.chat-markdown code { background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 4px; font-size: 12px; word-break: break-all; }
-.chat-markdown pre code { background: none; padding: 0; word-break: normal; }
-.chat-markdown ul, .chat-markdown ol { margin: 4px 0; padding-left: 18px; }
-.chat-markdown blockquote { margin: 4px 0; padding-left: 8px; border-left: 3px solid rgba(255,255,255,0.25); color: #b8c2cc; }
-.chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { font-size: 14px; margin: 6px 0 2px; }
-`;
+/** @deprecated Import `SDK_OVERLAY_CSS` from the theme module instead; kept as an alias so existing consumers don't break. */
+export const OVERLAY_STYLES = SDK_OVERLAY_CSS;
 
 /**
  * Mount the mygame overlay (toasts + context menu) into an isolated Shadow-DOM root on top of the
@@ -39,6 +17,7 @@ export const OVERLAY_STYLES = `
  */
 export const mountOverlay = (): void => {
   if (root || typeof document === 'undefined') return;
+  installGestureUnlock(); // autoplay-policy escape hatch: first user gesture unmutes a pending ring
   host = document.createElement('div');
   host.id = 'mygame-overlay';
   host.style.position = 'fixed';

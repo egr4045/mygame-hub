@@ -36,7 +36,7 @@ export const ParticipantTile = ({
 
   const qualityColor =
     quality === ConnectionQuality.Poor
-      ? '#f0b232'
+      ? palette.warning
       : quality === ConnectionQuality.Lost
         ? palette.danger
         : quality === ConnectionQuality.Excellent || quality === ConnectionQuality.Good

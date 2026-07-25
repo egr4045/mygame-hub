@@ -9,6 +9,10 @@ import { ControlBar } from './ControlBar.js';
 import { RingingView } from './RingingView.js';
 import { ConnectionBanner } from './ConnectionBanner.js';
 import { palette, chromeButton } from './callStyles.js';
+import { mg, mgZ } from '../../theme/tokens.js';
+import { useFloatingWindow } from '../../hooks/useFloatingWindow.js';
+import { useViewport, getViewport } from '../../hooks/useViewport.js';
+import { useIsMobile } from '../../hooks/useIsMobile.js';
 
 const DOCK_W = 460;
 const DOCK_H = 380;
@@ -42,44 +46,28 @@ export const CallView = (): JSX.Element | null => {
 
   const [surfaceMode, setSurfaceMode] = useState<'docked' | 'expanded'>('docked');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+  const isMobile = useIsMobile();
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const onR = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', onR);
-    return () => window.removeEventListener('resize', onR);
-  }, []);
-
-  // Docked-window position: top-right by default (the chat widget owns the bottom-right corner),
-  // draggable per-call. Not persisted — a fresh call starts back at the default.
-  const [dockPos, setDockPos] = useState<{ x: number; y: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      setDockPos({
-        x: Math.max(0, Math.min(e.clientX - dragOffsetRef.current.x, window.innerWidth - 80)),
-        y: Math.max(0, Math.min(e.clientY - dragOffsetRef.current.y, window.innerHeight - 48)),
-      });
-    };
-    const onUp = () => setDragging(false);
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-  }, [dragging]);
+  // Docked-window position: top-right by default (the chat widget owns the bottom-right corner).
+  // Persisted across calls (useFloatingWindow, key 'callDock') — a window the user parked somewhere
+  // stays there; only the surface mode resets per call.
+  const vp = useViewport();
+  const expandedSurface = isFullscreen || surfaceMode === 'expanded' || isMobile; // phones: always full-screen
+  const { pos: dockPosition, handleProps: dockHandle } = useFloatingWindow({
+    key: 'callDock',
+    anchor: 'top-left',
+    defaultPos: (v) => ({ x: Math.max(0, v.w - DOCK_W - 24), y: 80 }),
+    size: () => ({ w: Math.min(DOCK_W, getViewport().w - 16), h: Math.min(DOCK_H, getViewport().h - 16) }),
+    minVisible: 40,
+    disabled: expandedSurface,
+  });
 
   const currentKey = callKey ?? activeCall?.conversationId ?? null;
   useEffect(() => {
     setPinnedKey(null);
     setSurfaceMode('docked');
-    setDockPos(null);
   }, [currentKey]);
 
   useEffect(() => {
@@ -152,34 +140,37 @@ export const CallView = (): JSX.Element | null => {
     }
   };
 
-  const expanded = isFullscreen || surfaceMode === 'expanded' || isMobile; // phones: always full-screen
-  const dockDefault = { x: Math.max(0, window.innerWidth - DOCK_W - 24), y: 80 };
-  const pos = dockPos ?? dockDefault;
+  const expanded = expandedSurface;
+  const pos = dockPosition;
   const containerStyle = expanded
     ? {
         position: 'fixed' as const,
         inset: 0,
-        zIndex: 1600,
+        zIndex: mgZ.call,
         pointerEvents: 'auto' as const,
         display: 'flex',
         flexDirection: 'column' as const,
         background: palette.stage,
+        // Full-screen on phones: keep the top bar off the notch and the control bar above the
+        // home indicator.
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }
     : {
         position: 'fixed' as const,
         left: pos.x,
         top: pos.y,
-        width: Math.min(DOCK_W, window.innerWidth - 16),
-        height: Math.min(DOCK_H, window.innerHeight - 16),
-        zIndex: 1600,
+        width: Math.min(DOCK_W, vp.w - 16),
+        height: Math.min(DOCK_H, vp.h - 16),
+        zIndex: mgZ.call,
         pointerEvents: 'auto' as const,
         display: 'flex',
         flexDirection: 'column' as const,
         background: palette.stage,
-        borderRadius: 12,
+        borderRadius: mg.rLg,
         overflow: 'hidden',
         border: `1px solid ${palette.border}`,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        boxShadow: mg.shadowWindow,
       };
 
   const ringingStatus = activeCall
@@ -190,13 +181,7 @@ export const CallView = (): JSX.Element | null => {
 
   const topBar = (
     <div
-      onMouseDown={(e) => {
-        if (expanded) return;
-        // Buttons inside the bar must stay clickable — only bare-bar presses start a drag.
-        if ((e.target as HTMLElement).closest('button')) return;
-        dragOffsetRef.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
-        setDragging(true);
-      }}
+      onPointerDown={dockHandle.onPointerDown}
       style={{
         flexShrink: 0,
         height: 40,
@@ -206,7 +191,7 @@ export const CallView = (): JSX.Element | null => {
         padding: '0 10px',
         background: palette.tileBgAlt,
         color: palette.text,
-        cursor: expanded ? 'default' : 'grab',
+        ...dockHandle.style,
       }}
     >
       <span style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -241,7 +226,7 @@ export const CallView = (): JSX.Element | null => {
         alignItems: 'center',
         gap: 10,
         padding: '8px 12px',
-        background: '#2a3f2a',
+        background: mg.positiveSoft,
         borderBottom: `1px solid ${palette.border}`,
         color: palette.text,
         fontSize: 13,
@@ -252,7 +237,7 @@ export const CallView = (): JSX.Element | null => {
       </span>
       <button
         onClick={() => void goToInvite()}
-        style={{ ...chromeButton, background: '#3ba55d', fontWeight: 700 }}
+        style={{ ...chromeButton, background: mg.positive, fontWeight: 700 }}
         aria-label={`Перейти в ${pendingInvite.gameName}`}
       >
         Перейти

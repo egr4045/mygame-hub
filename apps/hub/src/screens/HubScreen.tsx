@@ -16,6 +16,7 @@ import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
+import { useChatStore, useMissedCallsStore } from '@mygame/sdk';
 import { createTelegramLinkCode, getTelegramStatus, createSuggestion } from '@mygame/sdk';
 import { useIsMobile } from '../platform/useIsMobile.js';
 import { MobileHub } from '../mobile/MobileHub.js';
@@ -60,7 +61,9 @@ const DesktopHubScreen = (): JSX.Element => {
   const invites = useSocialStore((s) => s.invites);
   const { accept, dismissInvite } = useSocialStore.getState();
   const incomingRequests = friends.filter((f) => f.status === 'incoming');
-  const notificationCount = incomingRequests.length + invites.length;
+  const allMissed = useMissedCallsStore((s) => s.missed);
+  const missedCalls = allMissed.filter((m) => !m.seen);
+  const notificationCount = incomingRequests.length + invites.length + missedCalls.length;
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
 
@@ -181,6 +184,11 @@ const DesktopHubScreen = (): JSX.Element => {
                         label: `🎮 ${inv.inviterName}: ${inv.gameName} — присоединиться`,
                         action: () => void routeToInvite(inv),
                       })),
+                      ...missedCalls.map((mc) => ({
+                        label: `📵 Пропущенный звонок от ${mc.fromName} — открыть чат`,
+                        action: () => useChatStore.getState().openChat(mc.conversationId),
+                        danger: true,
+                      })),
                     ];
                 openMenu(e.clientX, e.clientY + 20, [
                   ...items,
@@ -274,13 +282,13 @@ const DesktopHubScreen = (): JSX.Element => {
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <button onClick={() => void startTelegramLink()} style={{ background: 'var(--c-accent)', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <button onClick={() => void startTelegramLink()} className="hub-btn hub-btn-primary" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <span>✈</span> Привязать Telegram
               </button>
-              <button disabled title="Скоро" style={{ background: 'var(--c-accent-muted)', color: '#fff', border: 'none', padding: '14px', borderRadius: 4, cursor: 'not-allowed', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: 0.5 }}>
+              <button disabled title="Скоро" className="hub-btn" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <span>K</span> Привязать ВКонтакте (скоро)
               </button>
-              <button onClick={dismissLinkModal} style={{ background: 'transparent', color: 'var(--c-text-muted)', border: 'none', padding: '14px', cursor: 'pointer', fontWeight: 600, marginTop: 8 }}>
+              <button onClick={dismissLinkModal} style={{ background: 'transparent', color: 'var(--c-text-muted)', border: 'none', padding: '14px', cursor: 'pointer', fontWeight: 600, marginTop: 8, transition: 'color var(--motion-fast)' }}>
                 Позже
               </button>
             </div>

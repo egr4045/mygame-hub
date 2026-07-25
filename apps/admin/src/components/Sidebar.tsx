@@ -16,8 +16,8 @@ export const Sidebar = ({ currentTab, onChangeTab, onLogout, adminName }: Sideba
       <button
         onClick={() => onChangeTab(tab)}
         style={{
-          background: isActive ? 'rgba(26, 159, 255, 0.1)' : 'transparent',
-          color: isActive ? '#fff' : 'var(--text-muted)',
+          background: isActive ? 'rgba(76, 154, 255, 0.1)' : 'transparent',
+          color: isActive ? 'var(--text-main)' : 'var(--text-muted)',
           border: 'none',
           borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
           borderRadius: '0 8px 8px 0',
@@ -34,7 +34,7 @@ export const Sidebar = ({ currentTab, onChangeTab, onLogout, adminName }: Sideba
           marginBottom: 4,
         }}
         onMouseOver={(e) => {
-          if (!isActive) e.currentTarget.style.color = '#fff';
+          if (!isActive) e.currentTarget.style.color = 'var(--text-main)';
         }}
         onMouseOut={(e) => {
           if (!isActive) e.currentTarget.style.color = 'var(--text-muted)';
@@ -49,7 +49,7 @@ export const Sidebar = ({ currentTab, onChangeTab, onLogout, adminName }: Sideba
   return (
     <div style={{
       width: 260,
-      background: 'rgba(15, 18, 23, 0.8)',
+      background: 'rgba(10, 13, 20, 0.8)',
       backdropFilter: 'var(--glass-blur)',
       borderRight: '1px solid var(--border-color)',
       display: 'flex',

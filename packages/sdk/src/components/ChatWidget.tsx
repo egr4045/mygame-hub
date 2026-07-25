@@ -3,12 +3,18 @@ import { useChatStore, type ChatMessage, type ChatSession } from '../state/chatS
 import { useSocialStore } from '../state/socialStore.js';
 import { useMenuStore } from '../state/menuStore.js';
 import { useToastStore } from '../state/toastStore.js';
+import { useMissedCallsStore, type MissedCall } from '../state/missedCallsStore.js';
 import { UserProfileModal } from './UserProfileModal.js';
 import { useDroppable } from '@dnd-kit/core';
 import ReactMarkdown from 'react-markdown';
 import { config } from '../config.js';
 import { freshAccessToken } from '../authClient.js';
 import type { social } from '@mygame/protocol';
+import { mg, mgZ } from '../theme/tokens.js';
+import { btn, iconBtn, input as inputStyle, countBadge } from '../theme/primitives.js';
+import { useFloatingWindow, useResizeHandle, loadStoredSize, clampSizeTo } from '../hooks/useFloatingWindow.js';
+import { getViewport, useViewport } from '../hooks/useViewport.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 const activityText = (f?: Omit<social.Friend, 'status'>): string => {
   if (!f) return 'Неизвестно';
@@ -55,7 +61,7 @@ const Avatar = ({
         flexShrink: 0,
         borderRadius: radius,
         overflow: 'hidden',
-        background: src ? '#3d4450' : avatarBg(name),
+        background: src ? mg.surfaceRaised : avatarBg(name),
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -77,41 +83,14 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 /** Small round icon button used in the window headers (close, etc.). */
 const headerIconBtn: React.CSSProperties = {
-  background: '#3d4450',
-  border: 'none',
-  color: '#dcdedf',
-  cursor: 'pointer',
+  ...iconBtn(26),
+  background: mg.surfaceRaised,
+  color: mg.text,
   fontSize: 14,
   lineHeight: 1,
-  width: 26,
-  height: 26,
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flexShrink: 0,
 };
 
-const clampSize = (s: { w: number; h: number }): { w: number; h: number } => ({
-  w: Math.min(Math.max(MIN_W, s.w), window.innerWidth),
-  h: Math.min(Math.max(MIN_H, s.h), window.innerHeight),
-});
-
-/** Keep the window reachable: at least the header strip stays inside the viewport, so a position
- *  persisted on a big monitor can't strand the widget off-screen on a smaller one. */
-const clampPos = (p: { x: number; y: number }, s: { w: number; h: number }): { x: number; y: number } => ({
-  x: Math.max(0, Math.min(p.x, Math.max(0, window.innerWidth - Math.min(s.w, window.innerWidth)))),
-  y: Math.max(0, Math.min(p.y, Math.max(0, window.innerHeight - 48))),
-});
-
-const loadJson = <T,>(key: string, fallback: T): T => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-};
+const MIN_SIZE = { w: MIN_W, h: MIN_H };
 
 /** A session-list row that's also a drop target for `SocialDndProvider` — dragging a friend here
  *  (id `friend:<accountId>`) adds them to this conversation. Id convention: `chat:<sessionId>`. */
@@ -119,12 +98,15 @@ const DroppableChatSession = ({
   s,
   activeChatId,
   callCount,
+  hasMissed,
   onClick,
 }: {
   s: ChatSession;
   activeChatId: string | null;
   /** How many people are currently in this conversation's call (0 = none). */
   callCount: number;
+  /** Unseen missed call in this conversation — renders a danger phone marker. */
+  hasMissed: boolean;
   onClick: () => void;
 }): JSX.Element => {
   const { isOver, setNodeRef } = useDroppable({ id: `chat:${s.id}` });
@@ -140,23 +122,28 @@ const DroppableChatSession = ({
         display: 'flex',
         alignItems: 'center',
         gap: 12,
-        ...(isOver ? { background: 'rgba(42,171,238,0.2)' } : active ? { background: '#2a475e' } : {}),
+        ...(isOver ? { background: mg.accentSoft } : active ? { background: mg.surfaceRaised } : {}),
         borderBottom: '1px solid rgba(255,255,255,0.05)',
       }}
     >
       <Avatar src={s.avatar} name={s.name} size={32} shape={s.type === 'group' ? 'square' : 'circle'} />
 
-      <div style={{ fontSize: '13px', color: '#dcdedf', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: '13px', color: mg.text, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {s.name}
       </div>
+      {hasMissed && !active && (
+        <span title="Пропущенный звонок" style={{ color: mg.danger, fontSize: 13, lineHeight: 1 }} aria-label="Пропущенный звонок">
+          📵
+        </span>
+      )}
       {callCount > 0 && (
-        <div title={`В звонке: ${callCount}`} style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#3ba55d', fontSize: 11, fontWeight: 700 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#3ba55d', display: 'inline-block' }} />
+        <div title={`В звонке: ${callCount}`} style={{ display: 'flex', alignItems: 'center', gap: 3, color: mg.positive, fontSize: 11, fontWeight: 700 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: mg.positive, display: 'inline-block' }} />
           {callCount}
         </div>
       )}
       {!!s.unreadCount && !active && (
-        <div style={{ background: '#5c7e10', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>
+        <div style={countBadge('accent')}>
           {s.unreadCount}
         </div>
       )}
@@ -165,19 +152,26 @@ const DroppableChatSession = ({
 };
 
 /** The "no conversation open" placeholder — also a drop target (id `chat:new`) for starting a new
- *  DM by dragging a friend here; `SocialDndProvider` special-cases this id to open-or-create a DM. */
-const DroppableNewChatArea = (): JSX.Element => {
+ *  DM by dragging a friend here; `SocialDndProvider` special-cases this id to open-or-create a DM.
+ *  The whole empty pane doubles as a window drag surface (`dragProps` from useFloatingWindow). */
+const DroppableNewChatArea = ({
+  dragProps,
+}: {
+  dragProps?: { onPointerDown: (e: React.PointerEvent<HTMLElement>) => void; style: React.CSSProperties } | undefined;
+}): JSX.Element => {
   const { isOver, setNodeRef } = useDroppable({ id: 'chat:new' });
   return (
     <div
       ref={setNodeRef}
+      onPointerDown={dragProps?.onPointerDown}
       style={{
         flex: 1,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: isOver ? '#2AABEE' : '#8f98a0',
-        background: isOver ? 'rgba(42,171,238,0.1)' : 'transparent',
+        color: isOver ? mg.accent : mg.textMuted,
+        background: isOver ? mg.accentSoft : 'transparent',
+        ...(dragProps?.style ?? {}),
       }}
     >
       Выберите диалог из списка
@@ -215,6 +209,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
   const activeCall = useChatStore((s) => s.activeCall);
   const ring = useChatStore((s) => s.ring);
   const hangup = useChatStore((s) => s.hangup);
+  const allMissed = useMissedCallsStore((s) => s.missed);
 
   const me = useSocialStore((s) => s.me);
   const friends = useSocialStore((s) => s.friends);
@@ -234,16 +229,9 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
   const [addMemberIds, setAddMemberIds] = useState<string[]>([]);
   const [isViewingMembers, setIsViewingMembers] = useState(false);
 
-  const [position, setPosition] = useState(() => {
-    const size = loadJson('chat_size', { w: 600, h: 450 });
-    return clampPos(loadJson('chat_position', { x: window.innerWidth - 650, y: window.innerHeight - 500 }), clampSize(size));
-  });
-  const [size, setSize] = useState(() => clampSize(loadJson('chat_size', { w: 600, h: 450 })));
+  const [size, setSize] = useState(() => loadStoredSize('chat', 'chat_size', { w: 600, h: 450 }, MIN_SIZE));
   const sizeRef = useRef(size);
   sizeRef.current = size;
-
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -256,45 +244,35 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
   const activeSession = sessions.find((s) => s.id === activeChatId);
   const activeMessages = activeSession?.messages;
 
+  // Below the shared breakpoint the widget goes full-screen and stacks list↔chat; the viewport hook
+  // (visualViewport-aware) drives the mobile height so the composer stays above the on-screen
+  // keyboard. Size clamping on monitor changes keeps the desktop window inside the screen.
+  const isMobile = useIsMobile();
+  const vp = useViewport();
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const newPos = clampPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y }, sizeRef.current);
-        setPosition(newPos);
-        localStorage.setItem('chat_position', JSON.stringify(newPos));
-      }
-    };
-    const handleMouseUp = () => setIsDragging(false);
+    setSize((s) => {
+      const c = clampSizeTo(s, MIN_SIZE, getViewport());
+      return c.w !== s.w || c.h !== s.h ? c : s;
+    });
+  }, [vp.w, vp.h]);
 
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, dragOffset]);
-
-  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
-
-  // A monitor change (or window shrink) must never strand the widget off-screen; also track the
-  // mobile breakpoint (below it the widget goes full-screen and stacks list↔chat).
-  useEffect(() => {
-    const onResize = () => {
-      setIsMobile(window.innerWidth < 768);
-      setSize((s) => {
-        const c = clampSize(s);
-        return c.w !== s.w || c.h !== s.h ? c : s;
-      });
-      setPosition((p) => {
-        const c = clampPos(p, sizeRef.current);
-        return c.x !== p.x || c.y !== p.y ? c : p;
-      });
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  // The floating-window engine: pointer drag (mouse+touch), viewport clamping, persisted position
+  // (migrates the legacy 'chat_position' key on first load).
+  const { pos: position, handleProps: dragHandle } = useFloatingWindow({
+    key: 'chat',
+    anchor: 'top-left',
+    legacyKey: 'chat_position',
+    defaultPos: (v, s) => ({ x: Math.max(8, v.w - s.w - 50), y: Math.max(8, v.h - s.h - 50) }),
+    size: () => sizeRef.current,
+    disabled: isMobile,
+  });
+  const { handleProps: resizeHandle, resizing } = useResizeHandle({
+    key: 'chat',
+    min: MIN_SIZE,
+    size,
+    onChange: setSize,
+    disabled: isMobile,
+  });
 
   // Surface store errors (failed send/edit/upload acks, socket errors) instead of dropping them.
   useEffect(() => {
@@ -342,6 +320,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
     if (stickToBottomRef.current) el.scrollTo({ top: el.scrollHeight });
   }, [activeMessages]);
 
+  // Mobile keyboard: the visual viewport shrinking (keyboard opening) must not scroll the newest
+  // messages out from under the composer — re-stick to the bottom if we were there.
+  useEffect(() => {
+    if (!isMobile) return;
+    const el = listRef.current;
+    if (el && stickToBottomRef.current) el.scrollTo({ top: el.scrollHeight });
+  }, [vp.h, isMobile]);
+
   if (!isOpen) {
     // When an external launcher owns the entry point (the unified "Друзья и чат" button / the mobile
     // app-bar chat icon), render nothing while collapsed instead of a second bottom button.
@@ -355,9 +341,10 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
           position: 'fixed',
           bottom: 0,
           right: window.innerWidth < 768 ? 16 : 360,
-          zIndex: 1000,
-          background: '#171a21',
-          color: '#dcdedf',
+          zIndex: mgZ.launcher,
+          background: mg.surfaceDeep,
+          color: mg.text,
+          fontFamily: mg.font,
           border: 'none',
           borderRadius: '8px 8px 0 0',
           padding: '12px 20px',
@@ -373,7 +360,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
       >
         <span>💬 Мессенджер</span>
         {totalUnread > 0 && (
-          <span style={{ background: '#5c7e10', color: '#fff', borderRadius: 10, padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>
+          <span style={countBadge('accent')}>
             {totalUnread}
           </span>
         )}
@@ -403,15 +390,6 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputText(e.target.value);
     if (activeChatId && !editing) sendTyping(activeChatId);
-  };
-
-  /** Start dragging the window from a header bar — but not when the press lands on a button/input
-   *  inside that bar (so the call/close/action controls stay clickable). */
-  const startDrag = (e: React.MouseEvent) => {
-    if (isMobile) return; // full-screen on mobile — nothing to drag
-    if ((e.target as HTMLElement).closest('button, input, a')) return;
-    setIsDragging(true);
-    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
 
   /** Upload one image and send it as a structured attachment (the server rejects non-images and
@@ -532,15 +510,21 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
         isMobile
           ? {
               // Phones: full-screen, no drag/resize — the floating window is unusable at 375px.
+              // Height follows the *visual* viewport (shrinks for the keyboard/browser chrome) and
+              // the safe-area insets keep the header/composer off the notch and home indicator.
               position: 'fixed',
-              inset: 0,
+              left: 0,
+              top: 0,
               width: '100%',
-              height: '100%',
-              background: '#1b2838',
+              height: vp.h,
+              paddingTop: 'env(safe-area-inset-top, 0px)',
+              background: mg.surface,
+              color: mg.text,
+              fontFamily: mg.font,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              zIndex: 1000,
+              zIndex: mgZ.widget,
               pointerEvents: 'auto',
             }
           : {
@@ -551,46 +535,38 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
               height: size.h,
               minWidth: MIN_W,
               minHeight: MIN_H,
-              maxWidth: '100vw',
-              maxHeight: '100vh',
-              background: '#1b2838',
-              border: '1px solid #3d4450',
-              borderRadius: 8,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
+              background: mg.surface,
+              color: mg.text,
+              fontFamily: mg.font,
+              border: `1px solid ${mg.border}`,
+              borderRadius: mg.rLg,
+              boxShadow: mg.shadowWindow,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              zIndex: 1000,
-              resize: 'both',
+              zIndex: mgZ.widget,
               pointerEvents: 'auto',
             }
       }
-      onMouseUp={(e) => {
-        // Handle resize by storing size on mouseup when not dragging (desktop only)
-        if (!isMobile && !isDragging && e.currentTarget) {
-          const newSize = clampSize({ w: e.currentTarget.offsetWidth, h: e.currentTarget.offsetHeight });
-          if (newSize.w !== size.w || newSize.h !== size.h) {
-            setSize(newSize);
-            localStorage.setItem('chat_size', JSON.stringify(newSize));
-          }
-        }
-      }}
     >
       {connStatus !== 'connected' && (
-        <div style={{ flexShrink: 0, background: connStatus === 'error' ? '#6e2b2b' : '#3d4450', color: '#fff', fontSize: 12, textAlign: 'center', padding: '4px 8px' }}>
+        <div
+          onPointerDown={dragHandle.onPointerDown}
+          style={{ flexShrink: 0, background: connStatus === 'error' ? mg.dangerSoft : mg.surfaceRaised, color: mg.text, fontSize: 12, textAlign: 'center', padding: '4px 8px', ...dragHandle.style }}
+        >
           {connStatus === 'error' ? 'Нет соединения с чатом' : 'Переподключение…'}
         </div>
       )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       {/* Mobile stacks list↔chat: the sidebar is full-width when no chat is open and hidden once one is. */}
-      <div style={{ width: isMobile ? '100%' : 220, flexShrink: 0, background: '#171a21', borderRight: isMobile ? 'none' : '1px solid #3d4450', display: isMobile && activeChatId ? 'none' : 'flex', flexDirection: 'column' }}>
+      <div style={{ width: isMobile ? '100%' : 220, flexShrink: 0, background: mg.surfaceDeep, borderRight: isMobile ? 'none' : `1px solid ${mg.border}`, display: isMobile && activeChatId ? 'none' : 'flex', flexDirection: 'column' }}>
         <div
-          onMouseDown={startDrag}
+          onPointerDown={dragHandle.onPointerDown}
           title="Перетащите за эту полосу, чтобы переместить окно"
-          style={{ padding: '10px 10px 10px 12px', borderBottom: '1px solid #3d4450', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'grab', background: '#23262e', userSelect: 'none' }}
+          style={{ padding: '10px 10px 10px 12px', borderBottom: `1px solid ${mg.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: mg.surfaceRaised, ...dragHandle.style }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span aria-hidden style={{ color: '#5a6673', fontSize: 15, lineHeight: 1 }}>⠿</span>
+            <span aria-hidden style={{ color: mg.textMuted, fontSize: 15, lineHeight: 1 }}>⠿</span>
             <span style={{ fontWeight: 700, fontSize: '14px', color: '#fff' }}>Мессенджер</span>
           </div>
           <button
@@ -612,13 +588,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
             alignItems: 'center',
             justifyContent: 'center',
             gap: 8,
-            background: 'rgba(42,171,238,0.12)',
-            color: '#2AABEE',
-            border: '1px solid rgba(42,171,238,0.35)',
-            borderRadius: 6,
+            background: mg.accentSoft,
+            color: mg.accent,
+            border: `1px solid ${mg.accentSoft}`,
+            borderRadius: mg.rMd,
             cursor: 'pointer',
             fontWeight: 600,
             fontSize: 13,
+            transition: `background ${mg.motionFast}`,
           }}
         >
           <span aria-hidden style={{ fontSize: 15 }}>👥</span> Новая группа
@@ -630,13 +607,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
               s={s}
               activeChatId={activeChatId}
               callCount={callStates[s.id]?.participantIds.length ?? 0}
+              hasMissed={allMissed.some((mc) => mc.conversationId === s.id && !mc.seen)}
               onClick={() => { openChat(s.id); setIsAddingMembers(false); setIsViewingMembers(false); }}
             />
           ))}
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: isMobile && !activeChatId && !isCreatingGroup ? 'none' : 'flex', flexDirection: 'column', background: '#1b2838' }}>
+      <div style={{ flex: 1, minWidth: 0, display: isMobile && !activeChatId && !isCreatingGroup ? 'none' : 'flex', flexDirection: 'column', background: mg.surface }}>
         {isCreatingGroup ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12, overflowY: 'auto' }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Новая группа</div>
@@ -644,38 +622,38 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
               placeholder={selectedMemberIds.length ? `${suggestedGroupName()} (необязательно)` : 'Название группы (необязательно)'}
-              style={{ background: '#23262e', border: '1px solid #3d4450', borderRadius: 4, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}
+              style={inputStyle}
             />
-            <div style={{ fontSize: 12, color: '#8f98a0' }}>Участники ({acceptedFriends.length ? selectedMemberIds.length : 0}):</div>
+            <div style={{ fontSize: 12, color: mg.textMuted }}>Участники ({acceptedFriends.length ? selectedMemberIds.length : 0}):</div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
               {acceptedFriends.length === 0 && (
-                <div style={{ color: '#8f98a0', fontSize: 12 }}>Нет друзей, кого можно добавить.</div>
+                <div style={{ color: mg.textMuted, fontSize: 12 }}>Нет друзей, кого можно добавить.</div>
               )}
               {acceptedFriends.map((f) => {
                 const isOnline = f.presence === 'online';
                 const isInGame = isOnline && !!f.activity;
                 return (
-                  <label key={f.accountId} className="cw-hover-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13, borderRadius: 4 }}>
+                  <label key={f.accountId} className="cw-hover-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: mg.text, fontSize: 13, borderRadius: 4 }}>
                     <input type="checkbox" checked={selectedMemberIds.includes(f.accountId)} onChange={() => toggleMember(f.accountId)} />
-                    <div style={{ padding: 2, borderRadius: 4, flexShrink: 0, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450') }}>
+                    <div style={{ padding: 2, borderRadius: 4, flexShrink: 0, background: isInGame ? mg.positive : (isOnline ? mg.accent : mg.surfaceRaised) }}>
                       <Avatar src={f.avatarIcon} name={f.displayName} size={28} shape="square" />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>{f.displayName}</span>
-                      <span style={{ fontSize: 11, color: isInGame ? '#a3d928' : '#8f98a0' }}>{activityText(f)}</span>
+                      <span style={{ fontWeight: 600, color: isInGame ? mg.positive : (isOnline ? mg.accent : mg.textMuted) }}>{f.displayName}</span>
+                      <span style={{ fontSize: 11, color: isInGame ? mg.positive : mg.textMuted }}>{activityText(f)}</span>
                     </div>
                   </label>
                 );
               })}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setIsCreatingGroup(false)} style={{ flex: 1, background: '#3d4450', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>
+              <button onClick={() => setIsCreatingGroup(false)} style={{ ...btn('neutral'), flex: 1, padding: '8px' }}>
                 Отмена
               </button>
               <button
                 onClick={submitGroup}
                 disabled={selectedMemberIds.length === 0}
-                style={{ flex: 1, background: '#1a9fff', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: selectedMemberIds.length === 0 ? 0.5 : 1 }}
+                style={{ ...btn('primary'), flex: 1, padding: '8px', opacity: selectedMemberIds.length === 0 ? 0.5 : 1 }}
               >
                 Создать
               </button>
@@ -691,24 +669,24 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
               return (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
                   {addable.length === 0 && (
-                    <div style={{ color: '#8f98a0', fontSize: 12 }}>Все друзья уже в группе.</div>
+                    <div style={{ color: mg.textMuted, fontSize: 12 }}>Все друзья уже в группе.</div>
                   )}
                   {addable.map((f) => {
                     const isOnline = f.presence === 'online';
                     const isInGame = isOnline && !!f.activity;
                     return (
-                      <label key={f.accountId} className="cw-hover-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: '#dcdedf', fontSize: 13, borderRadius: 4 }}>
+                      <label key={f.accountId} className="cw-hover-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', cursor: 'pointer', color: mg.text, fontSize: 13, borderRadius: 4 }}>
                         <input type="checkbox" checked={addMemberIds.includes(f.accountId)} onChange={() => toggleAddMember(f.accountId)} />
-                        <div style={{ width: 32, height: 32, background: isInGame ? '#5c7e10' : (isOnline ? '#54a5d4' : '#3d4450'), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
+                        <div style={{ width: 32, height: 32, background: isInGame ? mg.positive : (isOnline ? mg.accent : mg.surfaceRaised), borderRadius: 2, padding: 2, overflow: 'hidden' }}>
                           {f.avatarIcon ? (
                             <img src={f.avatarIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : (
-                            <div style={{ width: '100%', height: '100%', background: '#1a1f29' }} />
+                            <div style={{ width: '100%', height: '100%', background: mg.tileAlt }} />
                           )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{ fontWeight: 600, color: isInGame ? '#a3d928' : (isOnline ? '#54a5d4' : '#8f98a0') }}>{f.displayName}</span>
-                          <span style={{ fontSize: 11, color: isInGame ? '#a3d928' : '#8f98a0' }}>{activityText(f)}</span>
+                          <span style={{ fontWeight: 600, color: isInGame ? mg.positive : (isOnline ? mg.accent : mg.textMuted) }}>{f.displayName}</span>
+                          <span style={{ fontSize: 11, color: isInGame ? mg.positive : mg.textMuted }}>{activityText(f)}</span>
                         </div>
                       </label>
                     );
@@ -719,14 +697,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => { setIsAddingMembers(false); setAddMemberIds([]); }}
-                style={{ flex: 1, background: '#3d4450', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+                style={{ ...btn('neutral'), flex: 1, padding: '8px' }}
               >
                 Отмена
               </button>
               <button
                 onClick={submitAddMembers}
                 disabled={addMemberIds.length === 0}
-                style={{ flex: 1, background: '#1a9fff', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: addMemberIds.length === 0 ? 0.5 : 1 }}
+                style={{ ...btn('primary'), flex: 1, padding: '8px', opacity: addMemberIds.length === 0 ? 0.5 : 1 }}
               >
                 Добавить
               </button>
@@ -783,20 +761,20 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                   <div
                     key={p.accountId}
                     className="cw-hover-row"
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', color: '#dcdedf', fontSize: 13, borderRadius: 4, cursor: 'pointer' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', color: mg.text, fontSize: 13, borderRadius: 4, cursor: 'pointer' }}
                     onContextMenu={(e) => { e.preventDefault(); openPersonMenu(e.clientX, e.clientY); }}
                   >
                     <Avatar src={f?.avatarIcon} name={p.displayName} size={28} />
                     <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.displayName}
-                      {isOwner && <span style={{ color: '#8f98a0', fontSize: 11 }}> (владелец)</span>}
-                      {!isOwner && isAdmin && <span style={{ color: '#8f98a0', fontSize: 11 }}> (админ)</span>}
+                      {isOwner && <span style={{ color: mg.textMuted, fontSize: 11 }}> (владелец)</span>}
+                      {!isOwner && isAdmin && <span style={{ color: mg.textMuted, fontSize: 11 }}> (админ)</span>}
                     </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); openPersonMenu(e.clientX, e.clientY); }}
                       title="Действия"
                       aria-label={`Действия с ${p.displayName}`}
-                      style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                      style={{ background: 'none', border: 'none', color: mg.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
                     >
                       ⋯
                     </button>
@@ -806,7 +784,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
             </div>
             <button
               onClick={() => setIsViewingMembers(false)}
-              style={{ background: '#3d4450', color: '#fff', border: 'none', padding: '8px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+              style={{ ...btn('neutral'), padding: '8px' }}
             >
               Закрыть
             </button>
@@ -814,9 +792,9 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
         ) : activeSession ? (
           <>
             <div
-              onMouseDown={startDrag}
+              onPointerDown={dragHandle.onPointerDown}
               title="Перетащите шапку, чтобы переместить окно"
-              style={{ height: 60, flexShrink: 0, padding: '0 16px', borderBottom: '1px solid #3d4450', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#23262e', cursor: 'grab', userSelect: 'none' }}
+              style={{ height: 60, flexShrink: 0, padding: '0 16px', borderBottom: `1px solid ${mg.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: mg.surfaceRaised, ...dragHandle.style }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                 {isMobile && (
@@ -824,7 +802,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                     onClick={() => useChatStore.setState({ activeChatId: null })}
                     title="К списку чатов"
                     aria-label="Назад к списку чатов"
-                    style={{ background: 'none', border: 'none', color: '#dcdedf', cursor: 'pointer', fontSize: 24, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                    style={{ background: 'none', border: 'none', color: mg.text, cursor: 'pointer', fontSize: 24, lineHeight: 1, minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, margin: '0 -8px 0 -12px' }}
                   >
                     ‹
                   </button>
@@ -836,7 +814,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                 )}
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSession.name}</div>
-                  <div style={{ fontSize: '12px', color: '#8f98a0' }}>
+                  <div style={{ fontSize: '12px', color: mg.textMuted }}>
                     {activeSession.type === 'group' ? `${activeSession.participants.length} участников` : activityText(dmPeer)}
                   </div>
                 </div>
@@ -847,7 +825,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                   <>
                     <button
                       onClick={() => setIsViewingMembers(true)}
-                      style={{ background: '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                      style={{ background: mg.surfaceRaised, border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
                       title="Участники"
                       aria-label="Участники группы"
                     >
@@ -855,7 +833,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                     </button>
                     <button
                       onClick={() => setIsAddingMembers(true)}
-                      style={{ background: '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                      style={{ background: mg.surfaceRaised, border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
                       title="Добавить участника"
                       aria-label="Добавить участника"
                     >
@@ -863,7 +841,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                     </button>
                     <button
                       onClick={() => leaveGroup(activeSession.id)}
-                      style={{ background: '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                      style={{ background: mg.surfaceRaised, border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
                       title="Покинуть группу"
                       aria-label="Покинуть группу"
                     >
@@ -873,7 +851,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                 )}
                 <button
                   onClick={() => (callForThisChat ? hangup() : ring(activeSession.id, 'audio'))}
-                  style={{ background: callForThisChat?.type === 'audio' ? '#5c7e10' : '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                  style={{ background: callForThisChat?.type === 'audio' ? mg.positive : mg.surfaceRaised, border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
                   title={callForThisChat ? 'Завершить звонок' : 'Аудиозвонок'}
                   aria-label={callForThisChat ? 'Завершить звонок' : 'Аудиозвонок'}
                 >
@@ -881,7 +859,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                 </button>
                 <button
                   onClick={() => (callForThisChat ? hangup() : ring(activeSession.id, 'video'))}
-                  style={{ background: callForThisChat?.type === 'video' ? '#5c7e10' : '#3d4450', border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
+                  style={{ background: callForThisChat?.type === 'video' ? mg.positive : mg.surfaceRaised, border: 'none', width: 36, height: 36, borderRadius: '50%', color: '#fff', cursor: 'pointer' }}
                   title={callForThisChat ? 'Завершить звонок' : 'Видеозвонок'}
                   aria-label={callForThisChat ? 'Завершить звонок' : 'Видеозвонок'}
                 >
@@ -900,14 +878,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                 .slice(0, 3)
                 .join(', ');
               return (
-                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: '#20342a', borderBottom: '1px solid #3d4450' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3ba55d', flexShrink: 0 }} />
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#dcdedf', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: mg.positiveSoft, borderBottom: `1px solid ${mg.border}` }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: mg.positive, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: mg.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     Идёт звонок · {names}{cs.participantIds.length > 3 ? ` и ещё ${cs.participantIds.length - 3}` : ''}
                   </span>
                   <button
                     onClick={() => void acceptCall(activeSession.id)}
-                    style={{ background: '#3ba55d', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                    style={{ ...btn('primary'), background: mg.positive, padding: '5px 12px', flexShrink: 0 }}
                   >
                     Присоединиться
                   </button>
@@ -935,13 +913,49 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                     style={{ flex: 1, padding: '16px 16px 32px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}
                   >
                     {activeSession.loadingOlder && (
-                      <div style={{ textAlign: 'center', color: '#8f98a0', fontSize: 12 }}>Загрузка истории…</div>
+                      <div style={{ textAlign: 'center', color: mg.textMuted, fontSize: 12 }}>Загрузка истории…</div>
                     )}
-                    {activeSession.messages.map(m => {
+                    {/* Timeline = server messages + locally-witnessed missed calls (derived at render,
+                        so history replaces can't wipe them), merged chronologically. The server also
+                        writes a durable «📵 Пропущенный звонок…» system row for ordinary misses —
+                        local records within ±2 min of one are skipped to avoid a double row (busy-line
+                        misses have no server row and always render). */}
+                    {[
+                      ...activeSession.messages.map((m) => ({ at: m.createdAt ?? 0, msg: m as ChatMessage, missed: null as MissedCall | null })),
+                      ...allMissed
+                        .filter((mc) => mc.conversationId === activeSession.id)
+                        .filter(
+                          (mc) =>
+                            mc.busy ||
+                            !activeSession.messages.some(
+                              (m) =>
+                                m.senderId === 'system' &&
+                                m.text.startsWith('📵 Пропущенный звонок') &&
+                                Math.abs((m.createdAt ?? 0) - mc.at) < 120_000,
+                            ),
+                        )
+                        .map((mc) => ({ at: mc.at, msg: null as ChatMessage | null, missed: mc })),
+                    ]
+                      .sort((a, b) => a.at - b.at)
+                      .map((row) => {
+                      if (row.missed) {
+                        const mc = row.missed;
+                        const when = new Date(mc.at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+                        return (
+                          <div
+                            key={`missed-${mc.at}`}
+                            style={{ alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 6, color: mg.danger, fontSize: 12, margin: '4px 0' }}
+                          >
+                            <span aria-hidden>📵</span>
+                            Пропущенный звонок ({mc.type === 'video' ? 'видео' : 'аудио'}) · {when}
+                          </div>
+                        );
+                      }
+                      const m = row.msg!;
                       const isMe = m.senderId === me?.accountId;
                       const isSys = m.senderId === 'system';
                       if (isSys) {
-                        return <div key={m.id} style={{ textAlign: 'center', color: '#8f98a0', fontSize: '12px', margin: '8px 0' }}>{m.text}</div>;
+                        return <div key={m.id} style={{ textAlign: 'center', color: mg.textMuted, fontSize: '12px', margin: '8px 0' }}>{m.text}</div>;
                       }
 
                       const isDeleted = !!m.deletedAt;
@@ -976,9 +990,9 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                             ]);
                           }}
                         >
-                          {!isMe && activeSession.type === 'group' && <div style={{ fontSize: '11px', color: '#8f98a0', marginBottom: 2 }}>{m.senderName}</div>}
+                          {!isMe && activeSession.type === 'group' && <div style={{ fontSize: '11px', color: mg.textMuted, marginBottom: 2 }}>{m.senderName}</div>}
 
-                          <div style={{ background: isMe ? '#2AABEE' : '#3d4450', padding: '8px 12px', borderRadius: 8, color: '#fff', maxWidth: '85%', wordBreak: 'break-word' }}>
+                          <div style={{ background: isMe ? mg.bubbleOut : mg.bubbleIn, padding: '8px 12px', borderRadius: mg.rMd, color: '#fff', maxWidth: '85%', wordBreak: 'break-word' }}>
                             {replySource && !isDeleted && (
                               <div
                                 onClick={() => scrollToMessage(replySource.id)}
@@ -1013,7 +1027,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                                       />
                                     </a>
                                   ) : (
-                                    <a key={a.id} href={`${config.chatUrl}${a.url}`} target="_blank" rel="noreferrer" style={{ color: '#cfe8ff', fontSize: 13, display: 'block', marginBottom: m.text ? 6 : 0 }}>
+                                    <a key={a.id} href={`${config.chatUrl}${a.url}`} target="_blank" rel="noreferrer" style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, display: 'block', marginBottom: m.text ? 6 : 0 }}>
                                       📎 {a.name}
                                     </a>
                                   ),
@@ -1028,7 +1042,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: isMe ? 'flex-end' : 'flex-start', marginTop: 4, gap: 8 }}>
-                            <div style={{ fontSize: '11px', color: '#8f98a0' }}>
+                            <div style={{ fontSize: '11px', color: mg.textMuted }}>
                               {m.timestamp}
                               {m.editedAt && !isDeleted ? ' (изменено)' : ''}
                               {isMe && !isDeleted ? (m.status === 'read' ? ' ✓✓' : ' ✓') : ''}
@@ -1057,7 +1071,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                         : `${typingUsers.join(', ')} ${typingUsers.length === 1 ? 'печатает...' : 'печатают...'}`;
 
                       return (
-                        <div style={{ fontSize: '12px', color: '#8f98a0', fontStyle: 'italic', alignSelf: 'flex-start' }}>
+                        <div style={{ fontSize: '12px', color: mg.textMuted, fontStyle: 'italic', alignSelf: 'flex-start' }}>
                           {text}
                         </div>
                       );
@@ -1065,12 +1079,12 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                   </div>
 
                   {(replyTo || editing) && (
-                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: '#20242c', borderTop: '1px solid #3d4450' }}>
-                      <div style={{ flex: 1, minWidth: 0, borderLeft: '3px solid #2AABEE', paddingLeft: 8 }}>
-                        <div style={{ fontSize: 11, color: '#2AABEE', fontWeight: 700 }}>
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: mg.surfaceDeep, borderTop: `1px solid ${mg.border}` }}>
+                      <div style={{ flex: 1, minWidth: 0, borderLeft: `3px solid ${mg.accent}`, paddingLeft: 8 }}>
+                        <div style={{ fontSize: 11, color: mg.accent, fontWeight: 700 }}>
                           {editing ? 'Редактирование' : `Ответ: ${replyTo!.senderName}`}
                         </div>
-                        <div style={{ fontSize: 12, color: '#b8c2cc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 12, color: mg.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {(editing ?? replyTo)!.text || '📎 Вложение'}
                         </div>
                       </div>
@@ -1078,14 +1092,14 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                         onClick={() => { setEditing(null); setReplyTo(null); if (editing) setInputText(''); }}
                         title="Отмена (Esc)"
                         aria-label="Отменить"
-                        style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 16, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: mg.textMuted, cursor: 'pointer', fontSize: 16, flexShrink: 0 }}
                       >
                         ×
                       </button>
                     </div>
                   )}
 
-                  <div style={{ flexShrink: 0, padding: '12px 16px', background: '#171a21', borderTop: replyTo || editing ? 'none' : '1px solid #3d4450', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flexShrink: 0, padding: isMobile ? '12px 16px calc(12px + env(safe-area-inset-bottom, 0px))' : '12px 16px', background: mg.surfaceDeep, borderTop: replyTo || editing ? 'none' : `1px solid ${mg.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1101,7 +1115,7 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                       onClick={() => fileInputRef.current?.click()}
                       title="Прикрепить изображение"
                       aria-label="Прикрепить изображение"
-                      style={{ background: 'none', border: 'none', color: '#8f98a0', cursor: 'pointer', fontSize: 18, flexShrink: 0 }}
+                      style={{ background: 'none', border: 'none', color: mg.textMuted, cursor: 'pointer', fontSize: 18, flexShrink: 0 }}
                     >
                       📎
                     </button>
@@ -1114,13 +1128,13 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleSend();
                       }}
-                      style={{ flex: 1, minWidth: 0, background: '#23262e', border: '1px solid #3d4450', borderRadius: 20, padding: '10px 16px', color: '#fff', outline: 'none', fontSize: '13px' }}
+                      style={{ ...inputStyle, flex: 1, minWidth: 0, background: mg.surfaceRaised, borderRadius: mg.rPill, padding: '10px 16px' }}
                     />
                     <button
                       onClick={handleSend}
                       title={editing ? 'Сохранить' : 'Отправить'}
                       aria-label={editing ? 'Сохранить изменения' : 'Отправить сообщение'}
-                      style={{ background: '#2AABEE', color: '#fff', border: 'none', width: 40, height: 40, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                      style={{ background: mg.accent, color: '#fff', border: 'none', width: 40, height: 40, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: `background ${mg.motionFast}` }}
                     >
                       {editing ? '✓' : '➤'}
                     </button>
@@ -1128,10 +1142,39 @@ export const ChatWidget = ({ hideLauncher = false }: { hideLauncher?: boolean } 
             </div>
           </>
         ) : (
-          <DroppableNewChatArea />
+          <DroppableNewChatArea dragProps={isMobile ? undefined : dragHandle} />
         )}
       </div>
       </div>
+
+      {/* Visible, touch-capable resize grip (replaces the invisible native CSS resize corner). */}
+      {!isMobile && (
+        <div
+          onPointerDown={resizeHandle.onPointerDown}
+          title="Потяните, чтобы изменить размер"
+          aria-hidden
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: 18,
+            height: 18,
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'flex-end',
+            padding: 3,
+            color: resizing ? mg.accent : mg.textMuted,
+            opacity: 0.9,
+            zIndex: 2,
+            ...resizeHandle.style,
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+            <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <path d="M9 5v4H5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
+      )}
 
       {viewingProfile && <UserProfileModal target={viewingProfile} onClose={() => setViewingProfile(null)} />}
     </div>

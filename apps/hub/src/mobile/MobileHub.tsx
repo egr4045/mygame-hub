@@ -6,7 +6,17 @@
  * registries — this file only lays them out for a phone.
  */
 import { useState } from 'react';
-import { useSocialStore, useMenuStore, useChatStore, ChatWidget, CallView, ContextMenu, ToastContainer, SocialDndProvider } from '@mygame/sdk';
+import {
+  useSocialStore,
+  useMenuStore,
+  useChatStore,
+  useMissedCallsStore,
+  ChatWidget,
+  CallView,
+  ContextMenu,
+  ToastContainer,
+  SocialDndProvider,
+} from '@mygame/sdk';
 import { routeToInvite } from '../platform/inviteRouting.js';
 import { MobileGamesTab } from './MobileGamesTab.js';
 import { MobileFriendsTab } from './MobileFriendsTab.js';
@@ -30,8 +40,12 @@ export const MobileHub = (): JSX.Element => {
   const [tab, setTab] = useState<MobileTab>('games');
 
   const incomingRequests = friends.filter((f) => f.status === 'incoming');
-  const notificationCount = incomingRequests.length + invites.length;
-  const totalUnread = useChatStore((s) => s.sessions.reduce((n, x) => n + (x.unreadCount ?? 0), 0));
+  const allMissed = useMissedCallsStore((s) => s.missed);
+  const missedCalls = allMissed.filter((m) => !m.seen);
+  const notificationCount = incomingRequests.length + invites.length + missedCalls.length;
+  const unreadMessages = useChatStore((s) => s.sessions.reduce((n, x) => n + (x.unreadCount ?? 0), 0));
+  // Server call-log rows already count as unread; only busy-line misses need adding on top.
+  const totalUnread = unreadMessages + missedCalls.filter((m) => m.busy).length;
 
   const openBell = (e: React.MouseEvent): void => {
     const items =
@@ -45,6 +59,11 @@ export const MobileHub = (): JSX.Element => {
             ...invites.map((inv) => ({
               label: `🎮 ${inv.inviterName}: ${inv.gameName} — присоединиться`,
               action: () => void routeToInvite(inv),
+            })),
+            ...missedCalls.map((mc) => ({
+              label: `📵 Пропущенный звонок от ${mc.fromName} — открыть чат`,
+              action: () => useChatStore.getState().openChat(mc.conversationId),
+              danger: true,
             })),
           ];
     openMenu(e.clientX, e.clientY + 16, [

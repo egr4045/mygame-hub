@@ -1,19 +1,22 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Values follow @mygame/ui-kit tokens (packages/ui-kit/src/tokens.ts) — Inter Variable is
+   self-hosted via @fontsource-variable/inter, imported in src/main.tsx. */
 
 :root {
-  --bg-dark: #0b0e14;
-  --bg-card: rgba(23, 26, 33, 0.6);
-  --bg-card-hover: rgba(30, 34, 43, 0.8);
-  --bg-input: rgba(15, 18, 23, 0.8);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-active: rgba(42, 171, 238, 0.5);
-  --text-main: #dcdedf;
-  --text-muted: #8f98a0;
-  --accent: #1a9fff;
-  --accent-hover: #2abee6;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --success: #10b981;
+  --bg-dark: #0a0d14; /* ui-kit panelDeep */
+  --bg-card: rgba(15, 18, 26, 0.6); /* ui-kit panelSolid family, glass alpha */
+  --bg-card-hover: rgba(30, 37, 52, 0.8); /* ui-kit panelHover family */
+  --bg-input: rgba(10, 13, 20, 0.8); /* ui-kit panelDeep (input wells) */
+  --border-color: rgba(140, 165, 210, 0.16); /* ui-kit panelBorder */
+  --border-active: rgba(76, 154, 255, 0.5); /* accent @ 50% */
+  --text-main: #eef2f9; /* ui-kit textPrimary */
+  --text-muted: #98a4b8; /* ui-kit textMuted */
+  --accent: #4c9aff; /* ui-kit accent */
+  --accent-hover: #2f7fe0; /* ui-kit accentMuted */
+  --danger: #ef5350; /* ui-kit negative */
+  --danger-hover: #e53935;
+  --success: #3fce7a; /* ui-kit positive */
+  --warning: #f0a93c; /* ui-kit warning */
+  --overlay: rgba(4, 6, 10, 0.72); /* ui-kit overlay (modal scrims) */
   --glass-blur: blur(12px);
 }
 
@@ -25,18 +28,18 @@ body {
   margin: 0;
   padding: 0;
   background-color: var(--bg-dark);
-  background-image: 
-    radial-gradient(circle at 15% 50%, rgba(26, 159, 255, 0.05), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.05), transparent 25%);
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(76, 154, 255, 0.05), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(124, 108, 240, 0.05), transparent 25%);
   color: var(--text-main);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   min-height: 100vh;
 }
 
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-main);
 }
 
 .glass-card {
@@ -44,9 +47,9 @@ h1, h2, h3, h4, h5, h6 {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 24px;
-  box-shadow: 0 4px 24px -8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); /* ui-kit shadow.md */
   transition: all 0.2s ease-in-out;
 }
 
@@ -55,7 +58,7 @@ h1, h2, h3, h4, h5, h6 {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 10px 14px;
-  color: #fff;
+  color: var(--text-main);
   font-family: inherit;
   font-size: 14px;
   outline: none;
@@ -64,7 +67,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .input-field:focus {
   border-color: var(--border-active);
-  box-shadow: 0 0 0 2px rgba(26, 159, 255, 0.15);
+  box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.15);
 }
 
 .btn {
@@ -98,13 +101,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn-danger {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(239, 83, 80, 0.1);
   color: var(--danger);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 83, 80, 0.2);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 83, 80, 0.2);
 }
 
 .btn-danger.solid {
@@ -122,8 +125,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(140, 165, 210, 0.08);
+  border-color: rgba(140, 165, 210, 0.3);
 }
 
 table {
@@ -142,7 +145,7 @@ th {
 
 td {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(140, 165, 210, 0.07);
 }
 
 tr {
@@ -150,7 +153,7 @@ tr {
 }
 
 tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(140, 165, 210, 0.05);
 }
 
 /* Animations */

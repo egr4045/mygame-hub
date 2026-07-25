@@ -14,7 +14,16 @@ import { useToastStore } from './toastStore.js';
 import { useNotificationPrefsStore } from './notificationPrefsStore.js';
 import { useCallStore } from './callStore.js';
 import { useSocialStore } from './socialStore.js';
-import { playSound } from '../sound.js';
+import { useMissedCallsStore } from './missedCallsStore.js';
+import { playSound, startRingtone, startRingback, stopAllCallSounds } from '../sound.js';
+import {
+  notifyMessage,
+  notifyCall,
+  notifyMissedCall,
+  closeCallNotification,
+  closeAllCallNotifications,
+  maybeOfferSystemNotifications,
+} from '../notifications.js';
 
 export type ChatConnStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -275,7 +284,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const idx = s.sessions.findIndex((sess) => sess.id === p.message.conversationId);
         if (idx === -1) {
           // Rare race: the message arrived before the thread it belongs to. The threads push that
-          // always follows corrects name/type/otherReadAt.
+          // always follows corrects name/type/otherReadAt. System messages (call log) never seed a
+          // session — they'd mislabel the DM «Система»; the threads push right behind brings it.
+          if (p.message.senderId === 'system') return s;
           const fresh: ChatSession = {
             id: p.message.conversationId,
             type: 'dm',
@@ -303,27 +314,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isOpen && activeChatId === p.message.conversationId && (typeof document === 'undefined' || document.hasFocus());
       if (looking && p.message.senderId !== meId) {
         socket?.emit(chat.C2S.markRead, { conversationId: p.message.conversationId });
+        // Symmetry for the call-log: a system row landing in the open, focused chat is seen — clear
+        // the local missed-call marker too (openChat handles the not-yet-open case).
+        if (p.message.senderId === 'system') useMissedCallsStore.getState().markSeen(p.message.conversationId);
       }
       // Steam-style popup for a message I'm not actively looking at — click it to open that chat.
-      if (
-        p.message.senderId !== meId &&
-        !looking &&
-        useNotificationPrefsStore.getState().messageToasts
-      ) {
+      // System messages (the server call-log) stay quiet: the callEnded path already toasts missed
+      // calls with better wording, and a «Система» toast on top would be noise.
+      if (p.message.senderId !== meId && p.message.senderId !== 'system' && !looking) {
         const conv = get().sessions.find((sess) => sess.id === p.message.conversationId);
         const senderAvatar = useSocialStore
           .getState()
           .friends.find((f) => f.accountId === p.message.senderId)?.avatarIcon;
         const title =
           conv?.type === 'group' ? `${p.message.senderName} · ${conv.name}` : p.message.senderName;
-        useToastStore.getState().addToast({
-          type: 'message',
+        const body = p.message.text?.trim() || '📎 Вложение';
+        // OS-level banner when the tab is hidden/unfocused (self-gates on the systemNotifications
+        // pref + permission); the in-page toast covers the focused-but-different-chat case.
+        notifyMessage({
+          conversationId: p.message.conversationId,
           title,
-          content: p.message.text?.trim() || '📎 Вложение',
-          ...(senderAvatar ? { avatar: senderAvatar } : {}),
-          onClick: () => get().openChat(p.message.conversationId),
+          body,
+          avatar: senderAvatar,
+          onOpen: () => get().openChat(p.message.conversationId),
         });
-        playSound('message');
+        if (useNotificationPrefsStore.getState().messageToasts) {
+          useToastStore.getState().addToast({
+            type: 'message',
+            title,
+            content: body,
+            ...(senderAvatar ? { avatar: senderAvatar } : {}),
+            onClick: () => get().openChat(p.message.conversationId),
+          });
+          playSound('message');
+        }
       }
     });
 
@@ -414,11 +438,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (current.status === 'connecting' || current.status === 'connected')
       ) {
         socket?.emit(chat.C2S.callDecline, { conversationId: p.conversationId });
+        useMissedCallsStore.getState().addMissed({
+          conversationId: p.conversationId,
+          fromName: p.fromName ?? 'Пользователь',
+          type: p.callType === 'screen' ? 'video' : p.callType,
+          busy: true, // auto-decline reads as a decline server-side — no call-log row, badge it here
+        });
         useToastStore.getState().addToast({
           type: 'system',
           title: 'Пропущенный звонок',
           content: `${p.fromName ?? 'Пользователь'} звонил(а), пока вы были в другом звонке`,
           icon: '📞',
+          onClick: () => get().openChat(p.conversationId),
         });
         return;
       }
@@ -445,7 +476,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           icon: '📞',
         });
       }
-      playSound('call');
+      // Loop the ringtone for the whole ring window (stopped by every lifecycle exit) and put a
+      // sticky OS banner up for a hidden/unfocused tab.
+      startRingtone();
+      maybeOfferSystemNotifications();
+      notifyCall({
+        conversationId: p.conversationId,
+        fromName: p.fromName ?? 'Пользователь',
+        type: p.callType === 'screen' ? 'video' : p.callType,
+        onOpen: () => get().openChat(p.conversationId),
+      });
     });
 
     // Someone joined the call. If that's *me* (the callee's own acceptCall already handles its own
@@ -469,16 +509,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const call = get().activeCall;
       if (call?.conversationId !== p.conversationId) return;
       clearRingTimer();
+      stopAllCallSounds();
+      closeCallNotification(p.conversationId);
       useCallStore.getState().leave();
       set({ activeCall: null });
-      // The server's ring sweep gave up: tell the caller nobody answered; a still-ringing callee
-      // just has the banner cleared silently (there's no one to blame them for).
+      // The server's ring sweep gave up: tell the caller nobody answered.
       if (p.reason === 'timeout' && call.status === 'ringing-out') {
         useToastStore.getState().addToast({
           type: 'system',
           title: 'Нет ответа',
           content: 'Никто не ответил на звонок',
           icon: '📞',
+        });
+      }
+      // A ring that ended while I was still `ringing-in` is a MISSED call (timeout or the caller
+      // cancelled — Telegram semantics; my own decline nulls activeCall first, so it never gets
+      // here). Leave a durable record instead of clearing the banner silently.
+      if (call.status === 'ringing-in') {
+        const fromName = call.fromName ?? 'Пользователь';
+        useMissedCallsStore.getState().addMissed({
+          conversationId: p.conversationId,
+          fromName,
+          type: call.type === 'screen' ? 'video' : call.type,
+        });
+        notifyMissedCall({
+          conversationId: p.conversationId,
+          fromName,
+          onOpen: () => get().openChat(p.conversationId),
+        });
+        useToastStore.getState().addToast({
+          type: 'system',
+          title: 'Пропущенный звонок',
+          content: `${fromName} звонил(а)`,
+          icon: '📞',
+          onClick: () => get().openChat(p.conversationId),
         });
       }
     });
@@ -497,6 +561,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     meId = null;
     meName = null;
     clearRingTimer();
+    stopAllCallSounds();
+    closeAllCallNotifications();
     useCallStore.getState().leave();
     set({ status: 'idle', sessions: [], activeCall: null, callStates: {} });
   },
@@ -505,6 +571,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   openChat: (chatId) => {
     set({ isOpen: true, activeChatId: chatId });
+    useMissedCallsStore.getState().markSeen(chatId);
     socket?.emit(chat.C2S.getHistory, { conversationId: chatId, limit: 100 }, (p: chat.HistoryAck) =>
       set((s) => ({
         sessions: s.sessions.map((sess) => {
@@ -656,9 +723,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   ring: (chatId, type) => {
     if (!socket?.connected) return;
     set({ activeCall: { conversationId: chatId, type, status: 'ringing-out' } });
+    startRingback();
     socket.emit(chat.C2S.callRing, { conversationId: chatId, callType: type }, (ack: chat.CallAck) => {
       if (!ack?.ok) {
         clearRingTimer();
+        stopAllCallSounds();
         set({ activeCall: null, error: ack?.error ?? 'call failed' });
       }
     });
@@ -681,6 +750,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const call = get().activeCall;
     const type = call?.conversationId === chatId ? call.type : 'audio';
     clearRingTimer();
+    stopAllCallSounds();
+    closeCallNotification(chatId);
     set({
       activeCall: {
         conversationId: chatId,
@@ -716,13 +787,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   declineCall: (chatId) => {
     socket?.emit(chat.C2S.callDecline, { conversationId: chatId });
     clearRingTimer();
+    stopAllCallSounds();
+    closeCallNotification(chatId);
     set({ activeCall: null });
   },
 
   hangup: () => {
     const call = get().activeCall;
-    if (call) socket?.emit(chat.C2S.callHangup, { conversationId: call.conversationId });
+    if (call) {
+      socket?.emit(chat.C2S.callHangup, { conversationId: call.conversationId });
+      closeCallNotification(call.conversationId);
+    }
     clearRingTimer();
+    stopAllCallSounds();
     useCallStore.getState().leave();
     set({ activeCall: null });
   },

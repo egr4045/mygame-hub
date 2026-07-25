@@ -142,8 +142,8 @@ const AccountDetail = ({ id, onBack }: { id: string; onBack: () => void }): JSX.
                   <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 12 }} onClick={() => { setNewName(detail.displayName); setEditingName(true); }}>
                     ✎
                   </button>
-                  {detail.isAdmin && <span style={{ color: 'var(--accent)', fontSize: 13, background: 'rgba(26,159,255,0.1)', padding: '2px 8px', borderRadius: 4 }}>админ</span>}
-                  {detail.isBanned && <span style={{ color: 'var(--danger)', fontSize: 13, background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 4 }}>ЗАБАНЕН</span>}
+                  {detail.isAdmin && <span style={{ color: 'var(--accent)', fontSize: 13, background: 'rgba(76, 154, 255, 0.1)', padding: '2px 8px', borderRadius: 4 }}>админ</span>}
+                  {detail.isBanned && <span style={{ color: 'var(--danger)', fontSize: 13, background: 'rgba(239, 83, 80, 0.1)', padding: '2px 8px', borderRadius: 4 }}>ЗАБАНЕН</span>}
                 </div>
               )}
             </div>
