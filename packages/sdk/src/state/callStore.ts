@@ -211,6 +211,7 @@ const savedDevice = (key: string): string | undefined => {
 const createCallRoom = (): Room => {
   const camId = savedDevice('mygame:call:cam');
   const micId = savedDevice('mygame:call:mic');
+  const speakerId = savedDevice('mygame:call:speaker');
   return new Room({
     adaptiveStream: true,
     dynacast: true,
@@ -221,6 +222,8 @@ const createCallRoom = (): Room => {
       autoGainControl: true,
       ...(micId ? { deviceId: micId } : {}),
     },
+    // Default speaker (sinkId) — browsers without setSinkId (iOS Safari) just ignore it.
+    ...(speakerId ? { audioOutput: { deviceId: speakerId } } : {}),
     publishDefaults: {
       simulcast: true,
       videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],

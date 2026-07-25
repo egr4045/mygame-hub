@@ -1,10 +1,10 @@
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { palette } from './callStyles.js';
 
-/** localStorage keys for the last-picked capture devices — read by `createCallRoom` in chatStore so
- *  the next call opens with the same mic/cam. Speaker (sinkId) is applied live and not a capture
- *  default, so it isn't persisted here. */
-export const DEVICE_KEYS = { mic: 'mygame:call:mic', cam: 'mygame:call:cam' } as const;
+/** localStorage keys for the default devices — read by `createCallRoom` (callStore) so every call
+ *  opens with them. Written both here (in-call switch) and by the PermissionsModal device pickers.
+ *  Speaker persists too: LiveKit applies it as the room's `audioOutput` sinkId on the next call. */
+export const DEVICE_KEYS = { mic: 'mygame:call:mic', cam: 'mygame:call:cam', speaker: 'mygame:call:speaker' } as const;
 
 const persist = (key: string, id: string): void => {
   try {
@@ -93,7 +93,7 @@ export const DeviceMenu = ({ onClose }: { onClose: () => void }): JSX.Element =>
     >
       <Section title="Микрофон" kind="audioinput" persistKey={DEVICE_KEYS.mic} />
       <Section title="Камера" kind="videoinput" persistKey={DEVICE_KEYS.cam} />
-      <Section title="Динамик" kind="audiooutput" />
+      <Section title="Динамик" kind="audiooutput" persistKey={DEVICE_KEYS.speaker} />
     </div>
   </>
 );

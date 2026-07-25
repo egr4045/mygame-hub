@@ -20,6 +20,7 @@ import {
   useChatStore,
   useToastStore,
   loadSession,
+  usePermissionsModal,
 } from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
 import { useAchievementCatalogs } from '../platform/achievementsCatalog.js';
@@ -262,6 +263,16 @@ export const MobileProfileTab = (): JSX.Element => {
       <div>
         <div className="mhub-section-title">Настройки</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Permissions & devices */}
+          <div className="hub-card" style={{ padding: 0 }}>
+            <button
+              onClick={() => usePermissionsModal.getState().show()}
+              style={{ width: '100%', minHeight: 52, padding: '0 16px', textAlign: 'left', fontSize: 15, color: 'var(--c-text-primary)' }}
+            >
+              🎛️ Права и устройства
+            </button>
+          </div>
+
           {/* Rename */}
           <div className="hub-card" style={{ padding: showRename ? 16 : 0 }}>
             {!showRename ? (

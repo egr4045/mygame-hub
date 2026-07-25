@@ -9,6 +9,7 @@ import {
   notificationsSupported,
   notificationPermission,
   requestNotificationPermission,
+  usePermissionsModal,
 } from '@mygame/sdk';
 import { usePlatformStore } from '../platform/platformStore.js';
 
@@ -187,7 +188,14 @@ const NotificationsTab = (): JSX.Element => {
           </button>
         </div>
       </div>
-      <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 16 }}>
+      <button
+        className="hub-btn"
+        style={{ width: '100%', marginTop: 16, padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        onClick={() => usePermissionsModal.getState().show()}
+      >
+        🎛️ Права и устройства…
+      </button>
+      <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 12 }}>
         Хранится только в этом браузере. Звуки — плейсхолдеры (админ может заменить их своими). Заявки в
         друзья по-прежнему видны в 🔔.
       </p>

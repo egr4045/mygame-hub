@@ -25,6 +25,7 @@ export { CallView } from './components/call/CallView.js';
 export { FriendsWidget } from './components/FriendsWidget.js';
 export { FriendsSidebar } from './components/FriendsSidebar.js';
 export { UserProfileModal, type ProfileTarget } from './components/UserProfileModal.js';
+export { PermissionsModal, usePermissionsModal } from './components/PermissionsModal.js';
 export { MygameOverlay } from './components/MygameOverlay.js';
 export { SocialDndProvider } from './components/SocialDndProvider.js';
 export * from './overlay/mount.js';

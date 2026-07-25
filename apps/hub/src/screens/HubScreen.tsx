@@ -17,11 +17,12 @@ import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
 import { useChatStore, useMissedCallsStore } from '@mygame/sdk';
-import { createTelegramLinkCode, getTelegramStatus, createSuggestion } from '@mygame/sdk';
+import { createSuggestion } from '@mygame/sdk';
+import { PermissionsModal, usePermissionsModal } from '@mygame/sdk';
 import { useIsMobile } from '../platform/useIsMobile.js';
 import { MobileHub } from '../mobile/MobileHub.js';
 
-const TG_DISMISS_KEY = 'mygame:tg-link-dismissed';
+const PERMS_PROMPT_KEY = 'mygame.permsPromptSeen';
 
 /** execCommand-based copy for browsers/contexts where navigator.clipboard is unavailable or denied. */
 const copyViaTextarea = (text: string): boolean => {
@@ -49,7 +50,25 @@ const copyViaTextarea = (text: string): boolean => {
  */
 export const HubScreen = (): JSX.Element => {
   const isMobile = useIsMobile();
-  return isMobile ? <MobileHub /> : <DesktopHubScreen />;
+
+  // First entry: offer the permissions/devices window once (closable, reopenable from settings).
+  // Replaces the old auto-shown Telegram-link modal — TG linking still lives in the profile.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PERMS_PROMPT_KEY) === '1') return;
+      localStorage.setItem(PERMS_PROMPT_KEY, '1');
+    } catch {
+      return; // no storage — don't risk nagging on every load
+    }
+    usePermissionsModal.getState().show();
+  }, []);
+
+  return (
+    <>
+      {isMobile ? <MobileHub /> : <DesktopHubScreen />}
+      <PermissionsModal />
+    </>
+  );
 };
 
 const DesktopHubScreen = (): JSX.Element => {
@@ -67,19 +86,12 @@ const DesktopHubScreen = (): JSX.Element => {
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
 
-  const [showLinkModal, setShowLinkModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'account' | null>(null);
 
   useEffect(() => {
     // Always clear activity when we are in the Hub
     useSocialStore.getState().setActivity(null);
-
-    // Offer Telegram linking only when the account isn't linked yet and the user hasn't dismissed the offer.
-    if (localStorage.getItem(TG_DISMISS_KEY) === '1') return;
-    void getTelegramStatus().then((s) => {
-      if (s && !s.linked) setShowLinkModal(true);
-    });
   }, []);
 
   // Local state for library navigation (doesn't start the game yet)
@@ -88,22 +100,6 @@ const DesktopHubScreen = (): JSX.Element => {
   );
   const [gameDetailsTab, setGameDetailsTab] = useState<GameDetailsTab>('changelog');
   const [activeTab, setActiveTab] = useState<'library' | 'contact' | 'profile'>('library');
-
-  const startTelegramLink = async (): Promise<void> => {
-    const r = await createTelegramLinkCode();
-    setShowLinkModal(false);
-    if (r && r.url) {
-      window.open(r.url, '_blank', 'noopener');
-    } else {
-      // Couldn't get a deep link — the profile tab carries the full linking flow as a fallback.
-      setActiveTab('profile');
-    }
-  };
-
-  const dismissLinkModal = (): void => {
-    localStorage.setItem(TG_DISMISS_KEY, '1');
-    setShowLinkModal(false);
-  };
 
   const copyMyId = (myId: string): void => {
     const onCopied = (): void => addToast({ type: 'system', title: 'ID скопирован', content: myId, icon: '🔗' });
@@ -269,31 +265,6 @@ const DesktopHubScreen = (): JSX.Element => {
 
       {activeTab === 'profile' && (
         <ProfileView />
-      )}
-
-      {showLinkModal && (
-        <div className="hub-modal-scrim" style={{ zIndex: 1000 }}>
-          <div className="mygame-fade-in" style={{ width: 480, background: 'var(--c-panel-solid)', border: '1px solid var(--c-panel-border)', borderRadius: 8, padding: 32, textAlign: 'center' }}>
-            <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px 0', fontSize: 24 }}>Защитите свой аккаунт</h2>
-            <p style={{ color: 'var(--c-text-muted)', marginBottom: 32, fontSize: 14, lineHeight: 1.5 }}>
-              Привяжите Telegram или ВКонтакте прямо сейчас, чтобы не потерять прогресс. Это позволит вам мгновенно входить с любого устройства.
-              <br/><br/>
-              Вы всегда сможете сделать это позже в настройках Профиля.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <button onClick={() => void startTelegramLink()} className="hub-btn hub-btn-primary" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span>✈</span> Привязать Telegram
-              </button>
-              <button disabled title="Скоро" className="hub-btn" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span>K</span> Привязать ВКонтакте (скоро)
-              </button>
-              <button onClick={dismissLinkModal} style={{ background: 'transparent', color: 'var(--c-text-muted)', border: 'none', padding: '14px', cursor: 'pointer', fontWeight: 600, marginTop: 8, transition: 'color var(--motion-fast)' }}>
-                Позже
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {showLogoutConfirm && (
