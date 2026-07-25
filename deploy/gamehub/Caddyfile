@@ -25,8 +25,11 @@
 		reverse_proxy chat:8084
 	}
 
-	# Mint a LiveKit call token (plain HTTP, same chat container — see services/chat/src/server.ts).
-	handle /chat/call/token {
+	# LiveKit call endpoints (plain HTTP, same chat container — see services/chat/src/server.ts):
+	# /chat/call/token (conversation), /room-token (game room), /bind, /unbind. Must be a prefix
+	# match: an exact `handle /chat/call/token` left room-token and bind falling through to the SPA
+	# static handler below, which answered POST with 405 — game-room voice could never connect.
+	handle /chat/call/* {
 		reverse_proxy chat:8084
 	}
 
