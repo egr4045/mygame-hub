@@ -408,6 +408,76 @@ describe('chat server — call signaling', () => {
   });
 });
 
+describe('chat server — missed-call log', () => {
+  it('a ring that times out unanswered leaves a system call-log message that counts as unread', async () => {
+    const port = await startServer({ ringTimeoutMs: 60 });
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+
+    const sysMsg1 = new Promise<chat.MessageEvent>((res) => c1.once(chat.S2C.message, res));
+    const sysMsg2 = new Promise<chat.MessageEvent>((res) => c2.once(chat.S2C.message, res));
+    const c2Unread = waitThreads(
+      c2,
+      (t) => (t.find((x) => x.conversationId === conversationId)?.unreadCount ?? 0) > 0,
+    );
+    await ring(c1, conversationId!, 'audio');
+    expect((await sysMsg1).message).toMatchObject({ senderId: 'system', conversationId });
+    const seen = (await sysMsg2).message;
+    expect(seen.text).toContain('Пропущенный звонок');
+    expect(seen.text).toContain('Mara'); // names the caller
+    await c2Unread; // the callee's unread count includes the call-log row
+  });
+
+  it('a caller hanging up before anyone answers leaves the call-log message too', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+
+    await ring(c1, conversationId!, 'video');
+    const sysMsg2 = new Promise<chat.MessageEvent>((res) => c2.once(chat.S2C.message, res));
+    c1.emit(chat.C2S.callHangup, { conversationId });
+    const seen = (await sysMsg2).message;
+    expect(seen.senderId).toBe('system');
+    expect(seen.text).toContain('Пропущенный звонок (видео)');
+  });
+
+  it('declined and answered calls leave no call-log message', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+
+    let sysCount = 0;
+    for (const c of [c1, c2]) {
+      c.on(chat.S2C.message, (p: chat.MessageEvent) => {
+        if (p.message.senderId === 'system') sysCount++;
+      });
+    }
+
+    // Declined: c2 declines (leaves ringingIds), then the 1:1 caller gives up — no missed row.
+    await ring(c1, conversationId!, 'audio');
+    const declined = new Promise<chat.CallParticipantEvent>((res) => c1.once(chat.S2C.callDeclined, res));
+    c2.emit(chat.C2S.callDecline, { conversationId });
+    await declined;
+    const ended1 = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
+    c1.emit(chat.C2S.callHangup, { conversationId });
+    await ended1;
+
+    // Answered: a real call that ends normally — no missed row either.
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+    const ended2 = new Promise<chat.CallEndedEvent>((res) => c1.once(chat.S2C.callEnded, res));
+    c2.emit(chat.C2S.callHangup, { conversationId });
+    c1.emit(chat.C2S.callHangup, { conversationId });
+    await ended2;
+
+    await new Promise((r) => setTimeout(r, 80));
+    expect(sysCount).toBe(0);
+  });
+});
+
 describe('chat server — group ownership on leave', () => {
   it('transfers ownership to an admin when the owner leaves', async () => {
     const port = await startServer();

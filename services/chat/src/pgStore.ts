@@ -160,7 +160,10 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
           id: r.id as string,
           conversationId: r.conversation_id as string,
           senderId: r.sender_id as string,
-          senderName: mem.getAccount(r.sender_id as string)?.displayName ?? (r.sender_id as string).slice(0, 8),
+          senderName:
+            r.sender_id === 'system'
+              ? 'Система'
+              : (mem.getAccount(r.sender_id as string)?.displayName ?? (r.sender_id as string).slice(0, 8)),
           text: r.text as string,
           createdAt: Number(r.created_at),
           replyToId: r.reply_to_id as string | null,
@@ -256,6 +259,12 @@ export const createPgChatStore = (pool: Pool, logger: Logger): PgChatStore => {
     send(conversationId, senderId, text, opts) {
       const m = mem.send(conversationId, senderId, text, opts);
       if (m) persistMessage(m);
+      return m;
+    },
+
+    sendSystem(conversationId, text) {
+      const m = mem.sendSystem(conversationId, text);
+      if (m) persistMessage(m); // sender_id is TEXT (no FK) — the literal 'system' persists as-is
       return m;
     },
 

@@ -114,6 +114,10 @@ export interface ChatStore {
     text: string,
     opts?: { replyToId?: string | undefined; mentions?: string[] | undefined; attachments?: ChatMessage['attachments'] | undefined },
   ): ChatMessage | null;
+  /** Append a system message (senderId `'system'`) — the call-log etc. Bypasses the participant
+   *  check ('system' is nobody); counts as unread for every member, exactly like a normal message
+   *  from someone else. Null for an unknown conversation. */
+  sendSystem(conversationId: string, text: string): ChatMessage | null;
   /** Sender-only, not on tombstones. Returns the updated message. */
   editMessage(conversationId: string, messageId: string, editorId: string, text: string): ChatMessage | MessageChangeError;
   /** Own messages always; others' only with `canModerate` (group owner/admin — the server decides).
@@ -304,6 +308,24 @@ export const createMemoryChatStore = (opts: ChatStoreOptions = {}): ChatStore =>
         replyToId: replyTarget?.id ?? null,
         ...(opts?.mentions !== undefined ? { mentions: opts.mentions } : {}),
         ...(opts?.attachments !== undefined ? { attachments: opts.attachments } : {}),
+      };
+      const arr = messages.get(conversationId) ?? [];
+      arr.push(msg);
+      messages.set(conversationId, arr);
+      return msg;
+    },
+
+    sendSystem(conversationId, text) {
+      const conv = conversations.get(conversationId);
+      if (!conv) return null;
+      const msg: ChatMessage = {
+        id: randomUUID(),
+        conversationId,
+        senderId: 'system',
+        senderName: 'Система',
+        text,
+        createdAt: now(),
+        replyToId: null,
       };
       const arr = messages.get(conversationId) ?? [];
       arr.push(msg);

@@ -472,6 +472,24 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callState, payload);
   };
 
+  /** Telegram-style call log: a ring that DIED with people still ringing (timeout, or the caller
+   *  cancelled before anyone answered) leaves a durable system message in the conversation — so a
+   *  member who was offline for the whole ring still learns about the missed call on next connect
+   *  (it flows through the normal message push + unread counts). Declines remove the decliner from
+   *  `ringingIds` first, so a declined call never logs as missed. A call where somebody DID answer
+   *  is a real call, not a miss — those never reach this. */
+  const logMissedCall = (conversationId: string, call: ActiveCall, missedBy: string[]): void => {
+    if (missedBy.length === 0) return;
+    const callerName =
+      deps.store.getAccount(call.initiatorId)?.displayName ?? call.initiatorId.slice(0, 8);
+    const kind = call.type === 'audio' ? 'аудио' : 'видео';
+    const msg = deps.store.sendSystem(conversationId, `📵 Пропущенный звонок (${kind}) от ${callerName}`);
+    if (!msg) return;
+    const participants = deps.store.participantsOf(conversationId);
+    emitToEveryone(participants, chat.S2C.message, { message: msg } satisfies chat.MessageEvent);
+    for (const p of participants) emitThreads(p);
+  };
+
   /** The ring sweep: nobody answered within `ringTimeoutMs`. A dead 1:1/empty call ends for
    *  everyone (reason `'timeout'` so the caller shows "no answer"); a live group call keeps going —
    *  only the still-ringing users get the event, which merely clears their incoming banner. */
@@ -484,6 +502,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     if (call.participantIds.size <= (isDm ? 1 : 0)) {
       activeCalls.delete(conversationId);
       emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
+      logMissedCall(conversationId, call, stillRinging);
     } else if (stillRinging.length > 0) {
       emitToEveryone(stillRinging, chat.S2C.callEnded, payload);
     }
@@ -778,8 +797,13 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       if (call.participantIds.size <= threshold) {
         if (call.ringTimer) clearTimeout(call.ringTimer);
         activeCalls.delete(conversationId);
+        // Anyone still ringing at this point missed the call (the caller hung up before they
+        // answered) — leave the durable call-log row for them.
+        const stillRinging = [...call.ringingIds];
+        call.ringingIds.clear();
         const payload: chat.CallEndedEvent = { conversationId, reason: 'ended' };
         emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
+        logMissedCall(conversationId, call, stillRinging);
       }
       // Refresh the presence roster for everyone (empty if the call just ended).
       emitCallState(conversationId);
