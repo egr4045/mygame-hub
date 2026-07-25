@@ -39,6 +39,7 @@ export const CallView = (): JSX.Element | null => {
   const mediaKind = useCallStore((s) => s.kind);
   const mediaConversationId = useCallStore((s) => s.conversationId);
   const mediaLabel = useCallStore((s) => s.label);
+  const boundGame = useCallStore((s) => s.boundGame);
   const mediaParticipants = useCallStore((s) => s.participants);
   const embedded = useCallStore((s) => s.embedded);
   const pendingInvite = useCallStore((s) => s.pendingInvite);
@@ -94,7 +95,15 @@ export const CallView = (): JSX.Element | null => {
 
   const conversationId = mediaConversationId ?? activeCall?.conversationId ?? null;
   const session = conversationId ? sessions.find((s) => s.id === conversationId) : undefined;
-  const title = session?.name ?? mediaLabel ?? activeCall?.fromName ?? (mediaKind === 'game' ? 'Игровой звонок' : 'Звонок');
+  // A conversation call that a host bound onto a game room is that game's lobby for as long as the
+  // binding lives, so its name wins over the group-chat name — otherwise "Лобби Свояк" would show up
+  // for everyone who joined via the game and the group's name for the host who brought them there.
+  const title =
+    boundGame?.label ??
+    session?.name ??
+    mediaLabel ??
+    activeCall?.fromName ??
+    (mediaKind === 'game' ? 'Игровой звонок' : 'Звонок');
   // LiveKit identity is now per-device (`<accountId>#<device>`); the local tile is the exact local
   // identity, and names resolve on the base accountId (so a second device of mine still gets a name).
   const myIdentity = room ? room.localParticipant.identity : null;

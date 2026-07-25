@@ -173,8 +173,19 @@ export const bindCallRequest = z.object({
   conversationId: z.string().min(1),
   game: z.string().min(1).max(64),
   room: z.string().min(1).max(64),
+  /** Optional display name for the bound call ("Лобби Свояк") — what the call dock shows while the
+   *  binding is live, instead of the underlying conversation's name. */
+  label: z.string().min(1).max(64).optional(),
 });
 export const bindCallResponse = z.object({ ok: z.boolean() });
+/** `POST /chat/call/unbind` — release a binding made by `/chat/call/bind`, so the game room stops
+ *  resolving to the conversation's LiveKit room. Sent when a game ends: without it the alias lingers
+ *  for the whole 24h TTL, and a game that later reuses the same room code would drop its players
+ *  into that conversation's call. Requires being a participant of the conversation it points at. */
+export const unbindCallRequest = z.object({
+  game: z.string().min(1).max(64),
+  room: z.string().min(1).max(64),
+});
 export const typingPayload = z.object({ conversationId: z.string().min(1) });
 
 export const typingAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
@@ -198,6 +209,7 @@ export type CallTokenRequest = z.infer<typeof callTokenRequest>;
 export type RoomCallTokenRequest = z.infer<typeof roomCallTokenRequest>;
 export type BindCallRequest = z.infer<typeof bindCallRequest>;
 export type BindCallResponse = z.infer<typeof bindCallResponse>;
+export type UnbindCallRequest = z.infer<typeof unbindCallRequest>;
 export type TypingPayload = z.infer<typeof typingPayload>;
 export type TypingAck = z.infer<typeof typingAck>;
 
@@ -219,8 +231,15 @@ export const historyAck = z.object({
   hasMore: z.boolean().optional(),
 });
 export const callAck = z.object({ ok: z.boolean(), error: z.string().optional() });
-/** Response body of `POST /chat/call/token` (plain HTTP, not a socket ack — see server.ts). */
-export const callTokenResponse = z.object({ token: z.string(), url: z.string() });
+/** Response body of `POST /chat/call/token` and `/chat/call/room-token` (plain HTTP, not a socket
+ *  ack — see server.ts). `label` only comes back from `room-token`, and only when a host bound this
+ *  game room onto a conversation call under a display name: it lets a joiner title the call the same
+ *  way the binder did without having to be told out-of-band. */
+export const callTokenResponse = z.object({
+  token: z.string(),
+  url: z.string(),
+  label: z.string().optional(),
+});
 
 export type OpenDmAck = z.infer<typeof openDmAck>;
 export type CreateGroupAck = z.infer<typeof createGroupAck>;

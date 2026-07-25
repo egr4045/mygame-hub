@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { social } from '@mygame/protocol';
 import { usePlatformStore } from '../platform/platformStore.js';
-import { GAMES, getGameOrigin, type GameInfo } from '../platform/games.js';
+import { GAMES, type GameInfo } from '../platform/games.js';
 import { LibrarySidebar } from '../components/LibrarySidebar.js';
 import { GameDetailsView, type GameDetailsTab } from '../components/GameDetailsView.js';
-import { enterGame } from '../net/orchestratorClient.js';
+import { enterAndPlayGame } from '../platform/enterGameFlow.js';
 import { routeToInvite, routeToRoom } from '../platform/inviteRouting.js';
-import { getHandoff, recordGameEnter, loadSession } from '@mygame/sdk';
+import { loadSession } from '@mygame/sdk';
 import { useSocialStore } from '@mygame/sdk';
 import { ProfileView } from '../components/ProfileView.js';
 import { SettingsModal } from '../components/SettingsModal.js';
@@ -116,18 +116,10 @@ const DesktopHubScreen = (): JSX.Element => {
     }
   };
 
+  // Same flow as the mobile shell (it also carries `?call=` so a call survives the navigation) —
+  // don't re-inline it here, or the two drift apart.
   const handlePlay = (g: GameInfo): void => {
-    void recordGameEnter(g.id); // best-effort; a failed write just means stale "last played"
-    const base = getGameOrigin(g);
-    if (base) {
-      void (async () => {
-        await enterGame(g.id);
-        const handoff = await getHandoff();
-        window.location.href = handoff ? `${base}/?pt=${encodeURIComponent(handoff)}` : base;
-      })();
-    } else {
-      selectGame(g.id);
-    }
+    enterAndPlayGame(g, selectGame);
   };
 
   const handleJoinActivity = (f: social.Friend): void => {

@@ -72,6 +72,12 @@ export interface MygameCallState {
   status: CallMediaStatus;
   kind: CallKind | null;
   callKey: string | null;
+  /** Set when `kind === 'conv'` — a game needs it to know *which* conversation call it bound onto. */
+  conversationId: string | null;
+  /** Display name of the current call, if it has one. */
+  label: string | null;
+  /** Non-null while this conversation call is doubling as a game's lobby call (`bindToRoom`). */
+  boundGame: { game: string; room: string; label: string | null } | null;
   participants: CallParticipant[];
   embedded: boolean;
   pendingInvite: GameCallInvite | null;
@@ -226,8 +232,13 @@ class MygameClient {
     /** `true` = the host game renders call video itself; the SDK keeps only the audio pipeline. */
     setEmbedded: (embedded: boolean): void => useCallStore.getState().setEmbedded(embedded),
     /** Host: alias `game:<game>:<room>` onto my current conversation call so game-side joiners land
-     *  in the same LiveKit room. */
-    bindToRoom: (target: { game: string; room: string }): Promise<boolean> => useCallStore.getState().bindToRoom(target),
+     *  in the same LiveKit room. `label` names the call while the binding lives. */
+    bindToRoom: (target: { game: string; room: string; label?: string }): Promise<boolean> =>
+      useCallStore.getState().bindToRoom(target),
+    /** Release a `bindToRoom` alias when the game ends. The media survives — the call just stops
+     *  being that game's lobby, so a later game reusing the room code can't inherit it. */
+    unbindRoom: (target: { game: string; room: string }): Promise<boolean> =>
+      useCallStore.getState().unbindRoom(target),
     /** Host: push a "come play" invite to every call participant over the data channel. */
     inviteToGame: (invite: { game: string; gameName: string; room: string; url: string }): void =>
       useCallStore.getState().inviteToGame(invite),
@@ -240,6 +251,9 @@ class MygameClient {
         status: s.status,
         kind: s.kind,
         callKey: s.callKey,
+        conversationId: s.conversationId,
+        label: s.label,
+        boundGame: s.boundGame,
         participants: s.participants,
         embedded: s.embedded,
         pendingInvite: s.pendingInvite,

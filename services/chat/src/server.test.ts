@@ -75,6 +75,26 @@ const ring = (c: ClientSocket, conversationId: string, callType: chat.CallType) 
 const acceptCall = (c: ClientSocket, conversationId: string) =>
   new Promise<chat.CallAck>((res) => c.emit(chat.C2S.callAccept, { conversationId }, res));
 
+/** Authenticated POST against one of the call HTTP routes (they are plain node:http, not socket). */
+const callPost = async (
+  port: number,
+  path: string,
+  accountId: string,
+  body: unknown,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  const token = await auth.signAccess(accountId, accountId);
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+};
+
+/** The LiveKit room a token was minted for — the whole point of bind/unbind is which one you get. */
+const roomOfToken = (jwt: string): string =>
+  JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString()).video.room as string;
+
 describe('chat server — DMs', () => {
   it('opens the same DM conversation for both sides and delivers a message', async () => {
     const port = await startServer();
@@ -475,6 +495,62 @@ describe('chat server — missed-call log', () => {
 
     await new Promise((r) => setTimeout(r, 80));
     expect(sysCount).toBe(0);
+  });
+});
+
+describe('chat server — portable calls (bind/unbind)', () => {
+  it('binds a game room onto a conversation call, then releases it', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+
+    // Unbound: the game room is its own LiveKit room.
+    const before = await callPost(port, '/chat/call/room-token', 'a2', { game: 'svoyak', room: 'ROOM123456' });
+    expect(roomOfToken(before.body.token as string)).toBe('game:svoyak:ROOM123456');
+
+    const bind = await callPost(port, '/chat/call/bind', 'a1', {
+      conversationId,
+      game: 'svoyak',
+      room: 'ROOM123456',
+      label: 'Лобби Свояк',
+    });
+    expect(bind.status).toBe(200);
+
+    // Bound: joiners are minted into the conversation's room instead, and inherit its name.
+    const bound = await callPost(port, '/chat/call/room-token', 'a2', { game: 'svoyak', room: 'ROOM123456' });
+    expect(roomOfToken(bound.body.token as string)).toBe(conversationId);
+    expect(bound.body.label).toBe('Лобби Свояк');
+
+    const unbind = await callPost(port, '/chat/call/unbind', 'a1', { game: 'svoyak', room: 'ROOM123456' });
+    expect(unbind.status).toBe(200);
+
+    // Released: a later game reusing that code must not inherit the conversation's call.
+    const after = await callPost(port, '/chat/call/room-token', 'a2', { game: 'svoyak', room: 'ROOM123456' });
+    expect(roomOfToken(after.body.token as string)).toBe('game:svoyak:ROOM123456');
+    expect(after.body.label).toBeUndefined();
+  });
+
+  it('refuses to unbind a call the caller is not a participant of', async () => {
+    const port = await startServer();
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    const { conversationId } = await createGroup(c1, 'Squad', ['a2']);
+    await callPost(port, '/chat/call/bind', 'a1', { conversationId, game: 'svoyak', room: 'ROOM123456' });
+
+    const outsider = await callPost(port, '/chat/call/unbind', 'a9', { game: 'svoyak', room: 'ROOM123456' });
+    expect(outsider.status).toBe(403);
+
+    // ...and the binding is untouched.
+    const still = await callPost(port, '/chat/call/room-token', 'a2', { game: 'svoyak', room: 'ROOM123456' });
+    expect(roomOfToken(still.body.token as string)).toBe(conversationId);
+  });
+
+  it('unbinding something that was never bound is a no-op, not an error', async () => {
+    const port = await startServer();
+    await connect(port, 'a1', 'Mara');
+    const res = await callPost(port, '/chat/call/unbind', 'a1', { game: 'svoyak', room: 'NEVERBOUND' });
+    expect(res.status).toBe(200);
   });
 });
 

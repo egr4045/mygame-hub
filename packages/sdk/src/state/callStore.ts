@@ -99,6 +99,10 @@ interface CallState {
   callType: chat.CallType | null;
   label: string | null;
   participants: CallParticipant[];
+  /** Set while this *conversation* call is doubling as a game's lobby call (`bindToRoom`). Carries
+   *  the game's own name for it, so the dock reads "Лобби Свояк" instead of the group-chat name for
+   *  as long as the binding lives. Cleared by `unbindRoom` and by `leave()`. */
+  boundGame: { game: string; room: string; label: string | null } | null;
   /** The host game renders call video itself (`attachVideo`) — the default `CallView` surface hides
    *  its chrome and keeps only the audio pipeline alive. */
   embedded: boolean;
@@ -126,8 +130,14 @@ interface CallState {
   setEmbedded: (embedded: boolean) => void;
 
   /** Host: alias `game:<game>:<room>` onto my current conversation call so game-side joiners land in
-   *  the same LiveKit room. True if already a game call for that exact room. */
-  bindToRoom: (target: { game: string; room: string }) => Promise<boolean>;
+   *  the same LiveKit room. True if already a game call for that exact room. `label` names the call
+   *  while the binding lives (see `boundGame`). */
+  bindToRoom: (target: { game: string; room: string; label?: string }) => Promise<boolean>;
+  /** Release a `bindToRoom` alias — the game room stops resolving to this conversation's LiveKit
+   *  room. Call it when the game ends: the binding otherwise lingers for its whole server-side TTL,
+   *  and a game reusing that room code later would land its players in this call. The media itself is
+   *  untouched — the party keeps talking, it just stops being that game's lobby. */
+  unbindRoom: (target: { game: string; room: string }) => Promise<boolean>;
   /** Host: push a "come play" invite to every call participant over the data channel. */
   inviteToGame: (invite: { game: string; gameName: string; room: string; url: string }) => void;
   dismissInvite: () => void;
@@ -442,6 +452,9 @@ export const useCallStore = create<CallState>((set, get) => {
       set({ status: 'idle', kind: null, callKey: null, conversationId: null, error: 'failed to join call' });
       return false;
     }
+    // A game room bound to a conversation call carries the binder's name for it ("Лобби Свояк" etc).
+    // Only fill in what the caller didn't name itself.
+    if (!opts.label && token.label) set({ label: token.label });
 
     const room = createCallRoom();
     wireRoom(room);
@@ -481,6 +494,7 @@ export const useCallStore = create<CallState>((set, get) => {
         kind: null,
         callKey: null,
         conversationId: null,
+        boundGame: null,
         participants: [],
         error: 'Соединение со звонком потеряно',
       });
@@ -510,6 +524,7 @@ export const useCallStore = create<CallState>((set, get) => {
     callType: null,
     label: null,
     participants: [],
+    boundGame: null,
     embedded: false,
     pendingInvite: null,
     error: null,
@@ -549,6 +564,7 @@ export const useCallStore = create<CallState>((set, get) => {
         conversationId: null,
         callType: null,
         label: null,
+        boundGame: null,
         participants: [],
         embedded: false,
         error: null,
@@ -605,12 +621,29 @@ export const useCallStore = create<CallState>((set, get) => {
 
     setEmbedded: (embedded) => set({ embedded }),
 
-    bindToRoom: async ({ game, room }) => {
+    bindToRoom: async ({ game, room, label }) => {
       const { kind, conversationId, callKey } = get();
       if (kind === 'game') return callKey === `game:${game}:${room}`; // already IS that room's call
       if (kind !== 'conv' || !conversationId) return false;
-      const res = await authedPost(`${config.chatUrl}/chat/call/bind`, { conversationId, game, room });
-      return res?.ok ?? false;
+      const res = await authedPost(`${config.chatUrl}/chat/call/bind`, {
+        conversationId,
+        game,
+        room,
+        ...(label ? { label } : {}),
+      });
+      const ok = res?.ok ?? false;
+      if (ok) set({ boundGame: { game, room, label: label ?? null } });
+      return ok;
+    },
+
+    unbindRoom: async ({ game, room }) => {
+      const res = await authedPost(`${config.chatUrl}/chat/call/unbind`, { game, room });
+      const ok = res?.ok ?? false;
+      // Drop the local marker even on a failed request: the game is over either way, and a stale
+      // "this call is that game's lobby" title is worse than losing the retry.
+      const bound = get().boundGame;
+      if (bound && bound.game === game && bound.room === room) set({ boundGame: null });
+      return ok;
     },
 
     inviteToGame: ({ game, gameName, room, url }) => {

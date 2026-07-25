@@ -61,6 +61,8 @@ interface ActiveCall {
 interface OpenCall {
   livekitRoom: string;
   createdAt: number;
+  /** Display name the bound call should carry ("Лобби Свояк"), if the binder supplied one. */
+  label?: string;
 }
 
 const OPEN_CALL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -268,7 +270,8 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
         entry = { livekitRoom: key, createdAt: Date.now() };
         openCalls.set(key, entry);
       }
-      sendJson(res, 200, await mintLivekitToken(caller.accountId, caller.displayName, entry.livekitRoom));
+      const minted = await mintLivekitToken(caller.accountId, caller.displayName, entry.livekitRoom);
+      sendJson(res, 200, entry.label ? { ...minted, label: entry.label } : minted);
       return;
     }
 
@@ -295,7 +298,39 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       openCalls.set(`game:${parsed.data.game}:${parsed.data.room}`, {
         livekitRoom: parsed.data.conversationId,
         createdAt: Date.now(),
+        ...(parsed.data.label ? { label: parsed.data.label } : {}),
       });
+      const body: chat.BindCallResponse = { ok: true };
+      sendJson(res, 200, body);
+      return;
+    }
+
+    // Release a binding when the game is over. Without this the alias survives its full 24h TTL, and
+    // a game that later reuses the same room code would silently drop its players into this
+    // conversation's call. Authorised the same way as /bind — you must be a participant of the
+    // conversation the binding points at (so nobody can un-bind someone else's party).
+    if (req.method === 'POST' && req.url === '/chat/call/unbind') {
+      const caller = await verifyAccess(req, res);
+      if (!caller) return;
+      if (!limits.callHttp.take(caller.accountId)) {
+        sendJson(res, 429, { code: 'rate_limited', message: 'too many requests' });
+        return;
+      }
+      const parsed = chat.unbindCallRequest.safeParse(await readJsonBody(req));
+      if (!parsed.success) {
+        sendJson(res, 400, { code: 'validation', message: 'invalid request' });
+        return;
+      }
+      const key = `game:${parsed.data.game}:${parsed.data.room}`;
+      const entry = openCalls.get(key);
+      // Idempotent: nothing bound (or it resolves to its own room) is already the desired state.
+      if (entry && entry.livekitRoom !== key) {
+        if (!deps.store.isParticipant(entry.livekitRoom, caller.accountId)) {
+          sendJson(res, 403, { code: 'forbidden', message: 'not a participant of this conversation' });
+          return;
+        }
+        openCalls.delete(key);
+      }
       const body: chat.BindCallResponse = { ok: true };
       sendJson(res, 200, body);
       return;
