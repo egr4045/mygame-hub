@@ -14,29 +14,73 @@ let server: SocialServer | undefined;
 const clients: ClientSocket[] = [];
 
 afterEach(() => {
+  readsSeen.clear();
   clients.splice(0).forEach((c) => c.close());
   server?.io.close();
   server?.httpServer.close();
   server = undefined;
 });
 
-const startServer = (store = createMemorySocialStore()): Promise<number> => {
+const startServer = (
+  store = createMemorySocialStore(),
+  extra: Partial<Parameters<typeof createSocialServer>[0]> = {},
+): Promise<number> => {
   server = createSocialServer({
     auth,
     store,
     invites: createMemoryInviteStore(),
     logger: createCapturingLogger(),
     corsOrigin: '*',
+    ...extra,
   });
   return new Promise((r) =>
     server!.httpServer.listen(0, () => r((server!.httpServer.address() as AddressInfo).port)),
   );
 };
 
+/** In-memory stand-in for the pg read-marker store (services/social/src/pgReads.ts). */
+const memoryReads = () => {
+  const byAccount = new Map<string, Set<string>>();
+  return {
+    store: {
+      list: (accountId: string) => Promise.resolve([...(byAccount.get(accountId) ?? [])]),
+      mark: (accountId: string, keys: string[]) => {
+        const set = byAccount.get(accountId) ?? new Set<string>();
+        for (const k of keys) set.add(k);
+        byAccount.set(accountId, set);
+        return Promise.resolve();
+      },
+    },
+    seed: (accountId: string, keys: string[]) => byAccount.set(accountId, new Set(keys)),
+  };
+};
+
+/** Read-key pushes seen per socket. Recorded from socket creation, because the connect-time push can
+ *  land before a test gets a chance to attach its own listener. */
+const readsSeen = new Map<ClientSocket, string[][]>();
+
+const waitReads = (c: ClientSocket, predicate: (keys: string[]) => boolean) =>
+  new Promise<string[]>((res) => {
+    const already = (readsSeen.get(c) ?? []).find(predicate);
+    if (already) {
+      res(already);
+      return;
+    }
+    const h = (p: social.NotificationsReadEvent) => {
+      if (predicate(p.keys)) {
+        c.off(social.S2C.notificationsRead, h);
+        res(p.keys);
+      }
+    };
+    c.on(social.S2C.notificationsRead, h);
+  });
+
 const connect = async (port: number, accountId: string, name: string): Promise<ClientSocket> => {
   const token = await auth.signAccess(accountId, name);
   const c = ioc(`http://127.0.0.1:${port}`, { path: '/social.io/', auth: { token }, transports: ['websocket'], forceNew: true });
   clients.push(c);
+  readsSeen.set(c, []);
+  c.on(social.S2C.notificationsRead, (p: social.NotificationsReadEvent) => readsSeen.get(c)?.push(p.keys));
   await new Promise<void>((res) => c.once('connect', () => res()));
   return c;
 };
@@ -305,5 +349,64 @@ describe('social server — blocking', () => {
     await connect(port, 'a2', 'Wei');
     await block(c1, 'a2');
     expect((await search(c1, 'Wei')).results.find((r) => r.accountId === 'a2')).toBeUndefined();
+  });
+});
+
+describe('social server — notification read-state', () => {
+  it('pushes stored read keys on connect', async () => {
+    const reads = memoryReads();
+    reads.seed('a1', ['friend-req:a2', 'missed:c1:100']);
+    const port = await startServer(createMemorySocialStore(), { notificationReads: reads.store });
+    const c1 = await connect(port, 'a1', 'Mara');
+    const keys = await waitReads(c1, (k) => k.length === 2);
+    expect(keys.sort()).toEqual(['friend-req:a2', 'missed:c1:100']);
+  });
+
+  it('marking read persists and echoes the full set back', async () => {
+    const reads = memoryReads();
+    const port = await startServer(createMemorySocialStore(), { notificationReads: reads.store });
+    const c1 = await connect(port, 'a1', 'Mara');
+    await waitReads(c1, (k) => k.length === 0);
+
+    const echoed = waitReads(c1, (k) => k.includes('invite:XYZ'));
+    const ack = await new Promise<social.MarkNotificationsReadAck>((res) =>
+      c1.emit(social.C2S.markNotificationsRead, { keys: ['invite:XYZ'] }, res),
+    );
+    expect(ack.ok).toBe(true);
+    expect(await echoed).toEqual(['invite:XYZ']);
+    expect(await reads.store.list('a1')).toEqual(['invite:XYZ']);
+  });
+
+  it('a mark on one device reaches this account\'s other devices', async () => {
+    const reads = memoryReads();
+    const port = await startServer(createMemorySocialStore(), { notificationReads: reads.store });
+    const phone = await connect(port, 'a1', 'Mara');
+    const desktop = await connect(port, 'a1', 'Mara');
+    await waitReads(desktop, (k) => k.length === 0);
+
+    // This is the whole point of server-side read-state: the badge must clear on the other device.
+    const desktopSees = waitReads(desktop, (k) => k.includes('friend-req:a9'));
+    phone.emit(social.C2S.markNotificationsRead, { keys: ['friend-req:a9'] });
+    expect(await desktopSees).toEqual(['friend-req:a9']);
+  });
+
+  it('read-state is per account — one account cannot mark another\'s', async () => {
+    const reads = memoryReads();
+    const port = await startServer(createMemorySocialStore(), { notificationReads: reads.store });
+    const c1 = await connect(port, 'a1', 'Mara');
+    await connect(port, 'a2', 'Wei');
+    c1.emit(social.C2S.markNotificationsRead, { keys: ['friend-req:zz'] });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(await reads.store.list('a1')).toEqual(['friend-req:zz']);
+    expect(await reads.store.list('a2')).toEqual([]);
+  });
+
+  it('without a read store the mark is refused rather than silently dropped', async () => {
+    const port = await startServer(); // no notificationReads (dev/memory mode)
+    const c1 = await connect(port, 'a1', 'Mara');
+    const ack = await new Promise<social.MarkNotificationsReadAck>((res) =>
+      c1.emit(social.C2S.markNotificationsRead, { keys: ['x'] }, res),
+    );
+    expect(ack.ok).toBe(false);
   });
 });

@@ -12,6 +12,8 @@ import { createMemorySocialStore, type SocialStore } from './store.js';
 import { createMemoryInviteStore, type InviteStore } from './invites.js';
 import { createPgSocialStore } from './pgStore.js';
 import { createPgInviteStore } from './pgInvites.js';
+import { createPgNotificationReadStore } from './pgReads.js';
+import type { NotificationReadStore } from './server.js';
 
 const config = loadConfig();
 const logger = createConsoleLogger({ svc: config.service });
@@ -22,9 +24,15 @@ const auth = createAuthCore({
   refreshTtl: '30d',
 });
 
-const { store, invites } = await (async (): Promise<{ store: SocialStore; invites: InviteStore }> => {
+const { store, invites, notificationReads } = await (async (): Promise<{
+  store: SocialStore;
+  invites: InviteStore;
+  notificationReads?: NotificationReadStore;
+}> => {
   if (!config.databaseUrl) {
     logger.warn('DATABASE_URL not set — friends + invites are in-memory and will not survive a restart');
+    // No read-markers without a DB: the notification center still works, it just shows everything as
+    // unread again after a reload rather than silently pretending state is shared.
     return { store: createMemorySocialStore(), invites: createMemoryInviteStore() };
   }
   const pool = createPool(config.databaseUrl);
@@ -34,7 +42,7 @@ const { store, invites } = await (async (): Promise<{ store: SocialStore; invite
   await pgStore.init();
   await pgInvites.init();
   logger.info('friends + invites persisted to postgres');
-  return { store: pgStore, invites: pgInvites };
+  return { store: pgStore, invites: pgInvites, notificationReads: createPgNotificationReadStore(pool, logger) };
 })();
 
 const maybePg = store as Partial<import('./pgStore.js').PgSocialStore>;
@@ -47,6 +55,7 @@ const { httpServer } = createSocialServer({
   corsOrigin: config.corsOrigin,
   ...(maybePg.isAccountBanned ? { isAccountBanned: maybePg.isAccountBanned.bind(store) } : {}),
   ...(maybePg.resolveFriendCode ? { resolveFriendCode: maybePg.resolveFriendCode.bind(store) } : {}),
+  ...(notificationReads ? { notificationReads } : {}),
 });
 
 httpServer.listen(config.port, () => logger.info('listening', { port: config.port, mode: 'production' }));

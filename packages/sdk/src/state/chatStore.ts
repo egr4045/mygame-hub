@@ -92,6 +92,9 @@ interface ChatState {
   connect: () => Promise<void>;
   disconnect: () => void;
   toggleChat: () => void;
+  /** Mark the conversation currently on screen as read (server `markRead` + local missed-call
+   *  marker). Idempotent and a no-op when nothing is unread. */
+  markActiveRead: () => void;
   openChat: (chatId: string) => void;
   /** Find-or-create a DM with `userId` and open it. `onReady` (if given) fires once with the
    *  conversation id, whether the DM already existed or was just created — used by `ringUser`. */
@@ -151,6 +154,21 @@ const typingTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${con
 /** Outbound typing throttle — the input calls sendTyping per keystroke by design. */
 const TYPING_SEND_INTERVAL_MS = 2_000;
 const lastTypingSent = new Map<string, number>(); // conversationId -> last emit ms
+
+/** A message that lands in the open, *unfocused* tab is deliberately not marked read (the user isn't
+ *  looking). Nothing used to un-do that once they came back, so the tab badge stayed lit while the
+ *  message sat on screen. Installed once from connect(); listeners are process-lifetime, like the
+ *  socket itself. */
+let focusReadInstalled = false;
+const installFocusRead = (): void => {
+  if (focusReadInstalled || typeof document === 'undefined') return;
+  focusReadInstalled = true;
+  const onBack = (): void => {
+    if (document.visibilityState === 'visible') useChatStore.getState().markActiveRead();
+  };
+  document.addEventListener('visibilitychange', onBack);
+  window.addEventListener('focus', onBack);
+};
 
 const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -228,6 +246,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   connect: async () => {
     if (socket?.connected) return;
+    installFocusRead();
     set({ status: 'connecting', error: null });
     const prev = loadSession();
     if (!prev) {
@@ -468,6 +487,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isOpen: true,
         activeChatId: p.conversationId,
       });
+      // The ring just forced that conversation on screen — anything unread in it is now seen, and
+      // without this the badge keeps counting it after the call is over.
+      get().markActiveRead();
       if (useNotificationPrefsStore.getState().callToasts) {
         useToastStore.getState().addToast({
           type: 'system',
@@ -567,7 +589,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ status: 'idle', sessions: [], activeCall: null, callStates: {} });
   },
 
-  toggleChat: () => set((s) => ({ isOpen: !s.isOpen })),
+  // Mark whatever conversation is on screen as read. Read-state is server-authoritative
+  // (`unreadCount` only ever arrives from a `threads` push), so anything that puts messages in front
+  // of the user without emitting this leaves the tab badge lit forever — see the callers below.
+  markActiveRead: () => {
+    const { isOpen, activeChatId } = get();
+    if (!isOpen || !activeChatId) return;
+    const sess = get().sessions.find((s) => s.id === activeChatId);
+    // Don't chat with the server on every focus event — only when something is actually unread.
+    const hasUnread = (sess?.unreadCount ?? 0) > 0;
+    const hasUnseenMiss = useMissedCallsStore
+      .getState()
+      .missed.some((m) => m.conversationId === activeChatId && !m.seen);
+    if (!hasUnread && !hasUnseenMiss) return;
+    if (hasUnread) socket?.emit(chat.C2S.markRead, { conversationId: activeChatId });
+    if (hasUnseenMiss) useMissedCallsStore.getState().markSeen(activeChatId);
+  },
+
+  // Re-opening the widget lands the user straight back inside `activeChatId` (it is deliberately not
+  // cleared on close), so this is a real read even though `openChat` never runs.
+  toggleChat: () => {
+    const willOpen = !get().isOpen;
+    set({ isOpen: willOpen });
+    if (willOpen) get().markActiveRead();
+  },
 
   openChat: (chatId) => {
     set({ isOpen: true, activeChatId: chatId });

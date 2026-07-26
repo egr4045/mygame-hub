@@ -16,9 +16,9 @@ import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
 import { useToastStore } from '@mygame/sdk';
-import { useChatStore, useMissedCallsStore } from '@mygame/sdk';
 import { createSuggestion } from '@mygame/sdk';
 import { PermissionsModal, usePermissionsModal } from '@mygame/sdk';
+import { NotificationCenter, useNotificationUnreadCount } from '@mygame/sdk';
 import { useIsMobile } from '../platform/useIsMobile.js';
 import { MobileHub } from '../mobile/MobileHub.js';
 
@@ -76,18 +76,17 @@ const DesktopHubScreen = (): JSX.Element => {
   const logout = usePlatformStore((s) => s.logout);
   const account = usePlatformStore((s) => s.account);
   const me = useSocialStore((s) => s.me);
-  const friends = useSocialStore((s) => s.friends);
-  const invites = useSocialStore((s) => s.invites);
-  const { accept, dismissInvite } = useSocialStore.getState();
-  const incomingRequests = friends.filter((f) => f.status === 'incoming');
-  const allMissed = useMissedCallsStore((s) => s.missed);
-  const missedCalls = allMissed.filter((m) => !m.seen);
-  const notificationCount = incomingRequests.length + invites.length + missedCalls.length;
   const openMenu = useMenuStore((s) => s.openMenu);
   const addToast = useToastStore((s) => s.addToast);
 
+  // One formula for the bell, the panel and the tab badge (badge.ts uses the same selector). The
+  // three used to compute their own counts from different inputs, which is how the favicon kept
+  // claiming a notification the user had already dealt with.
+  const notificationCount = useNotificationUnreadCount();
+
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'account' | null>(null);
+  const [bellOpen, setBellOpen] = useState(false);
 
   useEffect(() => {
     // Always clear activity when we are in the Hub
@@ -156,36 +155,13 @@ const DesktopHubScreen = (): JSX.Element => {
         <div style={{ height: 40, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '0 16px', fontSize: '11px', borderBottom: '1px solid var(--c-panel-border)' }}>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-            {/* Notification Center */}
+            {/* Notification Center — the bell only toggles; the panel itself is the SDK component
+                (a context menu could not offer «Отклонить» or show read/unread). */}
             <div
               style={{ position: 'relative', cursor: 'pointer', color: 'var(--c-text-primary)', fontSize: 16 }}
               onClick={(e) => {
                 e.stopPropagation();
-                const items = notificationCount === 0
-                  ? [{ label: '🔔 Нет новых уведомлений', action: () => {} }]
-                  : [
-                      ...incomingRequests.map((f) => ({
-                        label: `👤 Заявка от ${f.displayName} — принять`,
-                        action: () => accept(f.accountId),
-                      })),
-                      ...invites.map((inv) => ({
-                        label: `🎮 ${inv.inviterName}: ${inv.gameName} — присоединиться`,
-                        action: () => void routeToInvite(inv),
-                      })),
-                      ...missedCalls.map((mc) => ({
-                        label: `📵 Пропущенный звонок от ${mc.fromName} — открыть чат`,
-                        action: () => useChatStore.getState().openChat(mc.conversationId),
-                        danger: true,
-                      })),
-                    ];
-                openMenu(e.clientX, e.clientY + 20, [
-                  ...items,
-                  { separator: true, action: () => {} },
-                  ...(invites.length > 0
-                    ? [{ label: '🗑️ Скрыть приглашения', action: () => invites.forEach((inv) => dismissInvite(inv.code)) }]
-                    : []),
-                  { label: '⚙️ Настройки уведомлений', action: () => setSettingsTab('notifications') }
-                ]);
+                setBellOpen((o) => !o);
               }}
             >
               🔔
@@ -280,6 +256,17 @@ const DesktopHubScreen = (): JSX.Element => {
         />
       )}
 
+      {/* Anchored under the bell in the 40px system row. Routing into a room is ours, not the SDK's. */}
+      <NotificationCenter
+        open={bellOpen}
+        onClose={() => setBellOpen(false)}
+        anchor={{ top: 44, right: 16 }}
+        onOpenInvite={(code) => {
+          const inv = useSocialStore.getState().invites.find((i) => i.code === code);
+          if (inv) void routeToInvite(inv);
+        }}
+        onOpenSettings={() => setSettingsTab('notifications')}
+      />
       <FriendsWidget onJoinActivity={handleJoinActivity} />
       <ChatWidget hideLauncher />
       <CallView />

@@ -17,6 +17,7 @@ export { useFriendSearch } from './state/useFriendSearch.js';
 export * from './state/chatStore.js';
 export * from './state/callStore.js';
 export * from './state/menuStore.js';
+export * from './state/notificationsStore.js';
 
 export * from './components/ToastContainer.js';
 export * from './components/ContextMenu.js';
@@ -27,6 +28,7 @@ export { FriendsWidget } from './components/FriendsWidget.js';
 export { FriendsSidebar } from './components/FriendsSidebar.js';
 export { UserProfileModal, type ProfileTarget } from './components/UserProfileModal.js';
 export { PermissionsModal, usePermissionsModal } from './components/PermissionsModal.js';
+export { NotificationCenter, type NotificationCenterProps } from './components/NotificationCenter.js';
 export { MygameOverlay } from './components/MygameOverlay.js';
 export { SocialDndProvider } from './components/SocialDndProvider.js';
 export * from './overlay/mount.js';

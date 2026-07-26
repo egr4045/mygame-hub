@@ -28,6 +28,9 @@ interface SocialUIState {
   /** The activity I last reported via `setActivity`, tracked client-side (the server never echoes it
    *  back) so "invite a friend to my game" has something to send without the caller re-threading it. */
   myActivity: social.Activity | null;
+  /** Notification keys this account has already read, server-authoritative and shared across
+   *  devices (see `notification_reads`). The notification center derives read/unread from this. */
+  readKeys: string[];
 
   /** Connect using the stored account (refreshes the access token first). Idempotent. */
   connect: () => Promise<void>;
@@ -48,6 +51,9 @@ interface SocialUIState {
   /** Push an invite into a friend's presence channel. */
   inviteFriend: (accountId: string, target: social.InviteTarget) => void;
   dismissInvite: (code: string) => void;
+  /** Mark notification keys read. Optimistic locally, then persisted server-side so the badge stays
+   *  cleared after a reload and on this account's other devices. No-op for already-read keys. */
+  markNotificationsRead: (keys: string[]) => void;
   /** Hides presence/activity from `accountId` both ways and rejects new requests from them — doesn't
    *  touch the friendship, so `unblock` alone restores visibility. */
   block: (accountId: string) => Promise<boolean>;
@@ -63,6 +69,7 @@ export const useSocialStore = create<SocialUIState>((set) => ({
   invites: [],
   error: null,
   myActivity: null,
+  readKeys: [],
 
   connect: async () => {
     if (socket?.connected) return;
@@ -98,6 +105,9 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     socket.on(social.S2C.invite, (p: social.InviteEvent) =>
       set((s) => ({ invites: [p.invite, ...s.invites.filter((i) => i.code !== p.invite.code)] })),
     );
+    // Full set every time (on connect and after any device marks something) — replace, don't merge,
+    // so this is also how a mark on another device lands here.
+    socket.on(social.S2C.notificationsRead, (p: social.NotificationsReadEvent) => set({ readKeys: p.keys }));
     socket.on(social.S2C.error, (e: ProtocolError) => {
       set({ error: e.message });
       window.setTimeout(() => set((s) => (s.error === e.message ? { error: null } : {})), 3500);
@@ -107,7 +117,7 @@ export const useSocialStore = create<SocialUIState>((set) => ({
   disconnect: () => {
     socket?.close();
     socket = null;
-    set({ status: 'idle', friends: [], invites: [], myActivity: null });
+    set({ status: 'idle', friends: [], invites: [], myActivity: null, readKeys: [] });
   },
 
   addByCode: (code) =>
@@ -147,6 +157,19 @@ export const useSocialStore = create<SocialUIState>((set) => ({
     }),
   inviteFriend: (accountId, target) => emit(social.C2S.inviteFriend, { accountId, ...target }),
   dismissInvite: (code) => set((s) => ({ invites: s.invites.filter((i) => i.code !== code) })),
+
+  markNotificationsRead: (keys) => {
+    if (keys.length === 0) return;
+    let fresh: string[] = [];
+    set((s) => {
+      const known = new Set(s.readKeys);
+      fresh = keys.filter((k) => !known.has(k));
+      // Optimistic: the panel must gray out on click, not a round-trip later. The server's echo
+      // replaces this with the authoritative set.
+      return fresh.length ? { readKeys: [...s.readKeys, ...fresh] } : {};
+    });
+    if (fresh.length) emit(social.C2S.markNotificationsRead, { keys: fresh });
+  },
 
   block: (accountId) =>
     new Promise<boolean>((resolve) => {

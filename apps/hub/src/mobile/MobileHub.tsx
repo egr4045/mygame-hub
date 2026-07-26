@@ -8,7 +8,6 @@
 import { useState } from 'react';
 import {
   useSocialStore,
-  useMenuStore,
   useChatStore,
   useMissedCallsStore,
   ChatWidget,
@@ -17,6 +16,8 @@ import {
   ContextMenu,
   ToastContainer,
   SocialDndProvider,
+  NotificationCenter,
+  useNotificationUnreadCount,
 } from '@mygame/sdk';
 import { routeToInvite } from '../platform/inviteRouting.js';
 import { MobileGamesTab } from './MobileGamesTab.js';
@@ -33,47 +34,16 @@ const TABS: { id: MobileTab; label: string; icon: string }[] = [
 
 export const MobileHub = (): JSX.Element => {
   const me = useSocialStore((s) => s.me);
-  const friends = useSocialStore((s) => s.friends);
-  const invites = useSocialStore((s) => s.invites);
-  const { accept, dismissInvite } = useSocialStore.getState();
-  const openMenu = useMenuStore((s) => s.openMenu);
 
   const [tab, setTab] = useState<MobileTab>('games');
+  const [bellOpen, setBellOpen] = useState(false);
 
-  const incomingRequests = friends.filter((f) => f.status === 'incoming');
+  // Same selector as the desktop bell and the tab badge — see the comment in HubScreen.
+  const notificationCount = useNotificationUnreadCount();
   const allMissed = useMissedCallsStore((s) => s.missed);
-  const missedCalls = allMissed.filter((m) => !m.seen);
-  const notificationCount = incomingRequests.length + invites.length + missedCalls.length;
   const unreadMessages = useChatStore((s) => s.sessions.reduce((n, x) => n + (x.unreadCount ?? 0), 0));
   // Server call-log rows already count as unread; only busy-line misses need adding on top.
-  const totalUnread = unreadMessages + missedCalls.filter((m) => m.busy).length;
-
-  const openBell = (e: React.MouseEvent): void => {
-    const items =
-      notificationCount === 0
-        ? [{ label: '🔔 Нет новых уведомлений', action: () => {} }]
-        : [
-            ...incomingRequests.map((f) => ({
-              label: `👤 Заявка от ${f.displayName} — принять`,
-              action: () => accept(f.accountId),
-            })),
-            ...invites.map((inv) => ({
-              label: `🎮 ${inv.inviterName}: ${inv.gameName} — присоединиться`,
-              action: () => void routeToInvite(inv),
-            })),
-            ...missedCalls.map((mc) => ({
-              label: `📵 Пропущенный звонок от ${mc.fromName} — открыть чат`,
-              action: () => useChatStore.getState().openChat(mc.conversationId),
-              danger: true,
-            })),
-          ];
-    openMenu(e.clientX, e.clientY + 16, [
-      ...items,
-      ...(invites.length > 0
-        ? [{ separator: true, action: () => {} }, { label: '🗑️ Скрыть приглашения', action: () => invites.forEach((inv) => dismissInvite(inv.code)) }]
-        : []),
-    ]);
-  };
+  const totalUnread = unreadMessages + allMissed.filter((m) => m.busy && !m.seen).length;
 
   return (
     <SocialDndProvider>
@@ -86,7 +56,14 @@ export const MobileHub = (): JSX.Element => {
               💬
               {totalUnread > 0 && <span className="mhub-badge">{totalUnread}</span>}
             </button>
-            <button className="mhub-iconbtn" aria-label="Уведомления" onClick={openBell}>
+            <button
+              className="mhub-iconbtn"
+              aria-label="Уведомления"
+              onClick={(e) => {
+                e.stopPropagation();
+                setBellOpen((o) => !o);
+              }}
+            >
               🔔
               {notificationCount > 0 && <span className="mhub-badge">{notificationCount}</span>}
             </button>
@@ -119,6 +96,16 @@ export const MobileHub = (): JSX.Element => {
 
         {/* Global overlays (chat, calls, menus, toasts) — the floating desktop FriendsWidget is
             intentionally omitted; the Друзья tab is its mobile replacement. */}
+        {/* Full-width sheet under the app bar — 360px would overflow a phone. */}
+        <NotificationCenter
+          open={bellOpen}
+          onClose={() => setBellOpen(false)}
+          anchor={{ top: 56, right: 8 }}
+          onOpenInvite={(code) => {
+            const inv = useSocialStore.getState().invites.find((i) => i.code === code);
+            if (inv) void routeToInvite(inv);
+          }}
+        />
         <ChatWidget hideLauncher />
         <CallView />
         <GameInviteModal />

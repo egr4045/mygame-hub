@@ -30,6 +30,17 @@ export interface SocialDeps {
   /** Resolve a short friend code (or raw accountId) to an accountId. Absent (dev/memory) → the code
    *  is treated as the accountId, preserving the pre-friend-code behaviour. */
   readonly resolveFriendCode?: (code: string) => Promise<string | null>;
+  /** Notification read-markers (pg-backed in production). Absent (dev/memory) → read-state is not
+   *  shared across devices and every notification looks unread on a fresh connect; the notification
+   *  center still works, it just can't remember. */
+  readonly notificationReads?: NotificationReadStore;
+}
+
+/** Server-side «прочитано» for the notification center. Stores only keys — see the
+ *  `notification_reads` comment in packages/platform-db for why the content stays in its own home. */
+export interface NotificationReadStore {
+  list(accountId: string): Promise<string[]>;
+  mark(accountId: string, keys: string[]): Promise<void>;
 }
 
 /** Strip the internal `expiresAt` to the wire shape the client consumes. */
@@ -167,6 +178,26 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
     for (const edge of deps.store.friendsOf(account)) emitFriendsTo(edge.accountId);
   };
 
+  /** Push the read-key set. `socketId` targets one socket (connect); omit it to reach every device
+   *  this account has open, which is what makes a mark on one device clear the badge on the others. */
+  const emitReadsTo = async (account: string, socketId?: string): Promise<void> => {
+    if (!deps.notificationReads) return;
+    let keys: string[];
+    try {
+      keys = await deps.notificationReads.list(account);
+    } catch (err) {
+      // Losing read-state degrades to "everything looks unread" — never drop the connection for it.
+      deps.logger.error('notificationReads.list', { accountId: account, err: String(err) });
+      return;
+    }
+    const payload: social.NotificationsReadEvent = { keys };
+    if (socketId) {
+      io.to(socketId).emit(social.S2C.notificationsRead, payload);
+      return;
+    }
+    for (const id of socketsOf.get(account) ?? []) io.to(id).emit(social.S2C.notificationsRead, payload);
+  };
+
   io.on('connection', (socket) => {
     const { accountId, displayName } = socket.data as SocketData;
     deps.store.upsertAccount(accountId, displayName);
@@ -188,6 +219,10 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       socket.emit(social.S2C.me, meView(accountId));
       refresh(accountId);
     });
+
+    // What this account has already read, so a notification cleared on another device doesn't come
+    // back as unread here.
+    void emitReadsTo(accountId, socket.id);
 
     const guard = (fn: () => void): void => {
       try {
@@ -297,6 +332,27 @@ export const createSocialServer = (deps: SocialDeps): SocialServer => {
       }),
     );
     socket.on(social.C2S.getState, () => guard(() => emitFriendsTo(accountId)));
+
+    // Mark notification keys read. Async (a DB write), so it can't use the sync `guard`. Re-pushes
+    // the full set to *all* this account's devices — that cross-device echo is the point.
+    socket.on(social.C2S.markNotificationsRead, (raw, ack?: (res: social.MarkNotificationsReadAck) => void) => {
+      void (async () => {
+        try {
+          const { keys } = parse(social.markNotificationsReadPayload, raw);
+          if (!deps.notificationReads || keys.length === 0) {
+            ack?.({ ok: false });
+            return;
+          }
+          await deps.notificationReads.mark(accountId, keys);
+          await emitReadsTo(accountId);
+          ack?.({ ok: true });
+        } catch (err) {
+          if (err instanceof ContractError) socket.emit(social.S2C.error, err.toProtocol());
+          else deps.logger.error('markNotificationsRead', { accountId, err: String(err) });
+          ack?.({ ok: false });
+        }
+      })();
+    });
 
     // Mint a join code for the given room; ack returns it so the creator can copy a link/code.
     socket.on(social.C2S.createInvite, (raw, ack?: (res: social.CreateInviteAck) => void) =>

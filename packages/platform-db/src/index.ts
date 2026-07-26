@@ -74,6 +74,23 @@ export const runMigrations = async (pool: Pool): Promise<void> => {
     );
     CREATE INDEX IF NOT EXISTS blocks_blocked_idx ON blocks (blocked);
 
+    -- Which notifications an account has already read. Only the *marker* lives here: the content of
+    -- every notification kind is already durable in its own home (friendships for requests, the chat
+    -- call-log for missed calls, accounts.achievements, invites), so copying it would duplicate state
+    -- that can then drift from the truth. The key column is a stable synthetic id minted by the
+    -- client from the source row (e.g. friend-req:<accountId>, missed:<conversationId>:<at>), which
+    -- is what makes read-state agree across devices.
+    CREATE TABLE IF NOT EXISTS notification_reads (
+      account_id    TEXT NOT NULL,
+      key           TEXT NOT NULL,
+      read_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (account_id, key)
+    );
+    -- Bounded per account by a prune-on-write (see services/social/src/pgReads.ts): markers for
+    -- sources that have themselves aged out would otherwise accumulate forever.
+    CREATE INDEX IF NOT EXISTS notification_reads_account_read_at_idx
+      ON notification_reads (account_id, read_at DESC);
+
     CREATE TABLE IF NOT EXISTS invites (
       code          TEXT PRIMARY KEY,
       game          TEXT NOT NULL,

@@ -53,7 +53,18 @@ export const C2S = {
   block: 'social.block', // hide presence/activity from `accountId` both ways, reject their requests
   unblock: 'social.unblock', // restore visibility — does not re-friend, the edge was never touched
   getBlocked: 'social.getBlocked', // accounts *I* have blocked (ack) — for an unblock list
+  markNotificationsRead: 'social.markNotificationsRead', // mark notification keys read (ack {ok})
 } as const;
+
+/** Notification read-state. Only the *keys* travel: the notification center builds its rows from the
+ *  sources that already own them (friend edges, the chat call-log, achievements, invites) and mints a
+ *  stable key per row, so read-state is shared across devices without duplicating any content.
+ *  Server-side read state is the whole point — an unread badge that a second device already cleared
+ *  is exactly the bug this replaces. */
+export const markNotificationsReadPayload = z.object({ keys: z.array(z.string().min(1).max(200)).max(200) });
+export const markNotificationsReadAck = z.object({ ok: z.boolean() });
+export type MarkNotificationsReadPayload = z.infer<typeof markNotificationsReadPayload>;
+export type MarkNotificationsReadAck = z.infer<typeof markNotificationsReadAck>;
 
 export const requestPayload = z.object({ code: z.string().min(1).max(64) });
 export const requestAck = z.object({ ok: z.boolean().optional(), error: z.string().optional() });
@@ -112,8 +123,14 @@ export const S2C = {
   friends: 'social.friends', // full friends list (presence + activity)
   me: 'social.me', // your identity — accountId doubles as your friend code
   invite: 'social.invite', // a friend invited you somewhere (pushed)
+  notificationsRead: 'social.notificationsRead', // keys this account has read (full set, pushed on connect + after a mark)
   error: 'social.error',
 } as const;
+
+/** The complete set of read keys for this account — pushed on connect and re-pushed after a mark, so
+ *  a second device's «прочитано» lands here too. */
+export const notificationsReadEvent = z.object({ keys: z.array(z.string()) });
+export type NotificationsReadEvent = z.infer<typeof notificationsReadEvent>;
 
 export const friendsEvent = z.object({ friends: z.array(friend) });
 export const meEvent = z.object({

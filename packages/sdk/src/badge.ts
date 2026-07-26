@@ -4,7 +4,13 @@
  * embedded games' titles/favicons are never touched by the SDK overlay.
  */
 import { useChatStore } from './state/chatStore.js';
-import { useMissedCallsStore, selectUnseenBusyMissed } from './state/missedCallsStore.js';
+import { useMissedCallsStore } from './state/missedCallsStore.js';
+import { useSocialStore } from './state/socialStore.js';
+import {
+  installFriendAcceptWatcher,
+  selectUnreadNotificationCount,
+  useNotificationLogStore,
+} from './state/notificationsStore.js';
 
 let enabled = false;
 let baseTitle = '';
@@ -14,12 +20,10 @@ let flashTimer: ReturnType<typeof setInterval> | null = null;
 let flashOn = false;
 let unsubs: Array<() => void> = [];
 
-// Unread already includes the server call-log rows for ordinary misses — only busy-line misses
-// (no server message) are added on top.
-const currentCount = (): number => {
-  const unread = useChatStore.getState().sessions.reduce((n, s) => n + (s.unreadCount ?? 0), 0);
-  return unread + selectUnseenBusyMissed(useMissedCallsStore.getState());
-};
+// The same count the 🔔 bell shows — one formula for both, or the tab says "1" while the panel says
+// "nothing new". It is unread-*notifications*, not raw message count: read-state is server-side, so a
+// notification cleared on another device stops lighting this tab too.
+const currentCount = (): number => selectUnreadNotificationCount();
 
 const ensureFaviconLink = (): HTMLLinkElement => {
   if (faviconLink) return faviconLink;
@@ -36,9 +40,15 @@ const ensureFaviconLink = (): HTMLLinkElement => {
   return faviconLink;
 };
 
+/** Bumped on every draw so a slow image load can't repaint a count that is already stale — without
+ *  this, a `drawFavicon(2)` still decoding when `drawFavicon(0)` restores the clean icon lands
+ *  afterwards and leaves a red badge on a page with nothing unread. */
+let drawGeneration = 0;
+
 /** Draw the count on (a copy of) the favicon — or on an accent disc when the page has none. */
 const drawFavicon = (count: number): void => {
   const link = ensureFaviconLink();
+  const generation = ++drawGeneration;
   if (count <= 0) {
     if (baseFaviconHref) link.href = baseFaviconHref;
     else link.removeAttribute('href');
@@ -52,6 +62,7 @@ const drawFavicon = (count: number): void => {
   if (!cx) return;
 
   const paintBadge = (): void => {
+    if (generation !== drawGeneration) return; // a newer draw already won
     const label = count > 99 ? '99' : String(count);
     const r = 10;
     const x = size - r;
@@ -128,6 +139,9 @@ export const enableTabBadge = (): void => {
   if (enabled || typeof document === 'undefined') return;
   enabled = true;
   baseTitle = document.title;
+  // "Your request was accepted" is a transition with nothing left behind to derive it from — start
+  // watching the roster for it here, where we know a real UI is up to show it.
+  installFriendAcceptWatcher();
   applyCount();
   unsubs = [
     useChatStore.subscribe((s, prev) => {
@@ -138,6 +152,10 @@ export const enableTabBadge = (): void => {
       else if (!ringingNow) applyCount();
     }),
     useMissedCallsStore.subscribe(() => applyCount()),
+    // Friend requests, game invites and — crucially — `readKeys`: marking something read has to
+    // recompute the badge, otherwise it keeps showing what the user just cleared.
+    useSocialStore.subscribe(() => applyCount()),
+    useNotificationLogStore.subscribe(() => applyCount()),
   ];
 };
 
