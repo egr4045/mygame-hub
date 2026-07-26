@@ -155,21 +155,41 @@ const DesktopHubScreen = (): JSX.Element => {
         <div style={{ height: 40, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '0 16px', fontSize: '11px', borderBottom: '1px solid var(--c-panel-border)' }}>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-            {/* Notification Center — the bell only toggles; the panel itself is the SDK component
-                (a context menu could not offer «Отклонить» or show read/unread). */}
-            <div
-              style={{ position: 'relative', cursor: 'pointer', color: 'var(--c-text-primary)', fontSize: 16 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setBellOpen((o) => !o);
-              }}
-            >
-              🔔
-              {notificationCount > 0 && (
-                <div style={{ position: 'absolute', top: -6, right: -8, background: 'var(--c-accent)', color: '#fff', minWidth: 14, height: 14, padding: '0 3px', borderRadius: 7, fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {notificationCount}
-                </div>
-              )}
+            {/* Bell + settings as one control group. The bell owns notifications (and, inside its
+                panel, the notification prefs); this gear is hub-wide settings — two separate doors,
+                which is the whole point of splitting them. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                className="hub-topbtn"
+                data-open={bellOpen}
+                aria-label="Уведомления"
+                title="Уведомления"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBellOpen((o) => !o);
+                  setSettingsTab(null);
+                }}
+              >
+                🔔
+                {notificationCount > 0 && (
+                  <span className="hub-topbtn-badge">{notificationCount > 99 ? '99+' : notificationCount}</span>
+                )}
+              </button>
+              <button
+                className="hub-topbtn hub-topbtn-gear"
+                data-open={settingsTab !== null}
+                aria-label="Настройки"
+                title="Настройки"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Opens on Аккаунт: notification prefs stay behind the bell, so landing here on
+                  // «Уведомления» would make the two entry points feel interchangeable.
+                  setSettingsTab((t) => (t === null ? 'account' : null));
+                  setBellOpen(false);
+                }}
+              >
+                <span className="hub-gear-glyph">⚙️</span>
+              </button>
             </div>
 
             {/* Profile Menu */}

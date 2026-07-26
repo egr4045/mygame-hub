@@ -148,6 +148,83 @@ button {
   background: var(--c-panel-hover);
 }
 
+/* Icon buttons in the 40px system row (bell, settings). A matched set: same box, same hover, same
+   pressed-open state — so the pair reads as one control group rather than loose emoji. The glyph is
+   nudged with its own transform on :active for a physical press. */
+.hub-topbtn {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--c-text-primary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    transform var(--motion-fast);
+}
+.hub-topbtn:hover {
+  background: var(--c-panel-hover);
+  border-color: var(--c-panel-border);
+}
+.hub-topbtn:active {
+  transform: scale(0.92);
+}
+/* The panel this button owns is open — keep it visibly held down. */
+.hub-topbtn[data-open='true'] {
+  background: color-mix(in srgb, var(--c-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--c-accent) 55%, transparent);
+}
+/* Settings gear: a slow quarter-turn on hover. Purely decorative, so it respects reduced motion. */
+.hub-topbtn-gear:hover .hub-gear-glyph {
+  transform: rotate(90deg);
+}
+.hub-gear-glyph {
+  display: block;
+  transition: transform var(--motion-base);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hub-topbtn,
+  .hub-gear-glyph {
+    transition: none;
+  }
+  .hub-topbtn:active {
+    transform: none;
+  }
+  .hub-topbtn-gear:hover .hub-gear-glyph {
+    transform: none;
+  }
+}
+
+/* Unread count on a .hub-topbtn. Ring in the panel-deep bar colour so it reads as a separate chip
+   sitting on top of the icon, not part of the glyph. */
+.hub-topbtn-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: var(--r-pill);
+  background: var(--c-accent);
+  border: 2px solid var(--c-panel-deep);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Skeleton shimmer for loading states (GameDetailsView / ProfileView). */
 .hub-skeleton {
   background: linear-gradient(90deg, var(--c-panel-hover) 25%, var(--c-panel-border) 50%, var(--c-panel-hover) 75%);

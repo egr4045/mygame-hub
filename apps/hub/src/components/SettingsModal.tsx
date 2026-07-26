@@ -17,18 +17,25 @@ const overlay: CSSProperties = {
   position: 'fixed',
   inset: 0,
   background: 'var(--c-overlay)',
-  zIndex: 1000,
+  // Above the SDK notification panel (mgZ.panel = 1001), which can be open when settings is
+  // launched from inside it — at 1000 the panel used to sit on top of this modal.
+  zIndex: 1002,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
+  padding: 16,
 };
 
 const card: CSSProperties = {
-  width: 460,
+  width: 480,
+  maxWidth: '100%',
+  maxHeight: 'calc(100vh - 32px)',
+  overflowY: 'auto',
   background: 'var(--c-panel-solid)',
   border: '1px solid var(--c-panel-border)',
-  borderRadius: 8,
-  padding: 32,
+  borderRadius: 'var(--r-lg)',
+  boxShadow: 'var(--sh-window)',
+  padding: 24,
 };
 
 const inputStyle: CSSProperties = {
@@ -94,16 +101,41 @@ export const SettingsModal = ({ initialTab, onClose, onGoToProfile }: Props): JS
   return (
     <div style={overlay} onClick={onClose}>
       <div className="mygame-fade-in" style={card} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ color: 'var(--c-text-primary)', margin: '0 0 16px', fontSize: 20 }}>Настройки</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+          <span
+            aria-hidden
+            style={{
+              width: 34,
+              height: 34,
+              flexShrink: 0,
+              borderRadius: 'var(--r-md)',
+              background: 'var(--c-panel-hover)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 17,
+            }}
+          >
+            ⚙️
+          </span>
+          <h2 style={{ color: 'var(--c-text-primary)', margin: 0, fontSize: 19, flex: 1 }}>Настройки</h2>
+          <button
+            onClick={onClose}
+            className="hub-topbtn"
+            aria-label="Закрыть"
+            title="Закрыть"
+            style={{ fontSize: 13 }}
+          >
+            ✕
+          </button>
+        </div>
 
-        <div style={{ display: 'flex', marginBottom: 20, borderBottom: '1px solid var(--c-panel-border)' }}>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--c-panel-border)' }}>
           <div style={tabBtn(tab === 'notifications')} onClick={() => setTab('notifications')}>Уведомления</div>
           <div style={tabBtn(tab === 'account')} onClick={() => setTab('account')}>Аккаунт</div>
         </div>
 
         {tab === 'notifications' ? <NotificationsTab /> : <AccountTab onGoToProfile={() => { onGoToProfile(); onClose(); }} />}
-
-        <button onClick={onClose} style={{ ...ghostBtn, width: '100%', marginTop: 20 }}>Закрыть</button>
       </div>
     </div>
   );
@@ -188,13 +220,6 @@ const NotificationsTab = (): JSX.Element => {
           </button>
         </div>
       </div>
-      <button
-        className="hub-btn"
-        style={{ width: '100%', marginTop: 16, padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        onClick={() => usePermissionsModal.getState().show()}
-      >
-        🎛️ Права и устройства…
-      </button>
       <p style={{ color: 'var(--c-text-muted)', fontSize: 12, marginTop: 12 }}>
         Хранится только в этом браузере. Звуки — плейсхолдеры (админ может заменить их своими). Заявки в
         друзья по-прежнему видны в 🔔.
@@ -251,6 +276,19 @@ const AccountTab = ({ onGoToProfile }: { onGoToProfile: () => void }): JSX.Eleme
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Mic/camera/speaker permissions are device settings, not notification settings — they live
+          here rather than behind the bell. */}
+      <div>
+        <label style={label}>Устройства</label>
+        <button
+          className="hub-btn"
+          style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          onClick={() => usePermissionsModal.getState().show()}
+        >
+          🎛️ Права и устройства…
+        </button>
+      </div>
+
       <div>
         <label style={label}>Сменить пароль</label>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
