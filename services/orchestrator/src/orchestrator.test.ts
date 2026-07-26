@@ -35,7 +35,12 @@ class FakeRuntime implements ContainerRuntime {
 
 class FakeProbe implements ActivityProbe {
   count = 0;
+  /** Сколько первых опросов провалится — имитация «контейнер поднят, сервер ещё не слушает». */
+  failFirst = 0;
+  calls = 0;
   async players(): Promise<number> {
+    this.calls++;
+    if (this.calls <= this.failFirst) throw new Error('ECONNREFUSED');
     return this.count;
   }
 }
@@ -44,8 +49,15 @@ const setup = (games: GameManifest[]) => {
   const runtime = new FakeRuntime();
   const probe = new FakeProbe();
   const clock = createFakeClock(0);
-  const deps: OrchestratorDeps = { runtime, probe, clock, logger: createCapturingLogger() };
-  return { orch: new Orchestrator(games, deps), runtime, probe, clock };
+  const sleeps: number[] = [];
+  const deps: OrchestratorDeps = {
+    runtime,
+    probe,
+    clock,
+    logger: createCapturingLogger(),
+    sleep: async (ms) => { sleeps.push(ms); }, // тесты не ждут вживую
+  };
+  return { orch: new Orchestrator(games, deps), runtime, probe, clock, sleeps };
 };
 
 describe('ensureUp', () => {
@@ -72,6 +84,38 @@ describe('ensureUp', () => {
   it('throws on unknown game', async () => {
     const { orch } = setup([game()]);
     await expect(orch.ensureUp('nope')).rejects.toThrow();
+  });
+
+  // Без этого хаб уводил игрока на игру, пока внутри контейнера ещё не поднялся сервер,
+  // и первый вход стабильно заканчивался 502.
+  it('не возвращается, пока игра не начала отвечать', async () => {
+    const { orch, probe, sleeps } = setup([game()]);
+    probe.failFirst = 3; // три отказа, на четвёртый ответила
+    await orch.ensureUp('civa');
+    expect(probe.calls).toBe(4);
+    expect(sleeps).toEqual([250, 250, 250]);
+  });
+
+  it('сдаётся по таймауту, а не висит вечно', async () => {
+    const runtime = new FakeRuntime();
+    const probe = new FakeProbe();
+    probe.failFirst = Number.MAX_SAFE_INTEGER; // игра не отвечает никогда
+    const deps: OrchestratorDeps = {
+      runtime, probe, clock: createFakeClock(0), logger: createCapturingLogger(),
+      sleep: async () => {}, readyTimeoutMs: 1000,
+    };
+    const orch = new Orchestrator([game()], deps);
+    await expect(orch.ensureUp('civa')).resolves.toBeUndefined();
+    expect(probe.calls).toBe(4); // 1000мс / 250мс
+  });
+
+  it('проверяет готовность и у уже запущенной игры', async () => {
+    const { orch, runtime, probe } = setup([game()]);
+    runtime.states.set('civa', 'running');
+    probe.failFirst = 1; // контейнер жив, но сервер внутри ещё перезапускается
+    await orch.ensureUp('civa');
+    expect(runtime.ups).toBe(0);
+    expect(probe.calls).toBe(2);
   });
 });
 

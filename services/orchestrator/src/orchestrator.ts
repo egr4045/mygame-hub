@@ -12,7 +12,14 @@ export interface OrchestratorDeps {
   probe: ActivityProbe;
   clock: Clock;
   logger: Logger;
+  /** Пауза между попытками достучаться до игры. Тесты подменяют, чтобы не ждать вживую. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Сколько всего ждём ответа от игры, прежде чем сдаться и пустить игрока «как есть». */
+  readyTimeoutMs?: number;
 }
+
+const READY_POLL_MS = 250;
+const READY_TIMEOUT_MS = 25_000;
 
 interface Tracked {
   game: GameManifest;
@@ -54,9 +61,33 @@ export class Orchestrator {
         await this.deps.runtime.up(t.game);
         t.lastActiveAt = this.deps.clock.now();
       }
+      // `docker compose up -d` возвращается, когда контейнер ЗАПУЩЕН, а не когда процесс внутри
+      // начал слушать порт. Без этой паузы ensureUp рапортовал ready, хаб тут же уводил игрока
+      // на игру и тот стабильно ловил 502 при первом входе. Ждём, пока игра реально ответит.
+      await this.waitReady(t);
     } finally {
       t.starting = undefined;
     }
+  }
+
+  /** Опрашивает игру, пока она не ответит. По таймауту сдаётся молча: пустить игрока и показать
+   *  ему ошибку игры лучше, чем держать запрос вечно. */
+  private async waitReady(t: Tracked): Promise<void> {
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const timeout = this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
+    // Счётчик попыток, а не часы: с подменёнными часами в тестах цикл иначе не завершится
+    const attempts = Math.max(1, Math.ceil(timeout / READY_POLL_MS));
+    const startedAt = this.deps.clock.now();
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await this.deps.probe.players(t.game);
+        if (i > 0) this.deps.logger.info('game ready', { game: t.game.id, waitedMs: this.deps.clock.now() - startedAt });
+        return;
+      } catch {
+        if (i + 1 < attempts) await sleep(READY_POLL_MS);
+      }
+    }
+    this.deps.logger.error('game did not become ready in time', { game: t.game.id, timeout });
   }
 
   /** One reaper pass: refresh activity for running games and stop those idle past `idleMs`. */

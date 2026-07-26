@@ -8,17 +8,30 @@ import type { GameInfo } from './games.js';
 import type { Invite, InviteRole } from '@mygame/protocol';
 import { GAMES, getGameOrigin } from './games.js';
 import { enterGame } from '../net/orchestratorClient.js';
-import { getHandoff } from '@mygame/sdk';
+import { showLaunchOverlay } from './launchOverlay.js';
+import { getHandoff, useCallStore, waitGameReady } from '@mygame/sdk';
 
 export const routeToRoom = async (game: GameInfo, room: string, role: InviteRole = 'player'): Promise<void> => {
-  await enterGame(game.id);
-  const handoff = await getHandoff();
   const base = getGameOrigin(game);
   if (!base) return;
+  // Тот же холодный старт, что и у кнопки «Играть»: без заставки игрок видел 502,
+  // а без проверки готовности — уходил в игру раньше, чем та начинала слушать порт.
+  const overlay = showLaunchOverlay(game.name);
+  await enterGame(game.id);
+  if (!(await waitGameReady(`${base}/`))) {
+    overlay.fail('Игра не отвечает. Попробуйте ещё раз через минуту.');
+    return;
+  }
+  const handoff = await getHandoff();
   const params = new URLSearchParams();
   if (handoff) params.set('pt', handoff);
   params.set('join', room);
   if (role === 'spectator') params.set('spectate', '1');
+  // Звонок должен пережить переход: без ключа игра стартует «в тишине» и участник
+  // выпадает из разговора (localStorage спасает только при совпадении origin).
+  const { callKey, status } = useCallStore.getState();
+  if (callKey && status !== 'idle') params.set('call', callKey);
+  overlay.finish();
   window.location.href = `${base}/?${params.toString()}`;
 };
 

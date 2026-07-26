@@ -350,7 +350,7 @@ describe('chat server — call signaling', () => {
   });
 
   it('disconnecting the last participant ends the call (no ghost caller)', async () => {
-    const port = await startServer();
+    const port = await startServer({ callDropGraceMs: 60 });
     const c1 = await connect(port, 'a1', 'Mara');
     const c2 = await connect(port, 'a2', 'Wei');
     const { conversationId } = await openDm(c1, 'a2');
@@ -360,6 +360,43 @@ describe('chat server — call signaling', () => {
 
     // c2 stays connected (still a chat participant) so it can observe the broadcast once a1 — the
     // last remaining call participant — disconnects without an explicit hangup.
+    const ended = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
+    c1.close();
+    expect(await ended).toMatchObject({ conversationId });
+  });
+
+  // Уход в игру — это перезагрузка страницы, а не «положил трубку». Раньше собеседник
+  // получал callEnded в ту же секунду и звонок разваливался ровно при попытке пойти играть.
+  it('переподключение в пределах окна не роняет звонок у собеседника', async () => {
+    const port = await startServer({ callDropGraceMs: 400 });
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+
+    let endedSeen = false;
+    c2.on(chat.S2C.callEnded, () => { endedSeen = true; });
+
+    c1.close();                                   // «навигация» в игру
+    await new Promise((r) => setTimeout(r, 120));
+    expect(endedSeen).toBe(false);                // окно ещё не истекло — звонок жив
+    const c1again = await connect(port, 'a1', 'Mara'); // вернулся на странице игры
+
+    await new Promise((r) => setTimeout(r, 500)); // окно бы уже истекло
+    expect(endedSeen).toBe(false);
+    c1again.close();
+  });
+
+  it('не вернувшегося участника всё-таки выкидывает по истечении окна', async () => {
+    const port = await startServer({ callDropGraceMs: 80 });
+    const c1 = await connect(port, 'a1', 'Mara');
+    const c2 = await connect(port, 'a2', 'Wei');
+    const { conversationId } = await openDm(c1, 'a2');
+    await ring(c1, conversationId!, 'audio');
+    await acceptCall(c2, conversationId!);
+    c2.emit(chat.C2S.callHangup, { conversationId });
+
     const ended = new Promise<chat.CallEndedEvent>((res) => c2.once(chat.S2C.callEnded, res));
     c1.close();
     expect(await ended).toMatchObject({ conversationId });

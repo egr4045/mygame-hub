@@ -33,6 +33,10 @@ export interface ChatDeps {
   readonly isAccountBanned?: (accountId: string) => Promise<boolean>;
   /** How long an unanswered ring survives before the server ends it. Injectable for tests. */
   readonly ringTimeoutMs?: number;
+  /** Сколько ждём возвращения участника, у которого оборвался сокет, прежде чем выкинуть его
+   *  из звонка. Переход в игру — это полная перезагрузка страницы, и без отсрочки собеседник
+   *  видел «положил трубку». Injectable for tests. */
+  readonly callDropGraceMs?: number;
   /** Root dir for the upload store (`<dataDir>/uploads`). Defaults to `<cwd>/.data`. */
   readonly dataDir?: string;
   /** Max accepted upload size in bytes. Defaults to 10 MB. */
@@ -67,6 +71,9 @@ interface OpenCall {
 
 const OPEN_CALL_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RING_TIMEOUT_MS = 60_000;
+// Уход в игру — это полная перезагрузка страницы: сокет рвётся и тут же поднимается заново.
+// Окно подобрано с запасом на холодный старт игры и медленную сеть.
+const DEFAULT_CALL_DROP_GRACE_MS = 30_000;
 
 /** MIME -> extension. The extension is always derived from the (allowlisted) MIME type, never the
  *  client filename — an uploaded `.html`/`.svg` must not come back executable from our origin. */
@@ -119,6 +126,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
   const activeCalls = new Map<string, ActiveCall>(); // conversationId -> call
   const openCalls = new Map<string, OpenCall>(); // 'game:<game>:<room>' -> where that call lives
   const ringTimeoutMs = deps.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS;
+  const callDropGraceMs = deps.callDropGraceMs ?? DEFAULT_CALL_DROP_GRACE_MS;
   const uploadMaxBytes = deps.uploadMaxBytes ?? 10 * 1024 * 1024;
   const uploadMaxLabel = `${Math.round(uploadMaxBytes / (1024 * 1024))} MB`;
   const uploadDir = path.join(deps.dataDir ?? path.join(process.cwd(), '.data'), 'uploads');
@@ -558,6 +566,59 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     }
   };
 
+  /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty
+   *  or 1 person left in DM. Живёт вне обработчика сокета: выкидывать участника приходится и
+   *  отложенно, когда его сокета уже нет. */
+  const removeFromCall = (conversationId: string, accountId: string): void => {
+    const call = activeCalls.get(conversationId);
+    if (!call?.participantIds.delete(accountId)) return;
+
+    const isDm = deps.store.typeOf(conversationId) === 'dm';
+    const threshold = isDm ? 1 : 0;
+
+    call.ringingIds.delete(accountId);
+    disarmRingTimerIfIdle(call);
+
+    if (call.participantIds.size <= threshold) {
+      if (call.ringTimer) clearTimeout(call.ringTimer);
+      activeCalls.delete(conversationId);
+      // Anyone still ringing at this point missed the call (the caller hung up before they
+      // answered) — leave the durable call-log row for them.
+      const stillRinging = [...call.ringingIds];
+      call.ringingIds.clear();
+      const payload: chat.CallEndedEvent = { conversationId, reason: 'ended' };
+      emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
+      logMissedCall(conversationId, call, stillRinging);
+    }
+    // Refresh the presence roster for everyone (empty if the call just ended).
+    emitCallState(conversationId);
+  };
+
+  // Обрыв сокета ≠ «положил трубку». Переход из хаба в игру — это полная перезагрузка страницы,
+  // и раньше собеседник в личке моментально получал callEnded: звонок разваливался ровно в тот
+  // момент, когда человек шёл играть. Теперь ждём возвращения, и только не дождавшись — выкидываем.
+  const pendingDrops = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const cancelPendingDrop = (accountId: string): void => {
+    const t = pendingDrops.get(accountId);
+    if (t) {
+      clearTimeout(t);
+      pendingDrops.delete(accountId);
+    }
+  };
+
+  const scheduleDrop = (accountId: string): void => {
+    cancelPendingDrop(accountId);
+    const t = setTimeout(() => {
+      pendingDrops.delete(accountId);
+      if (socketsOf.get(accountId)?.size) return; // успел вернуться — звонок не трогаем
+      deps.logger.info('call drop after grace', { accountId });
+      for (const conversationId of [...activeCalls.keys()]) removeFromCall(conversationId, accountId);
+    }, callDropGraceMs);
+    t.unref?.();
+    pendingDrops.set(accountId, t);
+  };
+
   io.on('connection', (socket: Socket) => {
     const { accountId, displayName } = socket.data as SocketData;
     deps.store.upsertAccount(accountId, displayName);
@@ -565,6 +626,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
     const set = socketsOf.get(accountId) ?? new Set<string>();
     set.add(socket.id);
     socketsOf.set(accountId, set);
+    cancelPendingDrop(accountId); // вернулся в пределах окна — звонок за ним сохранён
     deps.logger.info('connect', { accountId, socket: socket.id });
 
     emitThreads(accountId);
@@ -818,31 +880,7 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       }),
     );
 
-    /** Remove `accountId` from `conversationId`'s call; ends it (broadcasting callEnded) once empty or 1 person left in DM. */
-    const leaveCall = (conversationId: string): void => {
-      const call = activeCalls.get(conversationId);
-      if (!call?.participantIds.delete(accountId)) return;
-
-      const isDm = deps.store.typeOf(conversationId) === 'dm';
-      const threshold = isDm ? 1 : 0;
-
-      call.ringingIds.delete(accountId);
-      disarmRingTimerIfIdle(call);
-
-      if (call.participantIds.size <= threshold) {
-        if (call.ringTimer) clearTimeout(call.ringTimer);
-        activeCalls.delete(conversationId);
-        // Anyone still ringing at this point missed the call (the caller hung up before they
-        // answered) — leave the durable call-log row for them.
-        const stillRinging = [...call.ringingIds];
-        call.ringingIds.clear();
-        const payload: chat.CallEndedEvent = { conversationId, reason: 'ended' };
-        emitToEveryone(deps.store.participantsOf(conversationId), chat.S2C.callEnded, payload);
-        logMissedCall(conversationId, call, stillRinging);
-      }
-      // Refresh the presence roster for everyone (empty if the call just ended).
-      emitCallState(conversationId);
-    };
+    const leaveCall = (conversationId: string): void => removeFromCall(conversationId, accountId);
 
     // Voice/video call signaling — ephemeral (`activeCalls` above), no store/Postgres involvement;
     // the actual media flows over LiveKit once a client has a token from `POST /chat/call/token`.
@@ -936,9 +974,10 @@ export const createChatServer = (deps: ChatDeps): ChatServer => {
       sockets?.delete(socket.id);
       if (sockets && sockets.size === 0) {
         socketsOf.delete(accountId);
-        // Fully offline (no other tabs/devices) — drop out of any call rather than leave a ghost
-        // participant nobody can ever remove.
-        for (const conversationId of [...activeCalls.keys()]) leaveCall(conversationId);
+        // Fully offline (no other tabs/devices). Не выкидываем сразу: это может быть переход
+        // в игру, то есть перезагрузка страницы. Ждём окно и выкидываем, только если не вернулся —
+        // иначе призрачный участник, которого никто не уберёт.
+        scheduleDrop(accountId);
       }
     });
   });

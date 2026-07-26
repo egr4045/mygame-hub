@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useCallStore } from '../../state/callStore.js';
 import { getHandoff } from '../../authClient.js';
+import { wakeGame, waitGameReady } from '../../wakeGame.js';
 import { initials, avatarColor } from './callLayout.js';
 import { mg, mgZ } from '../../theme/tokens.js';
 import { btn, surfaceWindow } from '../../theme/primitives.js';
@@ -42,8 +43,12 @@ export const GameInviteModal = (): JSX.Element | null => {
   const goToInvite = async () => {
     setGoing(true);
     try {
-      const pt = await getHandoff();
+      // Игра могла быть погашена как простаивающая: без побудки переход по приглашению
+      // стабильно упирался в 502 шлюза.
+      await wakeGame(pendingInvite.game);
       const url = new URL(pendingInvite.url, window.location.href);
+      await waitGameReady(url.toString());
+      const pt = await getHandoff();
       if (pt) url.searchParams.set('pt', pt);
       url.searchParams.set('join', pendingInvite.room);
       // Ключ звонка едет с собой: resume() на origin игры переподключится в тот же LiveKit-рум,
