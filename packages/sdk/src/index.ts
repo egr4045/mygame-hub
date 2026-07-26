@@ -22,6 +22,7 @@ export * from './components/ToastContainer.js';
 export * from './components/ContextMenu.js';
 export { ChatWidget } from './components/ChatWidget.js';
 export { CallView } from './components/call/CallView.js';
+export { GameInviteModal } from './components/call/GameInviteModal.js';
 export { FriendsWidget } from './components/FriendsWidget.js';
 export { FriendsSidebar } from './components/FriendsSidebar.js';
 export { UserProfileModal, type ProfileTarget } from './components/UserProfileModal.js';

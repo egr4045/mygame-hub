@@ -3,7 +3,6 @@ import { RoomContext, RoomAudioRenderer } from '@livekit/components-react';
 import { useChatStore } from '../../state/chatStore.js';
 import { useCallStore, getCallRoom } from '../../state/callStore.js';
 import { useSocialStore } from '../../state/socialStore.js';
-import { getHandoff } from '../../authClient.js';
 import { CallStage } from './CallStage.js';
 import { ControlBar } from './ControlBar.js';
 import { RingingView } from './RingingView.js';
@@ -42,8 +41,6 @@ export const CallView = (): JSX.Element | null => {
   const boundGame = useCallStore((s) => s.boundGame);
   const mediaParticipants = useCallStore((s) => s.participants);
   const embedded = useCallStore((s) => s.embedded);
-  const pendingInvite = useCallStore((s) => s.pendingInvite);
-  const dismissInvite = useCallStore((s) => s.dismissInvite);
 
   const [surfaceMode, setSurfaceMode] = useState<'docked' | 'expanded'>('docked');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -133,21 +130,6 @@ export const CallView = (): JSX.Element | null => {
     else el.requestFullscreen?.().catch(() => setSurfaceMode('expanded'));
   };
 
-  const goToInvite = async () => {
-    if (!pendingInvite) return;
-    try {
-      const pt = await getHandoff();
-      const url = new URL(pendingInvite.url, window.location.href);
-      if (pt) url.searchParams.set('pt', pt);
-      url.searchParams.set('join', pendingInvite.room);
-      // The call key rides along so resume() re-joins the same LiveKit room on the game's origin —
-      // nobody else in the call ever reconnects.
-      url.searchParams.set('call', `game:${pendingInvite.game}:${pendingInvite.room}`);
-      window.location.href = url.toString();
-    } catch {
-      dismissInvite();
-    }
-  };
 
   const expanded = expandedSurface;
   const pos = dockPosition;
@@ -227,40 +209,9 @@ export const CallView = (): JSX.Element | null => {
     </div>
   );
 
-  const inviteBanner = pendingInvite && (
-    <div
-      style={{
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 12px',
-        background: mg.positiveSoft,
-        borderBottom: `1px solid ${palette.border}`,
-        color: palette.text,
-        fontSize: 13,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        🎮 {pendingInvite.fromName || 'Участник звонка'} зовёт в {pendingInvite.gameName}
-      </span>
-      <button
-        onClick={() => void goToInvite()}
-        style={{ ...chromeButton, background: mg.positive, fontWeight: 700 }}
-        aria-label={`Перейти в ${pendingInvite.gameName}`}
-      >
-        Перейти
-      </button>
-      <button onClick={dismissInvite} style={chromeButton} aria-label="Скрыть приглашение">
-        Скрыть
-      </button>
-    </div>
-  );
-
   return (
     <div ref={containerRef} style={containerStyle}>
       {topBar}
-      {inviteBanner}
       {connected ? (
         <RoomContext.Provider key={currentKey ?? 'call'} value={room}>
           <ConnectionBanner />

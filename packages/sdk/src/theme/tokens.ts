@@ -138,6 +138,8 @@ export const mgZ = {
   widget: 1000,
   panel: 1001,
   call: 1600,
+  /** Blocking dialogs — above the call window, below menus that may open on top of them. */
+  modal: 1700,
   menu: 9999,
   toast: 99999,
 } as const;

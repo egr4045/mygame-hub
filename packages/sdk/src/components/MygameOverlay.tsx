@@ -2,6 +2,7 @@ import { ToastContainer } from './ToastContainer.js';
 import { ContextMenu } from './ContextMenu.js';
 import { ChatWidget } from './ChatWidget.js';
 import { CallView } from './call/CallView.js';
+import { GameInviteModal } from './call/GameInviteModal.js';
 import { FriendsWidget } from './FriendsWidget.js';
 import { SocialDndProvider } from './SocialDndProvider.js';
 
@@ -19,6 +20,9 @@ export const MygameOverlay = (): JSX.Element => (
     {/* FriendsWidget is the single launcher; ChatWidget opens from it (its own launcher is hidden). */}
     <ChatWidget hideLauncher />
     <CallView />
+    {/* Сиблинг CallView, а не его потомок: приглашение должно быть видно и когда окно
+        звонка свёрнуто, и во встроенной игре, где CallView рисует только аудио. */}
+    <GameInviteModal />
     <FriendsWidget />
   </SocialDndProvider>
 );

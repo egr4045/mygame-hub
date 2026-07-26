@@ -13,6 +13,7 @@ import {
   useMissedCallsStore,
   ChatWidget,
   CallView,
+  GameInviteModal,
   ContextMenu,
   ToastContainer,
   SocialDndProvider,
@@ -120,6 +121,7 @@ export const MobileHub = (): JSX.Element => {
             intentionally omitted; the Друзья tab is its mobile replacement. */}
         <ChatWidget hideLauncher />
         <CallView />
+        <GameInviteModal />
         <ContextMenu />
         <ToastContainer />
       </div>

@@ -11,7 +11,7 @@ import { useSocialStore } from '@mygame/sdk';
 import { ProfileView } from '../components/ProfileView.js';
 import { SettingsModal } from '../components/SettingsModal.js';
 import { ContextMenu } from '@mygame/sdk';
-import { ChatWidget, CallView, SocialDndProvider } from '@mygame/sdk';
+import { ChatWidget, CallView, GameInviteModal, SocialDndProvider } from '@mygame/sdk';
 import { FriendsWidget } from '@mygame/sdk';
 import { ToastContainer } from '@mygame/sdk';
 import { useMenuStore } from '@mygame/sdk';
@@ -283,6 +283,7 @@ const DesktopHubScreen = (): JSX.Element => {
       <FriendsWidget onJoinActivity={handleJoinActivity} />
       <ChatWidget hideLauncher />
       <CallView />
+      <GameInviteModal />
       <ContextMenu />
       <ToastContainer />
       </div>

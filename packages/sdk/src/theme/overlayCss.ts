@@ -17,6 +17,11 @@ export const SDK_OVERLAY_CSS = `
 @keyframes mygame-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes mygame-call-pulse { 0% { box-shadow: 0 0 0 0 ${pulse}; } 70% { box-shadow: 0 0 0 16px ${pulseEnd}; } 100% { box-shadow: 0 0 0 0 ${pulseEnd}; } }
 
+/* Приглашение в игру: «влетает» по центру — его нельзя не заметить (match-found). */
+.mygame-invite-pop { animation: mygame-invite-pop 260ms cubic-bezier(.34,1.56,.64,1); }
+@keyframes mygame-invite-pop { from { opacity: 0; transform: scale(.88) translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mygame-invite-pop { animation: none; } }
+
 /* ChatWidget rows: hover via CSS (keyboard/AT friendly) — active/drop states stay inline. */
 .cw-hover-row:hover { background: ${mg.rowHover}; }
 

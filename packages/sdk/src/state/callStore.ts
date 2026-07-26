@@ -568,6 +568,9 @@ export const useCallStore = create<CallState>((set, get) => {
         participants: [],
         embedded: false,
         error: null,
+        // Приглашение живёт только внутри звонка: без этого модалка «Присоединиться»
+        // висела бы и после выхода, ведя в комнату, которой для нас больше нет.
+        pendingInvite: null,
       });
     },
 
